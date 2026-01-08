@@ -1,0 +1,13 @@
+{
+  "name": "DistributionInstance",
+  "type": "object",
+  "properties": {
+    "distributionEventId": { "type": "string" },
+    "studentUserId": { "type": "string" },
+    "studentPageId": { "type": "string" },
+    "studentDriveItemId": { "type": "string" },
+    "status": { "type": "string", "enum": ["PENDING_AUTH", "CREATED", "FAILED"], "default": "PENDING_AUTH" },
+    "errorMessage": { "type": "string" }
+  },
+  "required": ["distributionEventId", "studentUserId"]
+}

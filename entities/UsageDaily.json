@@ -1,0 +1,11 @@
+{
+  "name": "UsageDaily",
+  "type": "object",
+  "properties": {
+    "domainId": { "type": "string" },
+    "usageDate": { "type": "string", "format": "date" },
+    "metricKey": { "type": "string", "enum": ["ACTIVE_USERS", "PAGES_CREATED", "PAGES_VIEWED", "SYNC_OPERATIONS", "CANVAS_SAVES"] },
+    "metricValue": { "type": "number" }
+  },
+  "required": ["domainId", "usageDate", "metricKey", "metricValue"]
+}

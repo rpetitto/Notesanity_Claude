@@ -1,0 +1,17 @@
+{
+  "name": "DriveItemMap",
+  "type": "object",
+  "properties": {
+    "ownerUserId": { "type": "string" },
+    "pageId": { "type": "string" },
+    "sectionId": { "type": "string" },
+    "itemType": { "type": "string", "enum": ["FILE", "SHORTCUT"] },
+    "driveItemId": { "type": "string" },
+    "targetDriveFileId": { "type": "string", "description": "For shortcuts, the target file ID" },
+    "parentDriveFolderId": { "type": "string" },
+    "origin": { "type": "string", "enum": ["APP", "DRIVE"], "default": "APP" },
+    "lastSeenAt": { "type": "string", "format": "date-time" },
+    "checksum": { "type": "string" }
+  },
+  "required": ["ownerUserId", "itemType", "driveItemId"]
+}

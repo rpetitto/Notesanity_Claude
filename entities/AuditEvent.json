@@ -1,0 +1,15 @@
+{
+  "name": "AuditEvent",
+  "type": "object",
+  "properties": {
+    "domainId": { "type": "string" },
+    "actorUserId": { "type": "string" },
+    "actorEmail": { "type": "string" },
+    "action": { "type": "string", "enum": ["CREATE", "UPDATE", "DELETE", "DISTRIBUTE", "SYNC", "LOGIN", "IMPORT"] },
+    "entityType": { "type": "string" },
+    "entityId": { "type": "string" },
+    "details": { "type": "object", "description": "Additional action details" },
+    "ipAddress": { "type": "string" }
+  },
+  "required": ["actorUserId", "action", "entityType"]
+}

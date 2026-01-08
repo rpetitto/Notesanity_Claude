@@ -1,0 +1,14 @@
+{
+  "name": "Binder",
+  "type": "object",
+  "properties": {
+    "portfolioId": { "type": "string" },
+    "courseId": { "type": "string", "description": "Linked course ID" },
+    "ownerUserId": { "type": "string", "description": "User who owns this binder instance" },
+    "name": { "type": "string", "description": "Binder name (usually course name)" },
+    "lastDriveSyncAt": { "type": "string", "format": "date-time" },
+    "lastDriveSyncError": { "type": "string" },
+    "status": { "type": "string", "enum": ["active", "archived"], "default": "active" }
+  },
+  "required": ["courseId", "ownerUserId"]
+}

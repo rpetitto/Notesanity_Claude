@@ -1,0 +1,11 @@
+{
+  "name": "CommentThread",
+  "type": "object",
+  "properties": {
+    "pageId": { "type": "string" },
+    "status": { "type": "string", "enum": ["open", "resolved"], "default": "open" },
+    "positionX": { "type": "number", "description": "X position on page for anchored comments" },
+    "positionY": { "type": "number", "description": "Y position on page for anchored comments" }
+  },
+  "required": ["pageId"]
+}

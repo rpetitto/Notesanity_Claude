@@ -1,0 +1,17 @@
+{
+  "name": "Course",
+  "type": "object",
+  "properties": {
+    "domainId": { "type": "string", "description": "Domain this course belongs to" },
+    "googleClassroomCourseId": { "type": "string", "description": "Google Classroom course ID" },
+    "name": { "type": "string", "description": "Course name" },
+    "section": { "type": "string", "description": "Course section/period" },
+    "description": { "type": "string" },
+    "status": { "type": "string", "enum": ["active", "archived", "provisioned"], "default": "active" },
+    "ownerId": { "type": "string", "description": "Primary teacher user ID" },
+    "classroomFolderId": { "type": "string", "description": "Google Drive folder ID for this course" },
+    "enrollmentCode": { "type": "string" },
+    "lastSyncAt": { "type": "string", "format": "date-time" }
+  },
+  "required": ["name"]
+}

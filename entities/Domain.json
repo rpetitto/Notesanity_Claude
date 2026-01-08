@@ -1,0 +1,11 @@
+{
+  "name": "Domain",
+  "type": "object",
+  "properties": {
+    "googleCustomerId": { "type": "string", "description": "Google Workspace customer ID" },
+    "name": { "type": "string", "description": "Domain name (e.g., school.edu)" },
+    "status": { "type": "string", "enum": ["active", "suspended", "pending"], "default": "active" },
+    "settings": { "type": "object", "description": "Domain-level settings JSON" }
+  },
+  "required": ["name"]
+}

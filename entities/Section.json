@@ -1,0 +1,18 @@
+{
+  "name": "Section",
+  "type": "object",
+  "properties": {
+    "binderId": { "type": "string" },
+    "title": { "type": "string" },
+    "orderIndex": { "type": "number", "default": 0 },
+    "isSystem": { "type": "boolean", "default": false, "description": "True for General and Assignments tabs" },
+    "systemKey": { "type": "string", "enum": ["GENERAL", "ASSIGNMENTS"], "description": "System section identifier" },
+    "published": { "type": "boolean", "default": false, "description": "Whether tab is published to students" },
+    "origin": { "type": "string", "enum": ["APP", "DRIVE", "CLASSROOM"], "default": "APP" },
+    "managedByApp": { "type": "boolean", "default": true },
+    "driveFolderId": { "type": "string", "description": "Corresponding Drive folder ID" },
+    "color": { "type": "string", "description": "Tab color hex code" },
+    "deletedAt": { "type": "string", "format": "date-time" }
+  },
+  "required": ["binderId", "title"]
+}

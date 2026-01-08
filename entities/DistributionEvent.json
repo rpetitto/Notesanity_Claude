@@ -1,0 +1,14 @@
+{
+  "name": "DistributionEvent",
+  "type": "object",
+  "properties": {
+    "courseId": { "type": "string" },
+    "teacherUserId": { "type": "string" },
+    "sourcePageId": { "type": "string" },
+    "sourceDriveFileId": { "type": "string" },
+    "distributionType": { "type": "string", "enum": ["REFERENCE", "TEMPLATE_COPY"] },
+    "targetSectionKey": { "type": "string", "description": "System key or section ID", "default": "GENERAL" },
+    "notifyStudents": { "type": "boolean", "default": true }
+  },
+  "required": ["courseId", "teacherUserId", "distributionType"]
+}

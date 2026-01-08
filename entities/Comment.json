@@ -1,0 +1,12 @@
+{
+  "name": "Comment",
+  "type": "object",
+  "properties": {
+    "threadId": { "type": "string" },
+    "authorUserId": { "type": "string" },
+    "authorName": { "type": "string" },
+    "body": { "type": "string" },
+    "editedAt": { "type": "string", "format": "date-time" }
+  },
+  "required": ["threadId", "authorUserId", "body"]
+}

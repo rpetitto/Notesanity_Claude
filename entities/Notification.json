@@ -1,0 +1,14 @@
+{
+  "name": "Notification",
+  "type": "object",
+  "properties": {
+    "recipientUserId": { "type": "string" },
+    "type": { "type": "string", "enum": ["PAGE_DISTRIBUTED", "COMMENT_ADDED", "PAGE_UPDATED", "SYNC_COMPLETE", "SYNC_ERROR"] },
+    "title": { "type": "string" },
+    "message": { "type": "string" },
+    "entityType": { "type": "string" },
+    "entityId": { "type": "string" },
+    "readAt": { "type": "string", "format": "date-time" }
+  },
+  "required": ["recipientUserId", "type"]
+}
