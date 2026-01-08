@@ -19,43 +19,43 @@ interface PageListProps {
 // Get icon based on page type and mime type
 function getPageIcon(page: Page) {
   if (page.pageType === 'CANVAS') {
-    return <PenTool className="h-4 w-4 icon-canvas" />
+    return <PenTool className="h-5 w-5 icon-canvas" />
   }
 
   if (page.pageType === 'DRIVE_FILE' && page.driveMimeType) {
     switch (page.driveMimeType) {
       case 'application/vnd.google-apps.document':
-        return <FileText className="h-4 w-4 icon-docs" />
+        return <FileText className="h-5 w-5 icon-docs" />
       case 'application/vnd.google-apps.spreadsheet':
-        return <Sheet className="h-4 w-4 icon-sheets" />
+        return <Sheet className="h-5 w-5 icon-sheets" />
       case 'application/vnd.google-apps.presentation':
-        return <Presentation className="h-4 w-4 icon-slides" />
+        return <Presentation className="h-5 w-5 icon-slides" />
       case 'application/pdf':
-        return <File className="h-4 w-4 icon-pdf" />
+        return <File className="h-5 w-5 icon-pdf" />
       case 'image/png':
       case 'image/jpeg':
       case 'image/gif':
-        return <Image className="h-4 w-4 icon-image" />
+        return <Image className="h-5 w-5 icon-image" />
       default:
-        return <File className="h-4 w-4 text-muted-foreground" />
+        return <File className="h-5 w-5 text-on-surface-variant" />
     }
   }
 
-  return <File className="h-4 w-4 text-muted-foreground" />
+  return <File className="h-5 w-5 text-on-surface-variant" />
 }
 
-// Get distribution badge
+// Get distribution badge - Material v3 style
 function getDistributionBadge(page: Page) {
   if (page.distributionStatus === 'viewOnlyDistributed') {
     return (
-      <span className="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded" title="View-only distributed">
+      <span className="px-2 py-0.5 text-label-small bg-primary-container text-on-primary-container rounded-small" title="View-only distributed">
         View
       </span>
     )
   }
   if (page.distributionStatus === 'copyDistributed') {
     return (
-      <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded" title="Copy distributed">
+      <span className="px-2 py-0.5 text-label-small bg-tertiary-container text-on-tertiary-container rounded-small" title="Copy distributed">
         Copy
       </span>
     )
@@ -112,35 +112,37 @@ export default function PageList({
   }, {} as Record<string, Page[]>)
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Search Bar */}
-      <div className="p-3 border-b">
+    <div className="flex-1 flex flex-col overflow-hidden bg-surface">
+      {/* Search Bar - Material v3 style */}
+      <div className="p-3 border-b border-outline-variant">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-on-surface-variant" />
           <input
             type="text"
             placeholder="Search pages..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            className="w-full pl-12 pr-4 py-3 text-body-large bg-surface-container-highest rounded-full
+                       focus:outline-none focus:ring-2 focus:ring-primary border-0
+                       placeholder:text-on-surface-variant"
           />
         </div>
       </div>
 
-      {/* Actions Bar */}
-      <div className="flex items-center gap-1 p-2 border-b">
+      {/* Actions Bar - Material v3 buttons */}
+      <div className="flex items-center gap-2 p-3 border-b border-outline-variant">
         <button
           onClick={handleAddPage}
-          className="flex items-center gap-1 px-3 py-1.5 text-sm hover:bg-accent rounded-md transition-colors"
+          className="btn-filled-tonal"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-5 w-5" />
           Add Page
         </button>
         <button
           onClick={handleAddFolder}
-          className="flex items-center gap-1 px-3 py-1.5 text-sm hover:bg-accent rounded-md transition-colors"
+          className="btn-outlined"
         >
-          <FolderPlus className="h-4 w-4" />
+          <FolderPlus className="h-5 w-5" />
           New Folder
         </button>
       </div>
@@ -152,20 +154,20 @@ export default function PageList({
           <div key={folder.id}>
             <button
               onClick={() => toggleFolder(folder.id)}
-              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent/50 transition-colors text-left"
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-variant transition-colors text-left state-layer"
             >
               {expandedFolders.has(folder.id) ? (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                <ChevronDown className="h-5 w-5 text-on-surface-variant" />
               ) : (
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                <ChevronRight className="h-5 w-5 text-on-surface-variant" />
               )}
-              <Folder className="h-4 w-4 text-yellow-500" />
-              <span className="flex-1 truncate text-sm font-medium">{folder.title}</span>
+              <Folder className="h-5 w-5 text-tertiary" />
+              <span className="flex-1 truncate text-body-large font-medium text-on-surface">{folder.title}</span>
             </button>
 
             {/* Folder Contents */}
             {expandedFolders.has(folder.id) && (
-              <div className="pl-6">
+              <div className="pl-8">
                 {(pagesByFolder[folder.id] || []).map((page) => (
                   <PageItem
                     key={page.id}
@@ -178,7 +180,7 @@ export default function PageList({
                   />
                 ))}
                 {(!pagesByFolder[folder.id] || pagesByFolder[folder.id].length === 0) && (
-                  <div className="px-3 py-2 text-sm text-muted-foreground italic">
+                  <div className="px-4 py-3 text-body-medium text-on-surface-variant italic">
                     Empty folder
                   </div>
                 )}
@@ -200,15 +202,19 @@ export default function PageList({
           />
         ))}
 
-        {/* Empty State */}
+        {/* Empty State - Material v3 style */}
         {pages.length === 0 && folders.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <File className="h-12 w-12 mb-4 opacity-20" />
-            <p className="text-sm">No pages yet</p>
+          <div className="flex flex-col items-center justify-center py-16 text-on-surface-variant">
+            <div className="w-20 h-20 rounded-full bg-surface-container-highest flex items-center justify-center mb-6">
+              <File className="h-10 w-10 opacity-40" />
+            </div>
+            <p className="text-title-medium mb-2">No pages yet</p>
+            <p className="text-body-medium text-on-surface-variant mb-6">Add your first page to get started</p>
             <button
               onClick={handleAddPage}
-              className="mt-4 px-4 py-2 text-sm bg-primary text-white rounded-md hover:bg-primary/90 transition-colors"
+              className="btn-filled"
             >
+              <Plus className="h-5 w-5" />
               Add your first page
             </button>
           </div>
@@ -227,7 +233,7 @@ export default function PageList({
   )
 }
 
-// Individual Page Item Component
+// Individual Page Item Component - Material v3 list item
 interface PageItemProps {
   page: Page
   isSelected: boolean
@@ -241,13 +247,15 @@ function PageItem({ page, isSelected, onSelect, isTeacher, activeMenu, setActive
   return (
     <div
       className={cn(
-        "group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors relative",
-        isSelected ? "bg-accent" : "hover:bg-accent/50"
+        "group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors relative state-layer",
+        isSelected
+          ? "bg-secondary-container text-on-secondary-container"
+          : "hover:bg-surface-variant text-on-surface"
       )}
       onClick={onSelect}
     >
       {getPageIcon(page)}
-      <span className="flex-1 truncate text-sm">{page.title}</span>
+      <span className="flex-1 truncate text-body-large">{page.title}</span>
       {getDistributionBadge(page)}
 
       {/* Page Menu */}
@@ -258,16 +266,16 @@ function PageItem({ page, isSelected, onSelect, isTeacher, activeMenu, setActive
             setActiveMenu(activeMenu === page.id ? null : page.id)
           }}
           className={cn(
-            "p-1 rounded hover:bg-background transition-opacity",
+            "p-2 rounded-full hover:bg-surface-container-high transition-opacity",
             activeMenu === page.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           )}
         >
-          <MoreVertical className="h-4 w-4" />
+          <MoreVertical className="h-5 w-5 text-on-surface-variant" />
         </button>
 
         {activeMenu === page.id && (
-          <div className="absolute top-full right-0 mt-1 w-40 bg-popover border rounded-md shadow-elevation-2 z-50">
-            <div className="p-1">
+          <div className="absolute top-full right-0 mt-1 w-48 bg-surface-container rounded-medium shadow-elevation-2 z-50 border border-outline-variant overflow-hidden">
+            <div className="py-1">
               {isTeacher && page.distributionStatus === 'private' && (
                 <button
                   onClick={(e) => {
@@ -275,9 +283,9 @@ function PageItem({ page, isSelected, onSelect, isTeacher, activeMenu, setActive
                     // Handle distribute
                     setActiveMenu(null)
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent"
+                  className="w-full flex items-center gap-3 px-4 py-3 text-body-medium text-on-surface hover:bg-surface-variant transition-colors"
                 >
-                  <Share2 className="h-4 w-4" />
+                  <Share2 className="h-5 w-5 text-on-surface-variant" />
                   Distribute
                 </button>
               )}
@@ -287,9 +295,9 @@ function PageItem({ page, isSelected, onSelect, isTeacher, activeMenu, setActive
                   // Handle delete
                   setActiveMenu(null)
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent text-destructive"
+                className="w-full flex items-center gap-3 px-4 py-3 text-body-medium text-error hover:bg-error-container transition-colors"
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-5 w-5" />
                 Delete
               </button>
             </div>

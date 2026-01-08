@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Send, Check, MoreVertical } from 'lucide-react'
+import { X, Send, Check, MoreVertical, MessageSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import { base44 } from '@/lib/base44-sdk'
 import type { CommentThread, Comment, User } from '@/types'
@@ -144,33 +144,39 @@ export default function CommentsPanel({ pageId, onClose }: CommentsPanelProps) {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <header className="h-12 border-b flex items-center px-4 gap-3">
-        <h3 className="font-medium">Comments</h3>
-        <span className="text-sm text-muted-foreground">
+    <div className="h-full flex flex-col bg-surface">
+      {/* Header - Material v3 style */}
+      <header className="h-14 border-b border-outline-variant flex items-center px-4 gap-3 bg-surface-container-low">
+        <h3 className="font-medium text-title-medium text-on-surface">Comments</h3>
+        <span className="text-body-medium text-on-surface-variant">
           ({threads.filter(t => t.status === 'open').length} open)
         </span>
         <div className="flex-1" />
         <button
           onClick={onClose}
-          className="p-1 hover:bg-accent rounded transition-colors"
+          className="btn-icon"
         >
-          <X className="h-4 w-4" />
+          <X className="h-5 w-5" />
         </button>
       </header>
 
       {/* Comment Threads */}
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            Loading comments...
+          <div className="flex items-center justify-center py-12 text-on-surface-variant">
+            <div className="text-center">
+              <div className="w-12 h-12 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-body-medium">Loading comments...</p>
+            </div>
           </div>
         ) : threads.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
+          <div className="flex items-center justify-center py-12 text-on-surface-variant">
             <div className="text-center">
-              <p className="mb-2">No comments yet</p>
-              <p className="text-xs">Start a conversation below</p>
+              <div className="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-4">
+                <MessageSquare className="h-8 w-8 opacity-40" />
+              </div>
+              <p className="text-title-medium mb-1">No comments yet</p>
+              <p className="text-body-medium">Start a conversation below</p>
             </div>
           </div>
         ) : (
@@ -178,39 +184,39 @@ export default function CommentsPanel({ pageId, onClose }: CommentsPanelProps) {
             <div
               key={thread.id}
               className={cn(
-                "border-b",
+                "border-b border-outline-variant",
                 thread.status === 'resolved' && "opacity-60"
               )}
             >
-              {/* Thread Header */}
-              <div className="flex items-center justify-between px-4 py-2 bg-muted/30">
+              {/* Thread Header - Material v3 chips */}
+              <div className="flex items-center justify-between px-4 py-3 bg-surface-container-low">
                 <span className={cn(
-                  "text-xs px-2 py-0.5 rounded",
+                  "text-label-small px-3 py-1 rounded-small",
                   thread.status === 'open'
-                    ? "bg-blue-100 text-blue-700"
-                    : "bg-green-100 text-green-700"
+                    ? "bg-primary-container text-on-primary-container"
+                    : "bg-tertiary-container text-on-tertiary-container"
                 )}>
                   {thread.status === 'open' ? 'Open' : 'Resolved'}
                 </span>
                 <div className="relative">
                   <button
                     onClick={() => setActiveMenu(activeMenu === thread.id ? null : thread.id)}
-                    className="p-1 hover:bg-accent rounded"
+                    className="btn-icon"
                   >
-                    <MoreVertical className="h-4 w-4" />
+                    <MoreVertical className="h-5 w-5" />
                   </button>
                   {activeMenu === thread.id && (
-                    <div className="absolute right-0 top-full mt-1 w-36 bg-popover border rounded-md shadow-elevation-2 z-50">
-                      <div className="p-1">
+                    <div className="absolute right-0 top-full mt-1 w-40 bg-surface-container rounded-medium shadow-elevation-2 z-50 border border-outline-variant overflow-hidden">
+                      <div className="py-1">
                         {thread.status === 'open' && (
                           <button
                             onClick={() => {
                               resolveThreadMutation.mutate(thread.id)
                               setActiveMenu(null)
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent"
+                            className="w-full flex items-center gap-3 px-4 py-3 text-body-medium text-on-surface hover:bg-surface-variant transition-colors"
                           >
-                            <Check className="h-4 w-4" />
+                            <Check className="h-5 w-5 text-on-surface-variant" />
                             Resolve
                           </button>
                         )}
@@ -221,20 +227,20 @@ export default function CommentsPanel({ pageId, onClose }: CommentsPanelProps) {
               </div>
 
               {/* Comments */}
-              {thread.comments.map((comment, index) => (
-                <div key={comment.id} className="px-4 py-3">
+              {thread.comments.map((comment) => (
+                <div key={comment.id} className="px-4 py-4">
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center text-primary text-sm font-medium flex-shrink-0">
+                    <div className="w-10 h-10 bg-primary-container rounded-full flex items-center justify-center text-on-primary-container text-label-large font-medium flex-shrink-0">
                       {comment.authorName?.charAt(0) || '?'}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline gap-2">
-                        <span className="font-medium text-sm">{comment.authorName || 'Unknown'}</span>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="font-medium text-body-large text-on-surface">{comment.authorName || 'Unknown'}</span>
+                        <span className="text-body-small text-on-surface-variant">
                           {formatTime(comment.created_at)}
                         </span>
                       </div>
-                      <p className="text-sm mt-1">{comment.body}</p>
+                      <p className="text-body-medium text-on-surface mt-1">{comment.body}</p>
                     </div>
                   </div>
                 </div>
@@ -242,10 +248,10 @@ export default function CommentsPanel({ pageId, onClose }: CommentsPanelProps) {
 
               {/* Reply Button */}
               {thread.status === 'open' && (
-                <div className="px-4 pb-3">
+                <div className="px-4 pb-4">
                   <button
                     onClick={() => setReplyingTo(thread.id)}
-                    className="text-sm text-primary hover:underline"
+                    className="text-label-large text-primary hover:text-primary/80 transition-colors"
                   >
                     Reply
                   </button>
@@ -254,22 +260,24 @@ export default function CommentsPanel({ pageId, onClose }: CommentsPanelProps) {
 
               {/* Reply Form */}
               {replyingTo === thread.id && (
-                <div className="px-4 pb-3">
+                <div className="px-4 pb-4">
                   <form onSubmit={handleSubmit} className="flex gap-2">
                     <input
                       type="text"
                       placeholder="Write a reply..."
                       value={newComment}
                       onChange={(e) => setNewComment(e.target.value)}
-                      className="flex-1 px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      className="flex-1 px-4 py-3 text-body-large bg-surface-container-highest rounded-full
+                                 focus:outline-none focus:ring-2 focus:ring-primary border-0
+                                 placeholder:text-on-surface-variant"
                       autoFocus
                     />
                     <button
                       type="submit"
                       disabled={!newComment.trim() || addCommentMutation.isPending}
-                      className="px-3 py-2 bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                      className="btn-icon-filled disabled:opacity-38"
                     >
-                      <Send className="h-4 w-4" />
+                      <Send className="h-5 w-5" />
                     </button>
                   </form>
                 </div>
@@ -279,23 +287,25 @@ export default function CommentsPanel({ pageId, onClose }: CommentsPanelProps) {
         )}
       </div>
 
-      {/* New Comment Form */}
+      {/* New Comment Form - Material v3 text field */}
       {!replyingTo && (
-        <div className="border-t p-4">
+        <div className="border-t border-outline-variant p-4 bg-surface-container-low">
           <form onSubmit={handleSubmit} className="flex gap-2">
             <input
               type="text"
               placeholder="Start a new thread..."
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
-              className="flex-1 px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="flex-1 px-4 py-3 text-body-large bg-surface-container-highest rounded-full
+                         focus:outline-none focus:ring-2 focus:ring-primary border-0
+                         placeholder:text-on-surface-variant"
             />
             <button
               type="submit"
               disabled={!newComment.trim() || addCommentMutation.isPending}
-              className="px-3 py-2 bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              className="btn-icon-filled disabled:opacity-38"
             >
-              <Send className="h-4 w-4" />
+              <Send className="h-5 w-5" />
             </button>
           </form>
         </div>

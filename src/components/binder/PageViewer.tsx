@@ -19,10 +19,15 @@ export default function PageViewer({
 }: PageViewerProps) {
   if (!page) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-muted/30">
-        <div className="text-center text-muted-foreground">
-          <p className="text-lg mb-2">No page selected</p>
-          <p className="text-sm">Select a page from the list to view its content</p>
+      <div className="flex-1 flex items-center justify-center bg-surface-variant/30">
+        <div className="text-center text-on-surface-variant">
+          <div className="w-24 h-24 rounded-full bg-surface-container-high flex items-center justify-center mx-auto mb-6">
+            <svg className="w-12 h-12 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p className="text-title-large mb-2">No page selected</p>
+          <p className="text-body-medium">Select a page from the list to view its content</p>
         </div>
       </div>
     )
@@ -62,17 +67,17 @@ export default function PageViewer({
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Page Header */}
-      <header className="h-12 border-b flex items-center px-4 gap-3 bg-card">
-        <h2 className="font-medium truncate">{page.title}</h2>
+      {/* Page Header - Material v3 top app bar style */}
+      <header className="h-14 border-b border-outline-variant flex items-center px-4 gap-3 bg-surface-container-low">
+        <h2 className="font-medium text-title-medium text-on-surface truncate">{page.title}</h2>
 
-        {/* Distribution Badge */}
+        {/* Distribution Badge - Material v3 chips */}
         {page.distributionStatus !== 'private' && (
           <span className={cn(
-            "px-2 py-0.5 text-xs rounded",
+            "px-3 py-1 text-label-medium rounded-small",
             page.distributionStatus === 'viewOnlyDistributed'
-              ? "bg-blue-100 text-blue-700"
-              : "bg-green-100 text-green-700"
+              ? "bg-primary-container text-on-primary-container"
+              : "bg-tertiary-container text-on-tertiary-container"
           )}>
             {page.distributionStatus === 'viewOnlyDistributed' ? 'View-only' : 'Copy'}
           </span>
@@ -80,23 +85,23 @@ export default function PageViewer({
 
         <div className="flex-1" />
 
-        {/* Actions */}
+        {/* Actions - Material v3 icon buttons */}
         <div className="flex items-center gap-1">
           {page.driveFileId && (
             <>
               <button
                 onClick={openInDrive}
-                className="p-2 hover:bg-accent rounded-md transition-colors"
+                className="btn-icon"
                 title="Open in Google Drive"
               >
-                <ExternalLink className="h-4 w-4" />
+                <ExternalLink className="h-5 w-5" />
               </button>
               <button
                 onClick={openFullscreen}
-                className="p-2 hover:bg-accent rounded-md transition-colors"
+                className="btn-icon"
                 title="Fullscreen"
               >
-                <Maximize2 className="h-4 w-4" />
+                <Maximize2 className="h-5 w-5" />
               </button>
             </>
           )}
@@ -104,34 +109,34 @@ export default function PageViewer({
           <button
             onClick={onShowComments}
             className={cn(
-              "p-2 rounded-md transition-colors",
-              showingComments ? "bg-primary text-white" : "hover:bg-accent"
+              "btn-icon",
+              showingComments && "bg-secondary-container text-on-secondary-container"
             )}
             title="Comments"
           >
-            <MessageSquare className="h-4 w-4" />
+            <MessageSquare className="h-5 w-5" />
           </button>
 
           {isTeacher && page.distributionStatus === 'private' && (
             <button
-              className="p-2 hover:bg-accent rounded-md transition-colors"
+              className="btn-icon"
               title="Share/Distribute"
             >
-              <Share2 className="h-4 w-4" />
+              <Share2 className="h-5 w-5" />
             </button>
           )}
 
           <button
-            className="p-2 hover:bg-accent rounded-md transition-colors"
+            className="btn-icon"
             title="More options"
           >
-            <MoreHorizontal className="h-4 w-4" />
+            <MoreHorizontal className="h-5 w-5" />
           </button>
         </div>
       </header>
 
       {/* Page Content */}
-      <div className="flex-1 overflow-hidden bg-muted/10">
+      <div className="flex-1 overflow-hidden bg-surface-variant/20">
         {page.pageType === 'DRIVE_FILE' && page.driveFileId ? (
           <iframe
             src={getEmbedUrl(page) || ''}
@@ -140,27 +145,43 @@ export default function PageViewer({
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         ) : page.pageType === 'CANVAS' ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center text-muted-foreground">
-              <p className="text-lg mb-2">Canvas Drawing</p>
-              <p className="text-sm mb-4">Click to open the drawing editor</p>
-              <button className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
+          <div className="flex-1 h-full flex items-center justify-center">
+            <div className="text-center text-on-surface-variant">
+              <div className="w-24 h-24 rounded-full bg-primary-container flex items-center justify-center mx-auto mb-6">
+                <svg className="w-12 h-12 text-on-primary-container" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </div>
+              <p className="text-title-large mb-2 text-on-surface">Canvas Drawing</p>
+              <p className="text-body-medium mb-6">Click to open the drawing editor</p>
+              <button className="btn-filled">
                 Open Canvas Editor
               </button>
             </div>
           </div>
         ) : page.pageType === 'EMBED' ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center text-muted-foreground">
-              <p className="text-lg mb-2">Embedded Content</p>
-              <p className="text-sm">This content is embedded from an external source</p>
+          <div className="flex-1 h-full flex items-center justify-center">
+            <div className="text-center text-on-surface-variant">
+              <div className="w-24 h-24 rounded-full bg-tertiary-container flex items-center justify-center mx-auto mb-6">
+                <svg className="w-12 h-12 text-on-tertiary-container" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </div>
+              <p className="text-title-large mb-2 text-on-surface">Embedded Content</p>
+              <p className="text-body-medium">This content is embedded from an external source</p>
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center text-muted-foreground">
-              <p className="text-lg mb-2">Content Preview</p>
-              <p className="text-sm">Preview not available for this page type</p>
+          <div className="flex-1 h-full flex items-center justify-center">
+            <div className="text-center text-on-surface-variant">
+              <div className="w-24 h-24 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-6">
+                <svg className="w-12 h-12 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              </div>
+              <p className="text-title-large mb-2 text-on-surface">Content Preview</p>
+              <p className="text-body-medium">Preview not available for this page type</p>
             </div>
           </div>
         )}

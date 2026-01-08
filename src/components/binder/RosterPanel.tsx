@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { X, Search, User, Eye, Mail } from 'lucide-react'
+import { X, Search, User, Eye } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface Student {
@@ -54,81 +54,94 @@ export default function RosterPanel({
   const activeStudents = filteredStudents.filter(s => s.status === 'active')
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <header className="h-12 border-b flex items-center px-4 gap-3">
-        <h3 className="font-medium">Class Roster</h3>
-        <span className="text-sm text-muted-foreground">({activeStudents.length})</span>
+    <div className="h-full flex flex-col bg-surface">
+      {/* Header - Material v3 style */}
+      <header className="h-14 border-b border-outline-variant flex items-center px-4 gap-3 bg-surface-container-low">
+        <h3 className="font-medium text-title-medium text-on-surface">Class Roster</h3>
+        <span className="text-body-medium text-on-surface-variant">({activeStudents.length})</span>
         <div className="flex-1" />
         <button
           onClick={onClose}
-          className="p-1 hover:bg-accent rounded transition-colors"
+          className="btn-icon"
         >
-          <X className="h-4 w-4" />
+          <X className="h-5 w-5" />
         </button>
       </header>
 
-      {/* Search */}
-      <div className="p-3 border-b">
+      {/* Search - Material v3 search bar */}
+      <div className="p-3 border-b border-outline-variant">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-on-surface-variant" />
           <input
             type="text"
             placeholder="Search students..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            className="w-full pl-12 pr-4 py-3 text-body-large bg-surface-container-highest rounded-full
+                       focus:outline-none focus:ring-2 focus:ring-primary border-0
+                       placeholder:text-on-surface-variant"
           />
         </div>
       </div>
 
-      {/* View All (exit student view) */}
+      {/* View All (exit student view) - Material v3 filled tonal style */}
       {viewingStudentId && (
         <button
           onClick={() => onViewStudent(null)}
-          className="flex items-center gap-3 px-4 py-3 border-b bg-primary/5 text-primary hover:bg-primary/10 transition-colors"
+          className="flex items-center gap-3 px-4 py-4 border-b border-outline-variant bg-secondary-container text-on-secondary-container hover:bg-secondary-container/80 transition-colors"
         >
-          <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-            <User className="h-4 w-4" />
+          <div className="w-10 h-10 bg-secondary rounded-full flex items-center justify-center">
+            <User className="h-5 w-5 text-on-secondary" />
           </div>
-          <span className="text-sm font-medium">View Teacher Notebook</span>
+          <span className="text-label-large font-medium">View Teacher Notebook</span>
         </button>
       )}
 
       {/* Student List */}
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            Loading students...
+          <div className="flex items-center justify-center py-12 text-on-surface-variant">
+            <div className="text-center">
+              <div className="w-12 h-12 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-body-medium">Loading students...</p>
+            </div>
           </div>
         ) : activeStudents.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            No students found
+          <div className="flex items-center justify-center py-12 text-on-surface-variant">
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-4">
+                <User className="h-8 w-8 opacity-40" />
+              </div>
+              <p className="text-title-medium mb-1">No students found</p>
+              <p className="text-body-medium">Try a different search term</p>
+            </div>
           </div>
         ) : (
           activeStudents.map((student) => (
             <div
               key={student.id}
               className={cn(
-                "flex items-center gap-3 px-4 py-3 hover:bg-accent/50 transition-colors cursor-pointer",
-                viewingStudentId === student.userId && "bg-accent"
+                "group flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer state-layer",
+                viewingStudentId === student.userId
+                  ? "bg-secondary-container text-on-secondary-container"
+                  : "hover:bg-surface-variant text-on-surface"
               )}
               onClick={() => onViewStudent(student.userId)}
             >
-              {/* Avatar */}
+              {/* Avatar - Material v3 style */}
               <div className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium",
+                "w-10 h-10 rounded-full flex items-center justify-center text-label-large font-medium",
                 viewingStudentId === student.userId
-                  ? "bg-primary text-white"
-                  : "bg-primary/10 text-primary"
+                  ? "bg-primary text-on-primary"
+                  : "bg-primary-container text-on-primary-container"
               )}>
                 {student.fullName.charAt(0)}
               </div>
 
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{student.fullName}</p>
-                <p className="text-xs text-muted-foreground truncate">{student.email}</p>
+                <p className="text-body-large font-medium truncate">{student.fullName}</p>
+                <p className="text-body-small text-on-surface-variant truncate">{student.email}</p>
               </div>
 
               {/* Actions */}
@@ -138,10 +151,10 @@ export default function RosterPanel({
                     e.stopPropagation()
                     onViewStudent(student.userId)
                   }}
-                  className="p-1.5 hover:bg-background rounded transition-colors"
+                  className="btn-icon"
                   title="View notebook"
                 >
-                  <Eye className="h-4 w-4" />
+                  <Eye className="h-5 w-5" />
                 </button>
               </div>
             </div>

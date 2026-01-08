@@ -231,7 +231,7 @@ export default function Home() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-surface">
       {/* Top Bar */}
       <TopBar
         courses={courses}
@@ -248,7 +248,7 @@ export default function Home() {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Section Tabs + Page List */}
-        <div className="w-80 border-r flex flex-col bg-card">
+        <div className="w-80 border-r border-outline-variant flex flex-col bg-surface-container-low">
           {selectedCourseId && (
             <>
               <SectionTabs
@@ -276,7 +276,7 @@ export default function Home() {
         </div>
 
         {/* Center Panel - Page Viewer */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden bg-surface">
           <PageViewer
             page={selectedPage}
             isTeacher={showTeacherControls}
@@ -288,7 +288,7 @@ export default function Home() {
 
         {/* Right Panel - Roster or Comments */}
         {(showRoster || showComments) && (
-          <div className="w-80 border-l bg-card">
+          <div className="w-80 border-l border-outline-variant bg-surface-container-low">
             {showRoster && isTeacher && (
               <RosterPanel
                 courseId={selectedCourseId || ''}

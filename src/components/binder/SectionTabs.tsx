@@ -8,18 +8,18 @@ import { cn } from '@/lib/utils'
 import AddSectionDialog from './AddSectionDialog'
 import DeleteSectionDialog from './DeleteSectionDialog'
 
-// Predefined colors for custom sections
+// Material v3 inspired colors for custom sections
 const SECTION_COLORS = [
-  '#4285f4', // Blue
-  '#ea4335', // Red
-  '#fbbc04', // Yellow
-  '#34a853', // Green
-  '#ff6d01', // Orange
-  '#46bdc6', // Teal
-  '#7baaf7', // Light Blue
-  '#f07b72', // Salmon
-  '#a142f4', // Purple
-  '#24c1e0', // Cyan
+  '#6750A4', // Primary
+  '#B3261E', // Error (red)
+  '#7D5260', // Tertiary
+  '#386A20', // Green
+  '#984061', // Pink
+  '#006A6A', // Teal
+  '#4355B9', // Indigo
+  '#865200', // Orange/Amber
+  '#984715', // Deep Orange
+  '#006B5E', // Green variant
 ]
 
 interface SectionTabsProps {
@@ -74,60 +74,69 @@ export default function SectionTabs({
 
   const getTabColor = (section: Section, index: number) => {
     if (section.color) return section.color
-    if (section.isSystem) return '#5f6368' // Gray for system tabs
+    if (section.isSystem) return '#79747E' // Outline color for system tabs
     return SECTION_COLORS[index % SECTION_COLORS.length]
   }
 
   return (
-    <div className="border-b">
-      {/* Tabs Container */}
-      <div className="flex items-center overflow-x-auto px-2 py-1 gap-1">
+    <div className="border-b border-outline-variant bg-surface-container-low">
+      {/* Tabs Container - Material v3 navigation rail style */}
+      <div className="flex items-center overflow-x-auto px-2 py-2 gap-1">
         {sections.map((section, index) => (
-          <div key={section.id} className="relative flex-shrink-0">
+          <div key={section.id} className="relative flex-shrink-0 group">
             <button
               onClick={() => onSectionSelect(section.id)}
               className={cn(
-                "flex items-center gap-2 px-3 py-2 rounded-t-md text-sm font-medium transition-all",
+                "flex items-center gap-2 px-4 py-2.5 rounded-full text-label-large transition-all state-layer",
                 selectedSectionId === section.id
-                  ? "bg-background border border-b-0 -mb-px"
-                  : "hover:bg-accent/50"
+                  ? "bg-secondary-container text-on-secondary-container"
+                  : "hover:bg-surface-variant text-on-surface-variant"
               )}
               style={{
-                borderTopColor: selectedSectionId === section.id ? getTabColor(section, index) : 'transparent',
-                borderTopWidth: selectedSectionId === section.id ? '3px' : '0',
+                backgroundColor: selectedSectionId === section.id
+                  ? `color-mix(in srgb, ${getTabColor(section, index)} 15%, transparent)`
+                  : undefined,
+                color: selectedSectionId === section.id
+                  ? getTabColor(section, index)
+                  : undefined,
               }}
             >
+              {/* Color indicator */}
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: getTabColor(section, index) }}
+              />
               <span>{section.title}</span>
               {!section.published && isTeacher && (
-                <EyeOff className="h-3 w-3 text-muted-foreground" title="Not published to students" />
+                <EyeOff className="h-4 w-4 opacity-60" title="Not published to students" />
               )}
             </button>
 
             {/* Section Menu for Teachers */}
             {isTeacher && !section.isSystem && (
-              <div className="absolute top-1 right-1">
+              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
                     setActiveMenu(activeMenu === section.id ? null : section.id)
                   }}
-                  className="p-1 hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="p-1.5 rounded-full hover:bg-surface-variant transition-colors"
                 >
-                  <MoreVertical className="h-3 w-3" />
+                  <MoreVertical className="h-4 w-4 text-on-surface-variant" />
                 </button>
 
                 {activeMenu === section.id && (
-                  <div className="absolute top-full right-0 mt-1 w-40 bg-popover border rounded-md shadow-elevation-2 z-50">
-                    <div className="p-1">
+                  <div className="absolute top-full right-0 mt-1 w-44 bg-surface-container rounded-medium shadow-elevation-2 z-50 border border-outline-variant overflow-hidden">
+                    <div className="py-1">
                       {section.published ? (
                         <button
                           onClick={() => {
                             unpublishMutation.mutate(section.id)
                             setActiveMenu(null)
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent"
+                          className="w-full flex items-center gap-3 px-4 py-3 text-body-medium text-on-surface hover:bg-surface-variant transition-colors"
                         >
-                          <EyeOff className="h-4 w-4" />
+                          <EyeOff className="h-5 w-5 text-on-surface-variant" />
                           Unpublish
                         </button>
                       ) : (
@@ -136,9 +145,9 @@ export default function SectionTabs({
                             publishMutation.mutate(section.id)
                             setActiveMenu(null)
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent"
+                          className="w-full flex items-center gap-3 px-4 py-3 text-body-medium text-on-surface hover:bg-surface-variant transition-colors"
                         >
-                          <Eye className="h-4 w-4" />
+                          <Eye className="h-5 w-5 text-on-surface-variant" />
                           Publish
                         </button>
                       )}
@@ -147,9 +156,9 @@ export default function SectionTabs({
                           setSectionToDelete(section)
                           setActiveMenu(null)
                         }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent text-destructive"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-body-medium text-error hover:bg-error-container transition-colors"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-5 w-5" />
                         Delete
                       </button>
                     </div>
@@ -160,30 +169,32 @@ export default function SectionTabs({
           </div>
         ))}
 
-        {/* Add Section Button */}
+        {/* Add Section Button - Material v3 icon button */}
         {isTeacher && (
           <button
             onClick={() => setShowAddDialog(true)}
-            className="flex-shrink-0 p-2 hover:bg-accent rounded-md transition-colors"
+            className="btn-icon flex-shrink-0"
             title="Add section"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-5 w-5" />
           </button>
         )}
 
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Roster Button */}
+        {/* Roster Button - Material v3 filled tonal button */}
         {isTeacher && (
           <button
             onClick={onShowRoster}
             className={cn(
-              "flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-              showingRoster ? "bg-primary text-white" : "hover:bg-accent"
+              "flex items-center gap-2 px-4 py-2.5 rounded-full text-label-large font-medium transition-all state-layer",
+              showingRoster
+                ? "bg-primary text-on-primary"
+                : "bg-secondary-container text-on-secondary-container hover:shadow-elevation-1"
             )}
           >
-            <Users className="h-4 w-4" />
+            <Users className="h-5 w-5" />
             <span className="hidden sm:inline">Roster</span>
           </button>
         )}

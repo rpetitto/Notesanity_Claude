@@ -1,7 +1,7 @@
 {
-  "name": "notebook-binder",
+  "name": "notesanity",
   "version": "1.0.0",
-  "description": "A web application for teachers and students to manage educational content with Google Classroom integration",
+  "description": "Notesanity - A web application for teachers and students to manage educational content with Google Classroom integration",
   "type": "module",
   "scripts": {
     "dev": "vite",

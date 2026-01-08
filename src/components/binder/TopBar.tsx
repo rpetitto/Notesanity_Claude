@@ -1,4 +1,4 @@
-import { RefreshCw, Import, Trash2, ChevronDown, Check, X } from 'lucide-react'
+import { RefreshCw, Import, ChevronDown, Check, X } from 'lucide-react'
 import type { Course, SyncStatus } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -42,67 +42,69 @@ export default function TopBar({
   }
 
   return (
-    <header className="h-14 border-b flex items-center px-4 gap-4 bg-card shadow-elevation-1">
-      {/* Logo */}
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-          <span className="text-white font-bold text-sm">NB</span>
+    <header className="h-16 border-b border-outline-variant flex items-center px-4 gap-4 bg-surface-container-low">
+      {/* Logo - Material v3 branded container */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-primary rounded-large flex items-center justify-center shadow-elevation-1">
+          <span className="text-on-primary font-medium text-title-medium">NS</span>
         </div>
-        <span className="font-semibold text-lg hidden sm:inline">Notebook Binder</span>
+        <span className="font-medium text-title-large text-on-surface hidden sm:inline">Notesanity</span>
       </div>
 
-      {/* Course Selector */}
+      {/* Course Selector - Material v3 style */}
       <div className="relative group">
-        <button className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-accent transition-colors">
-          <span className="font-medium">
+        <button className="flex items-center gap-2 px-4 py-2 rounded-full hover:bg-surface-variant transition-colors state-layer">
+          <span className="font-medium text-label-large text-on-surface">
             {selectedCourse?.name || 'Select Course'}
           </span>
           {selectedCourse?.section && (
-            <span className="text-sm text-muted-foreground">
+            <span className="text-body-medium text-on-surface-variant">
               ({selectedCourse.section})
             </span>
           )}
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          <ChevronDown className="h-5 w-5 text-on-surface-variant" />
         </button>
 
-        {/* Dropdown */}
-        <div className="absolute top-full left-0 mt-1 w-64 bg-popover border rounded-md shadow-elevation-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+        {/* Dropdown - Material v3 menu surface */}
+        <div className="absolute top-full left-0 mt-1 w-72 bg-surface-container rounded-medium shadow-elevation-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 border border-outline-variant">
           <div className="p-1">
             {courses.map((course) => (
               <button
                 key={course.id}
                 onClick={() => onCourseChange(course.id)}
                 className={cn(
-                  "w-full flex items-center gap-2 px-3 py-2 rounded-md text-left hover:bg-accent transition-colors",
-                  course.id === selectedCourseId && "bg-accent"
+                  "w-full flex items-center gap-3 px-4 py-3 rounded-small text-left transition-colors state-layer",
+                  course.id === selectedCourseId
+                    ? "bg-secondary-container text-on-secondary-container"
+                    : "hover:bg-surface-variant text-on-surface"
                 )}
               >
                 <Check className={cn(
-                  "h-4 w-4",
+                  "h-5 w-5 text-primary",
                   course.id === selectedCourseId ? "opacity-100" : "opacity-0"
                 )} />
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{course.name}</p>
+                  <p className="font-medium text-body-large truncate">{course.name}</p>
                   {course.section && (
-                    <p className="text-sm text-muted-foreground truncate">{course.section}</p>
+                    <p className="text-body-small text-on-surface-variant truncate">{course.section}</p>
                   )}
                 </div>
               </button>
             ))}
             {courses.length === 0 && (
-              <p className="px-3 py-2 text-sm text-muted-foreground">No courses available</p>
+              <p className="px-4 py-3 text-body-medium text-on-surface-variant">No courses available</p>
             )}
           </div>
         </div>
       </div>
 
-      {/* Student View Banner */}
+      {/* Student View Banner - Material v3 warning container */}
       {viewingStudentId && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-100 text-yellow-800 rounded-md">
-          <span className="text-sm font-medium">Viewing as student</span>
+        <div className="flex items-center gap-2 px-4 py-2 bg-tertiary-container text-on-tertiary-container rounded-full">
+          <span className="text-label-large">Viewing as student</span>
           <button
             onClick={onExitStudentView}
-            className="p-0.5 hover:bg-yellow-200 rounded transition-colors"
+            className="p-1 hover:bg-tertiary/20 rounded-full transition-colors"
           >
             <X className="h-4 w-4" />
           </button>
@@ -112,37 +114,37 @@ export default function TopBar({
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Sync Status */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      {/* Sync Status - Material v3 label */}
+      <div className="flex items-center gap-2 text-body-medium text-on-surface-variant">
         {syncStatus.isSyncing ? (
           <>
-            <RefreshCw className="h-4 w-4 animate-spin" />
+            <RefreshCw className="h-4 w-4 animate-spin text-primary" />
             <span>Syncing...</span>
           </>
         ) : syncStatus.error ? (
           <>
-            <span className="text-destructive">Sync error</span>
+            <span className="text-error">Sync error</span>
           </>
         ) : (
           <span>Last sync: {formatSyncTime(syncStatus.lastSyncAt)}</span>
         )}
       </div>
 
-      {/* Actions */}
+      {/* Actions - Material v3 icon buttons */}
       <div className="flex items-center gap-1">
         {isTeacher && (
           <>
             <button
               onClick={onSync}
               disabled={syncStatus.isSyncing}
-              className="p-2 hover:bg-accent rounded-md transition-colors disabled:opacity-50"
+              className="btn-icon"
               title="Sync with Google Drive"
             >
               <RefreshCw className={cn("h-5 w-5", syncStatus.isSyncing && "animate-spin")} />
             </button>
             <button
               onClick={onImport}
-              className="p-2 hover:bg-accent rounded-md transition-colors"
+              className="btn-icon"
               title="Import from Google Classroom"
             >
               <Import className="h-5 w-5" />
