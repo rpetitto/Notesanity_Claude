@@ -1,15 +1,23 @@
-import { Routes, Route } from 'react-router-dom'
-import Home from './pages/Home'
-import Roster from './pages/Roster'
+import { Routes, Route, Navigate } from 'react-router-dom'
+import SignIn from './pages/SignIn'
+import Notebooks from './pages/Notebooks'
+import Notebook from './pages/Notebook'
+import StudentRoster from './pages/StudentRoster'
+import Settings from './pages/Settings'
+import { RequireAuth } from './lib/auth'
 
-function App() {
+export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/roster" element={<Roster />} />
-      <Route path="/roster/:courseId" element={<Roster />} />
+      <Route path="/" element={<SignIn />} />
+      <Route element={<RequireAuth />}>
+        <Route path="/notebooks" element={<Notebooks />} />
+        <Route path="/notebooks/:classId" element={<Notebook />} />
+        <Route path="/notebooks/:classId/students" element={<StudentRoster />} />
+        <Route path="/notebooks/:classId/students/:studentId" element={<Notebook browseMode />} />
+        <Route path="/settings" element={<Settings />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }
-
-export default App

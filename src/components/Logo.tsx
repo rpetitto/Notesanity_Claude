@@ -1,0 +1,12 @@
+export default function Logo({ size = 32 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-label="Notesanity">
+      <rect x="8" y="6" width="44" height="52" rx="6" fill="#1A73E8" />
+      <rect x="14" y="6" width="4" height="52" fill="#0F4FB0" opacity="0.6" />
+      <rect x="22" y="18" width="24" height="3" rx="1.5" fill="white" />
+      <rect x="22" y="26" width="24" height="3" rx="1.5" fill="white" />
+      <rect x="22" y="34" width="16" height="3" rx="1.5" fill="white" />
+      <rect x="22" y="42" width="20" height="3" rx="1.5" fill="white" />
+    </svg>
+  )
+}
