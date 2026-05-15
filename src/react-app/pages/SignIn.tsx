@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { HAS_REAL_AUTH, useAuth } from '../lib/auth'
 import Logo from '../components/Logo'
+import { FlingBadge } from '../components/AppShell'
 
 export default function SignIn() {
   const { user, signIn, isReady } = useAuth()
@@ -51,6 +52,7 @@ export default function SignIn() {
         <span className="mx-3">·</span>
         <a href="#" className="hover:text-[#202124]">Terms</a>
       </footer>
+      <FlingBadge />
     </div>
   )
 }

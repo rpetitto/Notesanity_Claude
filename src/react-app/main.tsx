@@ -5,7 +5,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import App from './App'
 import { AuthProvider } from './lib/auth'
-import './globals.css'
+import './index.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

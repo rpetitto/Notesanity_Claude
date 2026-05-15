@@ -79,7 +79,22 @@ export default function AppShell({ children, topBar }: { children: ReactNode; to
         {topBar && <header className="bg-white border-b border-[#E8EAED]">{topBar}</header>}
         <main className="flex-1 min-h-0">{children}</main>
       </div>
+      <FlingBadge />
     </div>
+  )
+}
+
+export function FlingBadge() {
+  return (
+    <a
+      href="https://flingit.io"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="fixed bottom-3 left-3 z-50 flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-[#E8EAED] rounded-full shadow-sm text-xs text-[#5F6368] hover:text-[#202124] hover:border-[#DADCE0]"
+    >
+      <span className="inline-block w-3 h-3 rounded-sm bg-[#1A73E8]" />
+      Made with Fling
+    </a>
   )
 }
 
