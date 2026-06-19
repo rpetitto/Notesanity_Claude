@@ -110,10 +110,11 @@ function resolveAccent(folderProps: Record<string, string> | undefined, classNam
 
 export async function getClasses(): Promise<ClassNotebook[]> {
   const courses = await gfetch<{ courses?: any[] }>(`${CR}/courses?courseStates=ACTIVE&pageSize=50`)
-  const me = await gfetch<{ id: string }>(`${CR}/userProfiles/me`).catch(() => ({ id: '' }))
   const classroomRoot = await findClassroomRoot().catch(() => null)
   const resolved = await Promise.all((courses.courses ?? []).map(async (c) => {
-    const role: 'student' | 'teacher' = me.id && c.ownerId === me.id ? 'teacher' : 'student'
+    // Classroom only returns `teacherFolder` on the Course resource to teachers of that course.
+    // Use that as the role signal — it's far more reliable than comparing user IDs.
+    const role: 'student' | 'teacher' = c.teacherFolder?.id ? 'teacher' : 'student'
     const folderId =
       c.teacherFolder?.id || (await findClassFolder(c.name, classroomRoot).catch(() => null))
     if (!folderId) return null
@@ -133,8 +134,8 @@ export async function getClasses(): Promise<ClassNotebook[]> {
 export async function getClass(classId: string): Promise<ClassNotebook | undefined> {
   const c = await gfetch<any>(`${CR}/courses/${classId}`).catch(() => null)
   if (!c) return undefined
-  const me = await gfetch<{ id: string }>(`${CR}/userProfiles/me`).catch(() => ({ id: '' }))
   const classroomRoot = await findClassroomRoot().catch(() => null)
+  const role: 'student' | 'teacher' = c.teacherFolder?.id ? 'teacher' : 'student'
   const folderId =
     c.teacherFolder?.id || (await findClassFolder(c.name, classroomRoot).catch(() => null))
   if (!folderId) return undefined
@@ -145,7 +146,7 @@ export async function getClass(classId: string): Promise<ClassNotebook | undefin
     name: c.name,
     subtitle: c.section ?? '',
     accentColor: resolveAccent(props, c.name),
-    role: me.id && c.ownerId === me.id ? 'teacher' : 'student',
+    role,
   }
 }
 
