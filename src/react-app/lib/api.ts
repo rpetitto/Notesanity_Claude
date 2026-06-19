@@ -73,6 +73,19 @@ async function findClassFolder(className: string, classroomRoot: string | null):
   return data.files?.[0]?.id ?? null
 }
 
+async function getFolderProps(folderId: string): Promise<Record<string, string>> {
+  const f = await gfetch<DriveFile>(`${DRIVE}/files/${folderId}?fields=id,name,appProperties`).catch(() => null)
+  return f?.appProperties ?? {}
+}
+
+export async function setClassAccentColor(folderId: string, hex: string): Promise<void> {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) throw new Error('Invalid color')
+  await gfetch(`${DRIVE}/files/${folderId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ appProperties: { cnb_accentColor: hex } }),
+  })
+}
+
 // Find a specific student's auto-provisioned `My Drive › Classroom › {ClassName}` folder.
 // Classroom auto-shares this folder with the teacher; we look for it by owner email + name.
 async function findStudentClassFolder(
@@ -89,40 +102,32 @@ async function findStudentClassFolder(
   return data.files?.[0]?.id ?? null
 }
 
-function cover(course: any, className: string): string | undefined {
-  // Classroom API doesn't formally expose the banner image, but `coursePhoto`/`themeBackground`
-  // sometimes appear. Use whichever is present; otherwise undefined (caller falls back to gradient).
-  const url: string | undefined =
-    course?.coursePhoto?.thumbnailUrl ||
-    course?.coursePhoto?.url ||
-    course?.themeBackground?.imageUrl
-  if (typeof url === 'string' && /^https?:/.test(url)) return url
-  // Stable per-class generated cover via Picsum, seeded by class name. Looks like a real banner.
-  const seed = encodeURIComponent(className.toLowerCase().replace(/\s+/g, '-')).slice(0, 32)
-  return `https://picsum.photos/seed/notesanity-${seed}/640/200`
+function resolveAccent(folderProps: Record<string, string> | undefined, className: string): string {
+  const saved = folderProps?.cnb_accentColor
+  if (saved && /^#[0-9A-Fa-f]{6}$/.test(saved)) return saved
+  return accentFor(className)
 }
 
 export async function getClasses(): Promise<ClassNotebook[]> {
   const courses = await gfetch<{ courses?: any[] }>(`${CR}/courses?courseStates=ACTIVE&pageSize=50`)
   const me = await gfetch<{ id: string }>(`${CR}/userProfiles/me`).catch(() => ({ id: '' }))
   const classroomRoot = await findClassroomRoot().catch(() => null)
-  const out: ClassNotebook[] = []
-  for (const c of courses.courses ?? []) {
+  const resolved = await Promise.all((courses.courses ?? []).map(async (c) => {
     const role: 'student' | 'teacher' = me.id && c.ownerId === me.id ? 'teacher' : 'student'
     const folderId =
       c.teacherFolder?.id || (await findClassFolder(c.name, classroomRoot).catch(() => null))
-    if (!folderId) continue
-    out.push({
+    if (!folderId) return null
+    const props = await getFolderProps(folderId)
+    return {
       courseId: c.id,
       classFolderId: folderId,
       name: c.name,
       subtitle: c.section ?? '',
-      accentColor: accentFor(c.name),
-      bannerImageUrl: cover(c, c.name),
+      accentColor: resolveAccent(props, c.name),
       role,
-    })
-  }
-  return out
+    } as ClassNotebook
+  }))
+  return resolved.filter((x): x is ClassNotebook => x !== null)
 }
 
 export async function getClass(classId: string): Promise<ClassNotebook | undefined> {
@@ -133,18 +138,29 @@ export async function getClass(classId: string): Promise<ClassNotebook | undefin
   const folderId =
     c.teacherFolder?.id || (await findClassFolder(c.name, classroomRoot).catch(() => null))
   if (!folderId) return undefined
+  const props = await getFolderProps(folderId)
   return {
     courseId: c.id,
     classFolderId: folderId,
     name: c.name,
     subtitle: c.section ?? '',
-    accentColor: accentFor(c.name),
-    bannerImageUrl: cover(c, c.name),
+    accentColor: resolveAccent(props, c.name),
     role: me.id && c.ownerId === me.id ? 'teacher' : 'student',
   }
 }
 
-// Resolve the class+folder for a *specific student* by looking at folders owned by them.
+export class StudentFolderNotSharedError extends Error {
+  constructor(public studentName: string, public className: string) {
+    super(
+      `Can't see ${studentName}'s "${className}" notebook yet. ` +
+      `Google Classroom doesn't auto-share student class folders with teachers. ` +
+      `Ask ${studentName} to open Notesanity once and visit this notebook — ` +
+      `Notesanity will share their class folder with you automatically.`,
+    )
+    this.name = 'StudentFolderNotSharedError'
+  }
+}
+
 export async function getClassForStudent(classId: string, studentId: string): Promise<ClassNotebook | undefined> {
   const [c, student] = await Promise.all([
     gfetch<any>(`${CR}/courses/${classId}`).catch(() => null),
@@ -153,20 +169,44 @@ export async function getClassForStudent(classId: string, studentId: string): Pr
   if (!c) return undefined
   const folderId = await findStudentClassFolder(student?.email, c.name)
   if (!folderId) {
-    throw new Error(
-      `Couldn't access ${student?.name ?? 'this student'}'s "${c.name}" folder. ` +
-      `Classroom should auto-share student folders with teachers — verify in Drive.`,
-    )
+    throw new StudentFolderNotSharedError(student?.name ?? 'this student', c.name)
   }
+  const props = await getFolderProps(folderId)
   return {
     courseId: c.id,
     classFolderId: folderId,
     name: c.name,
     subtitle: c.section ?? '',
-    accentColor: accentFor(c.name),
-    bannerImageUrl: cover(c, c.name),
+    accentColor: resolveAccent(props, c.name),
     role: 'teacher',
   }
+}
+
+// Share the student's class folder with every teacher of the course (idempotent — Drive
+// silently no-ops if a matching permission already exists for an email).
+export async function shareClassFolderWithTeachers(classId: string, classFolderId: string): Promise<number> {
+  const teachers = await gfetch<{ teachers?: any[] }>(`${CR}/courses/${classId}/teachers?pageSize=50`).catch(() => ({ teachers: [] }))
+  const emails = (teachers.teachers ?? [])
+    .map((t) => t?.profile?.emailAddress)
+    .filter((e: any): e is string => typeof e === 'string' && e.includes('@'))
+  let shared = 0
+  await Promise.all(
+    emails.map(async (email) => {
+      try {
+        await gfetch(
+          `${DRIVE}/files/${classFolderId}/permissions?sendNotificationEmail=false&supportsAllDrives=false`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ role: 'reader', type: 'user', emailAddress: email }),
+          },
+        )
+        shared++
+      } catch {
+        // Already shared, or no permission to share — ignore.
+      }
+    }),
+  )
+  return shared
 }
 
 interface GetTabsOpts { withCounts?: boolean; classFolderId?: string }

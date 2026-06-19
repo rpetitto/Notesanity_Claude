@@ -3,17 +3,34 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronLeft, ChevronRight, ExternalLink, FilePlus, FolderPlus, MoreVertical, Plus, Trash2,
-  Users, UserCircle2, X, ArrowLeft, ArrowRight,
+  Users, UserCircle2, X, ArrowLeft, ArrowRight, PanelLeftClose, PanelLeftOpen, Palette, Share2,
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { toast } from 'sonner'
 import AppShell, { Avatar } from '../components/AppShell'
 import {
-  ROOT_TAB_ID, createPage, createTab, deletePage, deleteTab, getClass, getClassForStudent,
-  getPages, getStudent, getStudents, getTabs, movePage, renamePage, renameTab,
+  ROOT_TAB_ID, StudentFolderNotSharedError, createPage, createTab, deletePage, deleteTab,
+  getClass, getClassForStudent, getPages, getStudent, getStudents, getTabs, movePage,
+  renamePage, renameTab, setClassAccentColor, shareClassFolderWithTeachers,
 } from '../lib/api'
 import type { ClassNotebook, Page, Student, Tab } from '../lib/types'
 import { cn, relativeTime } from '../lib/utils'
+
+const ACCENT_PALETTE = [
+  '#1A73E8', '#34A853', '#EA4335', '#FBBC04', '#9334E6',
+  '#1E8E9C', '#D93025', '#137333', '#A142F4', '#E37400',
+  '#202124', '#5F6368',
+]
+
+const PANE_KEY = 'notesanity:notebookPanes'
+interface PaneState { tabs: boolean; pages: boolean }
+function loadPaneState(): PaneState {
+  try {
+    const raw = localStorage.getItem(PANE_KEY)
+    if (raw) return { tabs: false, pages: false, ...JSON.parse(raw) }
+  } catch {}
+  return { tabs: false, pages: false }
+}
 
 interface Props { browseMode?: boolean }
 
@@ -167,7 +184,36 @@ export default function NotebookView({ browseMode }: Props) {
   })
 
   const [rosterOpen, setRosterOpen] = useState(false)
+  const [panes, setPanes] = useState<PaneState>(loadPaneState)
+  useEffect(() => { try { localStorage.setItem(PANE_KEY, JSON.stringify(panes)) } catch {} }, [panes])
   const accent = cls?.accentColor ?? '#1A73E8'
+
+  const setAccentM = useMutation({
+    mutationFn: (hex: string) => {
+      if (!cls?.classFolderId) throw new Error('Notebook not loaded')
+      return setClassAccentColor(cls.classFolderId, hex)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['class', classId] })
+      qc.invalidateQueries({ queryKey: ['classes'] })
+      toast.success('Color updated')
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Could not update color'),
+  })
+
+  // For students viewing their own notebook: share the folder with the course's teachers
+  // so they can later browse it in teacher mode. Idempotent, runs once per class folder.
+  useEffect(() => {
+    if (browseMode || !cls?.classFolderId || cls.role !== 'student') return
+    const flagKey = `notesanity:shared:${cls.classFolderId}`
+    if (localStorage.getItem(flagKey) === '1') return
+    shareClassFolderWithTeachers(classId, cls.classFolderId)
+      .then((n) => {
+        localStorage.setItem(flagKey, '1')
+        if (n > 0) toast.success(`Notebook shared with ${n} teacher${n === 1 ? '' : 's'}`)
+      })
+      .catch(() => { /* non-fatal */ })
+  }, [browseMode, cls?.classFolderId, cls?.role, classId])
 
   const topBar = (
     <div className="flex flex-col">
@@ -195,6 +241,7 @@ export default function NotebookView({ browseMode }: Props) {
             <span className="font-medium">{cls?.name ?? '…'}</span>
           </div>
           <div className="flex items-center gap-2">
+            <ColorPicker current={accent} onPick={(hex) => setAccentM.mutate(hex)} />
             <button
               onClick={() => newPage.mutate()}
               disabled={newPage.isPending}
@@ -209,19 +256,49 @@ export default function NotebookView({ browseMode }: Props) {
   )
 
   if (classError) {
+    const isShareIssue = classError instanceof StudentFolderNotSharedError
     return (
       <AppShell topBar={topBar}>
-        <div className="m-6 bg-white border border-[#FCE8E6] text-[#D93025] rounded-xl p-6">
-          <div className="font-medium">Couldn't load this notebook</div>
-          <div className="text-sm mt-1 text-[#5F6368]">{(classError as Error).message}</div>
+        <div className={cn(
+          'm-6 rounded-xl p-6',
+          isShareIssue
+            ? 'bg-[#FEF7E0] border border-[#FDE293] text-[#202124]'
+            : 'bg-white border border-[#FCE8E6] text-[#D93025]',
+        )}>
+          <div className="flex items-start gap-3">
+            {isShareIssue && <Share2 className="w-5 h-5 mt-0.5 text-[#B06000] shrink-0" />}
+            <div>
+              <div className="font-medium">{isShareIssue ? 'This notebook isn’t shared with you yet' : "Couldn't load this notebook"}</div>
+              <div className="text-sm mt-1 text-[#5F6368] max-w-prose">{(classError as Error).message}</div>
+              {isShareIssue && (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => navigate(`/notebooks/${classId}/students`)}
+                    className="h-9 px-3 rounded-full bg-white border border-[#DADCE0] text-sm hover:bg-[#F1F3F4]"
+                  >
+                    Back to roster
+                  </button>
+                  <button
+                    onClick={() => qc.invalidateQueries({ queryKey: ['class-for-student', classId, studentId] })}
+                    className="h-9 px-3 rounded-full bg-[#1A73E8] text-white text-sm hover:bg-[#1765c1]"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </AppShell>
     )
   }
 
+  const tabsCol = panes.tabs ? '44px' : '260px'
+  const pagesCol = panes.pages ? '44px' : '300px'
+
   return (
     <AppShell topBar={topBar}>
-      <div className="grid grid-cols-[260px_300px_1fr] h-full min-h-0">
+      <div className="grid h-full min-h-0" style={{ gridTemplateColumns: `${tabsCol} ${pagesCol} 1fr` }}>
         <TabPane
           tabs={tabs}
           activeId={activeTabId}
@@ -231,6 +308,8 @@ export default function NotebookView({ browseMode }: Props) {
           onDelete={(id) => deleteTabM.mutate(id)}
           readOnly={browseMode}
           showCounts={browseMode}
+          collapsed={panes.tabs}
+          onToggleCollapsed={() => setPanes((p) => ({ ...p, tabs: !p.tabs }))}
         />
         <PagePane
           pages={pages}
@@ -242,6 +321,8 @@ export default function NotebookView({ browseMode }: Props) {
           onDelete={(id) => deletePageM.mutate(id)}
           onMove={(id, toTabId) => movePageM.mutate({ id, toTabId })}
           readOnly={browseMode}
+          collapsed={panes.pages}
+          onToggleCollapsed={() => setPanes((p) => ({ ...p, pages: !p.pages }))}
         />
         <ReaderPane
           page={activePage}
@@ -388,16 +469,111 @@ function RosterDrawer({
   )
 }
 
+function ColorPicker({ current, onPick }: { current: string; onPick: (hex: string) => void }) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 h-9 px-3 rounded-full border border-[#DADCE0] bg-white hover:bg-[#F1F3F4] text-sm text-[#5F6368]"
+          title="Change notebook color"
+        >
+          <span className="w-4 h-4 rounded-full border border-black/10" style={{ background: current }} />
+          <Palette className="w-4 h-4" />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={6}
+          className="p-3 bg-white rounded-lg shadow-elevation-3 border border-[#E8EAED]"
+        >
+          <div className="text-xs text-[#5F6368] mb-2">Notebook color</div>
+          <div className="grid grid-cols-6 gap-2">
+            {ACCENT_PALETTE.map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                onClick={() => onPick(hex)}
+                aria-label={`Use ${hex}`}
+                className={cn(
+                  'w-7 h-7 rounded-full border-2',
+                  hex.toLowerCase() === current.toLowerCase() ? 'border-[#202124]' : 'border-white shadow-sm hover:scale-110 transition-transform',
+                )}
+                style={{ background: hex }}
+              />
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <label className="text-xs text-[#5F6368]">Custom</label>
+            <input
+              type="color"
+              defaultValue={current}
+              onChange={(e) => onPick(e.target.value.toUpperCase())}
+              className="h-7 w-10 cursor-pointer rounded border border-[#DADCE0]"
+            />
+          </div>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
+
 function TabPane({
   tabs, activeId, onSelect, onCreate, onRename, onDelete, readOnly, showCounts,
+  collapsed, onToggleCollapsed,
 }: {
   tabs: Tab[]; activeId: string; onSelect: (id: string) => void
   onCreate: (name: string) => void; onRename: (id: string, name: string) => void
   onDelete: (id: string) => void; readOnly?: boolean; showCounts?: boolean
+  collapsed?: boolean; onToggleCollapsed?: () => void
 }) {
+  if (collapsed) {
+    return (
+      <div className="border-r border-[#E8EAED] bg-white flex flex-col items-center py-2 gap-1">
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          title="Expand tabs"
+          className="p-2 rounded hover:bg-[#F1F3F4] text-[#5F6368]"
+        >
+          <PanelLeftOpen className="w-4 h-4" />
+        </button>
+        <div className="mt-2 flex flex-col items-center gap-1 px-1">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onSelect(t.id)}
+              title={`${t.name}${typeof t.pageCount === 'number' ? ` (${t.pageCount})` : ''}`}
+              className={cn(
+                'w-8 h-8 rounded-full text-[10px] font-medium flex items-center justify-center border',
+                t.id === activeId
+                  ? 'bg-[#E8F0FE] text-[#1A73E8] border-[#1A73E8]/40'
+                  : 'bg-white text-[#5F6368] border-[#E8EAED] hover:bg-[#F1F3F4]',
+              )}
+            >
+              {showCounts && typeof t.pageCount === 'number' ? t.pageCount : t.name.slice(0, 2).toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="border-r border-[#E8EAED] bg-white flex flex-col min-h-0">
-      <div className="px-4 py-3 text-xs uppercase tracking-wide text-[#5F6368] font-medium">Tabs</div>
+      <div className="flex items-center justify-between px-4 py-3">
+        <div className="text-xs uppercase tracking-wide text-[#5F6368] font-medium">Tabs</div>
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            title="Collapse tabs"
+            className="p-1.5 rounded hover:bg-[#F1F3F4] text-[#5F6368]"
+          >
+            <PanelLeftClose className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
       <div className="flex-1 overflow-y-auto">
         {tabs.map((t) => (
           <TabRow
@@ -492,24 +668,55 @@ function TabRow({
 
 function PagePane({
   pages, activeId, tabs, onSelect, onCreate, onRename, onDelete, onMove, readOnly,
+  collapsed, onToggleCollapsed,
 }: {
   pages: Page[]; activeId: string | null; tabs: Tab[]
   onSelect: (id: string) => void; onCreate: () => void
   onRename: (id: string, title: string) => void; onDelete: (id: string) => void
   onMove: (id: string, toTabId: string) => void; readOnly?: boolean
+  collapsed?: boolean; onToggleCollapsed?: () => void
 }) {
+  if (collapsed) {
+    return (
+      <div className="border-r border-[#E8EAED] bg-white flex flex-col items-center py-2">
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          title="Expand pages"
+          className="p-2 rounded hover:bg-[#F1F3F4] text-[#5F6368]"
+        >
+          <PanelLeftOpen className="w-4 h-4" />
+        </button>
+        <div className="mt-2 text-[10px] text-[#5F6368] writing-mode-vertical">
+          {pages.length} page{pages.length === 1 ? '' : 's'}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="border-r border-[#E8EAED] bg-white flex flex-col min-h-0">
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className="flex items-center justify-between px-4 py-3 gap-2">
         <div className="text-xs uppercase tracking-wide text-[#5F6368] font-medium">Pages</div>
-        {!readOnly && (
-          <button
-            onClick={onCreate}
-            className="inline-flex items-center gap-1 text-xs text-[#1A73E8] hover:underline"
-          >
-            <FilePlus className="w-3.5 h-3.5" /> New
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {!readOnly && (
+            <button
+              onClick={onCreate}
+              className="inline-flex items-center gap-1 text-xs text-[#1A73E8] hover:underline"
+            >
+              <FilePlus className="w-3.5 h-3.5" /> New
+            </button>
+          )}
+          {onToggleCollapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              title="Collapse pages"
+              className="p-1.5 rounded hover:bg-[#F1F3F4] text-[#5F6368]"
+            >
+              <PanelLeftClose className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto">
         {pages.length === 0 && (

@@ -51,7 +51,6 @@ export default function Notebooks() {
 
 function NotebookTile({ cls }: { cls: ClassNotebook }) {
   const navigate = useNavigate()
-  const banner = cls.bannerImageUrl
   return (
     <div
       className="group bg-white rounded-xl border border-[#E8EAED] overflow-hidden cursor-pointer
@@ -61,9 +60,7 @@ function NotebookTile({ cls }: { cls: ClassNotebook }) {
       <div
         className="h-24 relative"
         style={{
-          background: banner
-            ? `url(${banner}) center/cover`
-            : `linear-gradient(135deg, ${cls.accentColor}, ${cls.accentColor}cc)`,
+          background: `linear-gradient(135deg, ${cls.accentColor}, ${cls.accentColor}99)`,
         }}
       >
         <div className="absolute inset-x-0 top-0 h-1" style={{ background: cls.accentColor }} />
