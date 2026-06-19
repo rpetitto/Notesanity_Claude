@@ -13,3 +13,4 @@ dist/
 
 # Vite
 *.local
+tsconfig.*.tsbuildinfo

@@ -15,7 +15,7 @@
     "@tanstack/react-query": "^5.17.0",
     "clsx": "^2.1.0",
     "flingit": "^0.0.67",
-    "lucide-react": "^0.303.0",
+    "lucide-react": "^0.460.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^6.21.1",

@@ -33,7 +33,7 @@ async function gfetch<T>(url: string, init: RequestInit = {}): Promise<T> {
 const DRIVE = 'https://www.googleapis.com/drive/v3'
 const CR = 'https://classroom.googleapis.com/v1'
 
-const FIELDS_FILE = 'id,name,mimeType,parents,modifiedTime,appProperties'
+const FIELDS_FILE = 'id,name,mimeType,parents,modifiedTime,appProperties,owners(emailAddress)'
 const FIELDS_LIST = `files(${FIELDS_FILE}),nextPageToken`
 
 interface DriveFile {
@@ -43,7 +43,10 @@ interface DriveFile {
   parents?: string[]
   modifiedTime?: string
   appProperties?: Record<string, string>
+  owners?: { emailAddress?: string }[]
 }
+
+const escQ = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 
 async function listChildren(folderId: string, mime: string): Promise<DriveFile[]> {
   const q = encodeURIComponent(`'${folderId}' in parents and mimeType='${mime}' and trashed=false`)
@@ -64,10 +67,39 @@ async function findClassroomRoot(): Promise<string | null> {
 async function findClassFolder(className: string, classroomRoot: string | null): Promise<string | null> {
   if (!classroomRoot) return null
   const q = encodeURIComponent(
-    `'${classroomRoot}' in parents and name='${className.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    `'${classroomRoot}' in parents and name='${escQ(className)}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
   )
   const data = await gfetch<{ files: DriveFile[] }>(`${DRIVE}/files?q=${q}&fields=files(id,name)`)
   return data.files?.[0]?.id ?? null
+}
+
+// Find a specific student's auto-provisioned `My Drive › Classroom › {ClassName}` folder.
+// Classroom auto-shares this folder with the teacher; we look for it by owner email + name.
+async function findStudentClassFolder(
+  studentEmail: string | undefined,
+  className: string,
+): Promise<string | null> {
+  if (!studentEmail) return null
+  const q = encodeURIComponent(
+    `'${escQ(studentEmail)}' in owners and name='${escQ(className)}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+  )
+  const data = await gfetch<{ files: DriveFile[] }>(
+    `${DRIVE}/files?q=${q}&fields=files(id,name,owners(emailAddress))&pageSize=20`,
+  )
+  return data.files?.[0]?.id ?? null
+}
+
+function cover(course: any, className: string): string | undefined {
+  // Classroom API doesn't formally expose the banner image, but `coursePhoto`/`themeBackground`
+  // sometimes appear. Use whichever is present; otherwise undefined (caller falls back to gradient).
+  const url: string | undefined =
+    course?.coursePhoto?.thumbnailUrl ||
+    course?.coursePhoto?.url ||
+    course?.themeBackground?.imageUrl
+  if (typeof url === 'string' && /^https?:/.test(url)) return url
+  // Stable per-class generated cover via Picsum, seeded by class name. Looks like a real banner.
+  const seed = encodeURIComponent(className.toLowerCase().replace(/\s+/g, '-')).slice(0, 32)
+  return `https://picsum.photos/seed/notesanity-${seed}/640/200`
 }
 
 export async function getClasses(): Promise<ClassNotebook[]> {
@@ -86,6 +118,7 @@ export async function getClasses(): Promise<ClassNotebook[]> {
       name: c.name,
       subtitle: c.section ?? '',
       accentColor: accentFor(c.name),
+      bannerImageUrl: cover(c, c.name),
       role,
     })
   }
@@ -93,27 +126,98 @@ export async function getClasses(): Promise<ClassNotebook[]> {
 }
 
 export async function getClass(classId: string): Promise<ClassNotebook | undefined> {
-  const all = await getClasses()
-  return all.find((c) => c.courseId === classId)
+  const c = await gfetch<any>(`${CR}/courses/${classId}`).catch(() => null)
+  if (!c) return undefined
+  const me = await gfetch<{ id: string }>(`${CR}/userProfiles/me`).catch(() => ({ id: '' }))
+  const classroomRoot = await findClassroomRoot().catch(() => null)
+  const folderId =
+    c.teacherFolder?.id || (await findClassFolder(c.name, classroomRoot).catch(() => null))
+  if (!folderId) return undefined
+  return {
+    courseId: c.id,
+    classFolderId: folderId,
+    name: c.name,
+    subtitle: c.section ?? '',
+    accentColor: accentFor(c.name),
+    bannerImageUrl: cover(c, c.name),
+    role: me.id && c.ownerId === me.id ? 'teacher' : 'student',
+  }
 }
 
-export async function getTabs(classId: string): Promise<Tab[]> {
-  const cls = await getClass(classId)
-  if (!cls) return []
-  const folders = await listChildren(cls.classFolderId, 'application/vnd.google-apps.folder')
+// Resolve the class+folder for a *specific student* by looking at folders owned by them.
+export async function getClassForStudent(classId: string, studentId: string): Promise<ClassNotebook | undefined> {
+  const [c, student] = await Promise.all([
+    gfetch<any>(`${CR}/courses/${classId}`).catch(() => null),
+    getStudent(classId, studentId).catch(() => null),
+  ])
+  if (!c) return undefined
+  const folderId = await findStudentClassFolder(student?.email, c.name)
+  if (!folderId) {
+    throw new Error(
+      `Couldn't access ${student?.name ?? 'this student'}'s "${c.name}" folder. ` +
+      `Classroom should auto-share student folders with teachers — verify in Drive.`,
+    )
+  }
+  return {
+    courseId: c.id,
+    classFolderId: folderId,
+    name: c.name,
+    subtitle: c.section ?? '',
+    accentColor: accentFor(c.name),
+    bannerImageUrl: cover(c, c.name),
+    role: 'teacher',
+  }
+}
+
+interface GetTabsOpts { withCounts?: boolean; classFolderId?: string }
+
+export async function getTabs(classId: string, opts: GetTabsOpts = {}): Promise<Tab[]> {
+  let folderId = opts.classFolderId
+  if (!folderId) {
+    const cls = await getClass(classId)
+    if (!cls) return []
+    folderId = cls.classFolderId
+  }
+  const folders = await listChildren(folderId, 'application/vnd.google-apps.folder')
   const tabs: Tab[] = folders.map((f, i) => ({
     id: f.id,
     name: f.name,
     order: Number(f.appProperties?.cnb_order ?? i + 1),
   }))
   tabs.sort((a, b) => a.order - b.order)
-  return [{ id: ROOT_TAB_ID, name: 'Root', order: 0 }, ...tabs]
+  const all: Tab[] = [{ id: ROOT_TAB_ID, name: 'Root', order: 0 }, ...tabs]
+
+  if (opts.withCounts) {
+    const folderIds = [folderId, ...tabs.map((t) => t.id)]
+    const clauses = folderIds.map((id) => `'${id}' in parents`).join(' or ')
+    const q = encodeURIComponent(
+      `(${clauses}) and mimeType='application/vnd.google-apps.document' and trashed=false`,
+    )
+    const data = await gfetch<{ files: DriveFile[] }>(
+      `${DRIVE}/files?q=${q}&fields=files(id,parents)&pageSize=1000`,
+    ).catch(() => ({ files: [] as DriveFile[] }))
+    const counts = new Map<string, number>()
+    for (const f of data.files ?? []) {
+      for (const p of f.parents ?? []) counts.set(p, (counts.get(p) ?? 0) + 1)
+    }
+    for (const t of all) {
+      const lookup = t.id === ROOT_TAB_ID ? folderId : t.id
+      t.pageCount = counts.get(lookup) ?? 0
+    }
+  }
+  return all
 }
 
-export async function getPages(classId: string, tabId: string): Promise<Page[]> {
-  const cls = await getClass(classId)
-  if (!cls) return []
-  const folderId = tabId === ROOT_TAB_ID ? cls.classFolderId : tabId
+interface GetPagesOpts { classFolderId?: string }
+
+export async function getPages(classId: string, tabId: string, opts: GetPagesOpts = {}): Promise<Page[]> {
+  let classFolderId = opts.classFolderId
+  if (!classFolderId) {
+    const cls = await getClass(classId)
+    if (!cls) return []
+    classFolderId = cls.classFolderId
+  }
+  const folderId = tabId === ROOT_TAB_ID ? classFolderId : tabId
   const docs = await listChildren(folderId, 'application/vnd.google-apps.document')
   const pages: Page[] = docs.map((d, i) => ({
     id: d.id,
@@ -202,4 +306,15 @@ export async function getStudents(classId: string): Promise<Student[]> {
     email: s.profile?.emailAddress,
     photoUrl: s.profile?.photoUrl,
   }))
+}
+
+export async function getStudent(classId: string, studentId: string): Promise<Student | undefined> {
+  const s = await gfetch<any>(`${CR}/courses/${classId}/students/${studentId}`).catch(() => null)
+  if (!s) return undefined
+  return {
+    userId: s.userId,
+    name: s.profile?.name?.fullName ?? 'Student',
+    email: s.profile?.emailAddress,
+    photoUrl: s.profile?.photoUrl,
+  }
 }
