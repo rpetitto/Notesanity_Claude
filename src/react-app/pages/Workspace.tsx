@@ -22,10 +22,18 @@ export default function Workspace() {
   const qc = useQueryClient();
   const { user } = useSession();
 
+  // A teacher has no student instance of their own notebook, so opening the
+  // student workspace directly would dead-end. Send them to the editor instead.
+  useEffect(() => {
+    if (user?.role === "teacher" && notebookId) {
+      navigate(`/notebooks/${notebookId}/edit`, { replace: true });
+    }
+  }, [user?.role, notebookId, navigate]);
+
   const workQuery = useQuery({
     queryKey: ["work", notebookId],
     queryFn: () => api.get<WorkResponse>(`/api/notebooks/${notebookId}/work`),
-    enabled: !!notebookId,
+    enabled: !!notebookId && user?.role !== "teacher",
   });
 
   const assignmentQuery = useQuery({

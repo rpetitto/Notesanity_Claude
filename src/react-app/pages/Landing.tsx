@@ -1,7 +1,14 @@
 import { Logo, FlingBadge } from "../components/Shell";
-import { signInHref } from "../lib/session";
+import { signInHref, signOutHref } from "../lib/session";
 
-export default function Landing() {
+/**
+ * `error` is set when the account is signed in to Google but Notesanity refused
+ * it — almost always a domain outside the school. Without showing it, sign-in
+ * silently bounces back here and looks like the app is broken.
+ */
+export default function Landing({ error }: { error?: Error | null }) {
+  const blocked = Boolean(error);
+
   return (
     <div className="flex min-h-dvh items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
@@ -10,6 +17,19 @@ export default function Landing() {
         </div>
         <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">Notesanity</h1>
         <p className="mt-2 text-sm text-slate-600">Interactive notebooks for your classroom.</p>
+
+        {blocked && (
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-left">
+            <div className="text-sm font-medium text-amber-900">Can't sign you in</div>
+            <p className="mt-1 text-xs leading-relaxed text-amber-800">{error?.message}</p>
+            <a
+              href={signOutHref}
+              className="mt-3 inline-flex h-9 items-center justify-center rounded-full border border-amber-300 bg-white px-3 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            >
+              Sign out and use a different account
+            </a>
+          </div>
+        )}
 
         <a
           href={signInHref("/")}
@@ -33,11 +53,13 @@ export default function Landing() {
               d="M43.6 20.5H42V20H24v8h11.3c-1 3-3.2 5.4-6 6.8l6.5 5.5C39.8 37.3 44 31.4 44 24c0-1.3-.1-2.7-.4-3.5z"
             />
           </svg>
-          Sign in with Google
+          {blocked ? "Try signing in again" : "Sign in with Google"}
         </a>
 
         <p className="mt-4 text-xs text-slate-400">
-          First person to sign in becomes the school admin.
+          {blocked
+            ? "An admin can add your domain under Settings → School settings."
+            : "First person to sign in becomes the school admin."}
         </p>
       </div>
       <FlingBadge />

@@ -16,13 +16,15 @@ import Grading from "./pages/Grading";
 import TeacherAssignments from "./pages/TeacherAssignments";
 
 export default function App() {
-  const { user, isLoading } = useSession();
+  const { user, isLoading, error } = useSession();
 
   if (isLoading) return <Spinner label="Starting Notesanity…" />;
+  // A signed-in Google account can still be refused (wrong email domain), so the
+  // reason has to reach the landing page — otherwise sign-in silently loops.
   if (!user) {
     return (
       <Routes>
-        <Route path="*" element={<Landing />} />
+        <Route path="*" element={<Landing error={error} />} />
       </Routes>
     );
   }
