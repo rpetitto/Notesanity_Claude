@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { KeyRound, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
-import { api } from "../lib/api";
+import { api, type ClassSummary } from "../lib/api";
 import { cn, formatDue, isOverdue } from "../lib/utils";
 
 interface MyAssignment {
@@ -54,6 +54,24 @@ function gradeLabel(a: MyAssignment): string | null {
   if (a.grading === "letter") return a.grade.letter ?? null;
   if (a.grading === "complete") return a.grade.complete === null ? null : a.grade.complete ? "Complete" : "Incomplete";
   return null;
+}
+
+function ClassCard({ cls }: { cls: ClassSummary }) {
+  return (
+    <Link
+      to={`/classes/${cls.id}`}
+      className="block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+    >
+      <div className="h-2.5 w-full" style={{ backgroundColor: cls.accent_color || "#1A73E8" }} />
+      <div className="p-4">
+        <div className="truncate text-base font-semibold text-slate-900">{cls.name}</div>
+        <div className="truncate text-sm text-slate-500">{cls.section || " "}</div>
+        <div className="mt-3 text-xs text-slate-500">
+          {cls.notebook_count} notebook{cls.notebook_count === 1 ? "" : "s"}
+        </div>
+      </div>
+    </Link>
+  );
 }
 
 function AssignmentRow({ a }: { a: MyAssignment }) {
@@ -156,6 +174,10 @@ function JoinClassModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function StudentHome() {
+  const classesQ = useQuery({
+    queryKey: ["classes"],
+    queryFn: () => api.get<{ classes: ClassSummary[] }>("/api/classes"),
+  });
   const assignmentsQ = useQuery({
     queryKey: ["my-assignments"],
     queryFn: () => api.get<{ assignments: MyAssignment[] }>("/api/my/assignments"),
@@ -180,6 +202,35 @@ export default function StudentHome() {
           Join a class
         </button>
       </div>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">My classes</h2>
+        {classesQ.isLoading && <Spinner />}
+        {classesQ.error && <ErrorNote error={classesQ.error as Error} />}
+        {!classesQ.isLoading && !classesQ.error && classesQ.data && classesQ.data.classes.length === 0 && (
+          <EmptyState
+            title="You haven't joined a class yet"
+            body="Ask your teacher for a class code, then use Join a class above to get started."
+            action={
+              <button
+                type="button"
+                onClick={() => setJoinOpen(true)}
+                className="flex h-10 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                <KeyRound className="h-4 w-4" />
+                Join a class
+              </button>
+            }
+          />
+        )}
+        {!classesQ.isLoading && !classesQ.error && classesQ.data && classesQ.data.classes.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {classesQ.data.classes.map((cls) => (
+              <ClassCard key={cls.id} cls={cls} />
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="mb-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Assignments</h2>

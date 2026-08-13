@@ -414,6 +414,47 @@ app.get("/api/classes/:id/gradebook.csv", handler(async (c) => {
   });
 }));
 
+/** Every assignment across the classes this teacher runs — the top-level view. */
+app.get("/api/my/teaching", handler(async (c) => {
+  const user = await requireUser(c);
+  const rows = await db
+    .prepare(
+      `SELECT a.*, c.name AS class_name, c.accent_color, n.title AS notebook_title
+         FROM assignments a
+         JOIN classes c ON c.id = a.class_id
+         JOIN notebooks n ON n.id = a.notebook_id
+         LEFT JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.role = 'teacher' AND e.status = 'active'
+        WHERE c.archived = 0 AND (c.owner_id = ? OR e.id IS NOT NULL)
+        ORDER BY COALESCE(a.due_at, a.created_at) DESC`,
+    )
+    .bind(user.id, user.id)
+    .all<any>();
+
+  const assignments = [];
+  for (const a of rows.results ?? []) {
+    const counts = await db
+      .prepare(
+        `SELECT SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted,
+                SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS returned,
+                SUM(CASE WHEN graded_at IS NOT NULL THEN 1 ELSE 0 END) AS graded,
+                COUNT(*) AS total
+           FROM submissions WHERE assignment_id = ?`,
+      )
+      .bind(a.id)
+      .first<any>();
+    assignments.push({
+      id: a.id, title: a.title, classId: a.class_id, className: a.class_name,
+      accentColor: a.accent_color, notebookId: a.notebook_id, notebookTitle: a.notebook_title,
+      pageCount: JSON.parse(a.page_ids || "[]").length,
+      dueAt: a.due_at, releaseAt: a.release_at, grading: a.grading, pointsMax: a.points_max,
+      status: a.status,
+      submitted: counts?.submitted ?? 0, returned: counts?.returned ?? 0,
+      graded: counts?.graded ?? 0, total: counts?.total ?? 0,
+    });
+  }
+  return c.json({ assignments });
+}));
+
 /** Everything on the signed-in student's plate, across all classes. */
 app.get("/api/my/assignments", handler(async (c) => {
   const user = await requireUser(c);

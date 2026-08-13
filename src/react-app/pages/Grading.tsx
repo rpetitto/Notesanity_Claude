@@ -19,7 +19,7 @@ import {
 import { toast } from "sonner";
 import { api, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
-import NotebookSurface from "../components/NotebookSurface";
+import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
@@ -56,7 +56,7 @@ export default function Grading() {
   const [pageIdx, setPageIdx] = useState(0);
   const [pageLocked, setPageLocked] = useState(true);
   const [rosterOpen, setRosterOpen] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState<ZoomMode>("page");
   const [tool, setTool] = useState<ToolState>({
     kind: "pen", color: "#D93025", width: 2.5, stamp: "✅", fontSize: 14,
   });
@@ -257,6 +257,7 @@ export default function Grading() {
         canRedo={!!visiblePages[0] && notebookWork.canRedo(visiblePages[0].id)}
         status={notebookWork.status}
         teacherPalette
+        allowComments
         zoom={zoom}
         onZoomChange={setZoom}
       />

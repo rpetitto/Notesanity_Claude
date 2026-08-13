@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, type PageRec } from "../lib/api";
@@ -29,10 +29,14 @@ export default function AssignmentEditor() {
     enabled: !!classId,
   });
 
-  const [notebookId, setNotebookId] = useState(searchParams.get("notebook") ?? "");
+  // Arriving from the notebook editor's "Create assignment" action carries the
+  // page multi-selection straight through, so the teacher doesn't repick pages.
+  const handoff = (useLocation().state as { notebookId?: string; pageIds?: string[] } | null) ?? null;
+
+  const [notebookId, setNotebookId] = useState(handoff?.notebookId ?? searchParams.get("notebook") ?? "");
   const [title, setTitle] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [pageIds, setPageIds] = useState<string[]>([]);
+  const [pageIds, setPageIds] = useState<string[]>(handoff?.pageIds ?? []);
   const [releaseAt, setReleaseAt] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [grading, setGrading] = useState<Grading>("points");

@@ -54,7 +54,7 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
 
   const pages = await db
     .prepare(
-      `SELECT id, seq, asset_key, source_index, width, height, label
+      `SELECT id, seq, asset_key, source_index, width, height, label, group_name
          FROM pages WHERE notebook_id = ? AND archived = 0 ORDER BY seq`,
     )
     .bind(nb.id)

@@ -78,7 +78,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
   const includeArchived = isTeacher && c.req.query("archived") === "1";
   const pages = await db
     .prepare(
-      `SELECT id, seq, asset_key, source_index, width, height, label, archived
+      `SELECT id, seq, asset_key, source_index, width, height, label, group_name, archived
          FROM pages WHERE notebook_id = ? ${includeArchived ? "" : "AND archived = 0"}
         ORDER BY seq`,
     )
@@ -177,13 +177,14 @@ app.patch("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
     .bind(param(c, "pageId"), nb.id)
     .first<any>();
   if (!page) throw new HttpError(404, "Page not found");
-  const body = await c.req.json<{ archived?: boolean; label?: string; seq?: number }>();
+  const body = await c.req.json<{ archived?: boolean; label?: string; seq?: number; groupName?: string }>();
   await db
-    .prepare(`UPDATE pages SET archived = ?, label = ?, seq = ? WHERE id = ?`)
+    .prepare(`UPDATE pages SET archived = ?, label = ?, seq = ?, group_name = ? WHERE id = ?`)
     .bind(
       body.archived === undefined ? page.archived : body.archived ? 1 : 0,
       body.label ?? page.label,
       body.seq ?? page.seq,
+      body.groupName === undefined ? page.group_name : body.groupName,
       page.id,
     )
     .run();
@@ -196,6 +197,83 @@ app.patch("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
     .bind(count?.n ?? 0, now(), nb.id)
     .run();
   return c.json({ ok: true });
+}));
+
+/**
+ * Apply one action to a multi-selection of pages — grouping, archiving, or
+ * restoring. Backs the selection toolbar in the notebook's page list.
+ */
+app.post("/api/notebooks/:id/pages/bulk", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { pageIds, action, groupName } = await c.req.json<{
+    pageIds: string[];
+    action: "group" | "ungroup" | "archive" | "restore";
+    groupName?: string;
+  }>();
+  if (!Array.isArray(pageIds) || pageIds.length === 0) throw new HttpError(400, "No pages selected");
+
+  for (const pid of pageIds) {
+    const owned = await db
+      .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
+      .bind(pid, nb.id)
+      .first();
+    if (!owned) continue;
+    if (action === "group") {
+      await db.prepare(`UPDATE pages SET group_name = ? WHERE id = ?`).bind(groupName ?? "", pid).run();
+    } else if (action === "ungroup") {
+      await db.prepare(`UPDATE pages SET group_name = '' WHERE id = ?`).bind(pid).run();
+    } else if (action === "archive" || action === "restore") {
+      await db.prepare(`UPDATE pages SET archived = ? WHERE id = ?`).bind(action === "archive" ? 1 : 0, pid).run();
+    }
+  }
+
+  const count = await db
+    .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 0`)
+    .bind(nb.id)
+    .first<{ n: number }>();
+  await db
+    .prepare(`UPDATE notebooks SET page_count = ?, updated_at = ? WHERE id = ?`)
+    .bind(count?.n ?? 0, now(), nb.id)
+    .run();
+  return c.json({ ok: true, updated: pageIds.length });
+}));
+
+/** Assignments that draw on this notebook, shown alongside its pages. */
+app.get("/api/notebooks/:id/assignments", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  const rows = await db
+    .prepare(
+      `SELECT id, title, page_ids, due_at, release_at, grading, points_max, status, created_at
+         FROM assignments
+        WHERE notebook_id = ? ${isTeacher ? "" : "AND status = 'active'"}
+        ORDER BY COALESCE(due_at, created_at) DESC`,
+    )
+    .bind(nb.id)
+    .all<any>();
+
+  const assignments = [];
+  for (const a of rows.results ?? []) {
+    const pageIds: string[] = JSON.parse(a.page_ids || "[]");
+    const counts = isTeacher
+      ? await db
+          .prepare(
+            `SELECT SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted,
+                    SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS returned,
+                    COUNT(*) AS total
+               FROM submissions WHERE assignment_id = ?`,
+          )
+          .bind(a.id)
+          .first<any>()
+      : null;
+    assignments.push({
+      id: a.id, title: a.title, pageIds, pageCount: pageIds.length,
+      dueAt: a.due_at, releaseAt: a.release_at, grading: a.grading,
+      pointsMax: a.points_max, status: a.status,
+      submitted: counts?.submitted ?? 0, returned: counts?.returned ?? 0, total: counts?.total ?? 0,
+    });
+  }
+  return c.json({ assignments, isTeacher });
 }));
 
 /** Reorder the whole notebook in one call (drag-and-drop commit). */

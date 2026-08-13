@@ -3,10 +3,15 @@
  *
  *   Layer 1  <canvas>  the PDF page, rendered by pdf.js
  *   Layer 2  <div>     teacher-authored form fields (real HTML inputs)
- *   Layer 3  <canvas>  student ink, teacher ink, plus text boxes and stamps
+ *   Layer 3  <canvas>  student ink, teacher ink, plus text, stamps and comments
  *
  * Everything above Layer 1 is positioned in page units and scaled at paint time,
  * so the same annotation data renders identically at any zoom or pixel density.
+ *
+ * Hit-testing rule: the pointer surface sits *below* the interactive overlay, so
+ * form fields, text boxes and comment pins stay clickable without switching
+ * tools. Only while a marking tool (pen/highlighter/eraser) is selected does the
+ * overlay go pointer-transparent so ink can be laid down across the whole page.
  *
  * iOS Safari / Apple Pencil notes:
  *  - Apple Pencil arrives as `pointerType === 'pen'` and carries real `pressure`.
@@ -19,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { MessageSquare, X } from "lucide-react";
 import type { FieldRec } from "../lib/api";
 import {
   type LayerData, type Stroke, type ToolKind, drawLayer, drawStroke, hitStroke,
@@ -51,17 +57,22 @@ interface Props {
   tool: ToolState;
   fingerDraw: boolean;
   fieldsEditable: boolean;
+  /** Display name stamped onto new comments. */
+  authorName?: string;
   className?: string;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
 
+/** Tools that paint across the page and therefore need the whole surface. */
+const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser"];
+
 export default function PageCanvas({
   pdfUrl, sourceIndex, pageWidth, pageHeight, scale,
   fields, fieldValues, onFieldChange,
   studentLayer, teacherLayer, onLayerChange,
-  writeTarget, tool, fingerDraw, fieldsEditable, className,
+  writeTarget, tool, fingerDraw, fieldsEditable, authorName, className,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const studentRef = useRef<HTMLCanvasElement>(null);
@@ -70,6 +81,7 @@ export default function PageCanvas({
 
   const [baseReady, setBaseReady] = useState(false);
   const [editingText, setEditingText] = useState<string | null>(null);
+  const [openComment, setOpenComment] = useState<string | null>(null);
 
   const cssW = pageWidth * scale;
   const cssH = pageHeight * scale;
@@ -120,6 +132,7 @@ export default function PageCanvas({
   const activePointer = useRef<number | null>(null);
 
   const activeLayer = writeTarget === "teacher" ? teacherLayer : studentLayer;
+  const isMarking = MARKING_TOOLS.includes(tool.kind);
   const isDrawTool = tool.kind === "pen" || tool.kind === "highlighter";
   const canWrite = writeTarget !== null && !!onLayerChange;
 
@@ -131,7 +144,6 @@ export default function PageCanvas({
   const shouldAcceptPointer = (e: React.PointerEvent | PointerEvent) => {
     if (e.pointerType === "pen") return true;
     if (e.pointerType === "mouse") return (e as PointerEvent).buttons !== 2;
-    // touch
     if (!fingerDraw) return false;
     // Suppress the palm: a pen used in the last moment wins over touch contacts.
     return Date.now() - lastPenAt.current > 1200;
@@ -203,6 +215,16 @@ export default function PageCanvas({
         ...activeLayer,
         e: [...activeLayer.e, { id: uid(), x, y, s: tool.fontSize * 1.8, e: tool.stamp }],
       });
+      return;
+    }
+
+    if (tool.kind === "comment") {
+      const id = uid();
+      onLayerChange?.({
+        ...activeLayer,
+        c: [...activeLayer.c, { id, x, y, t: "", a: authorName }],
+      });
+      setOpenComment(id);
       return;
     }
 
@@ -281,9 +303,30 @@ export default function PageCanvas({
     onLayerChange({ ...activeLayer, x: activeLayer.x.filter((t) => t.id !== id) });
     setEditingText(null);
   };
+  const updateComment = (id: string, t: string) => {
+    if (!onLayerChange) return;
+    onLayerChange({ ...activeLayer, c: activeLayer.c.map((k) => (k.id === id ? { ...k, t } : k)) });
+  };
+  const removeComment = (id: string) => {
+    if (!onLayerChange) return;
+    onLayerChange({ ...activeLayer, c: activeLayer.c.filter((k) => k.id !== id) });
+    setOpenComment(null);
+  };
 
   const interactive = canWrite && tool.kind !== "select";
-  const blockTouchScroll = interactive && fingerDraw && (isDrawTool || tool.kind === "eraser");
+  const blockTouchScroll = interactive && fingerDraw && isMarking;
+
+  // While marking, the overlay must not intercept — ink needs the whole page.
+  const overlayPointerEvents = isMarking && canWrite ? "none" : "auto";
+
+  const textOwners = [
+    ...studentLayer.x.map((t) => ({ t, own: writeTarget === "student" })),
+    ...teacherLayer.x.map((t) => ({ t, own: writeTarget === "teacher" })),
+  ];
+  const comments = [
+    ...studentLayer.c.map((k) => ({ k, own: writeTarget === "student", teacher: false })),
+    ...teacherLayer.c.map((k) => ({ k, own: writeTarget === "teacher", teacher: true })),
+  ];
 
   return (
     <div
@@ -299,8 +342,30 @@ export default function PageCanvas({
       <canvas ref={baseRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block" />
       {!baseReady && <div className="absolute inset-0 animate-pulse bg-slate-100" />}
 
+      <canvas ref={studentRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
+      <canvas ref={teacherRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
+      <canvas ref={liveRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
+
+      {/* Pointer surface — sits under the interactive overlay so fields and pins
+          stay clickable; only marking tools take over the full page. */}
+      {interactive && (
+        <div
+          className="absolute inset-0"
+          style={{
+            touchAction: blockTouchScroll ? "none" : "auto",
+            cursor: tool.kind === "eraser" ? "cell" : isDrawTool ? "crosshair" : "copy",
+          }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endStroke}
+          onPointerCancel={endStroke}
+          onPointerLeave={endStroke}
+          onContextMenu={(e) => e.preventDefault()}
+        />
+      )}
+
       {/* Layer 2 — form fields */}
-      <div className="absolute inset-0" style={{ pointerEvents: fieldsEditable ? "auto" : "none" }}>
+      <div className="absolute inset-0" style={{ pointerEvents: fieldsEditable ? overlayPointerEvents : "none" }}>
         {fields.map((f) => (
           <FieldControl
             key={f.id}
@@ -313,18 +378,18 @@ export default function PageCanvas({
         ))}
       </div>
 
-      <canvas ref={studentRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
-      <canvas ref={teacherRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
-      <canvas ref={liveRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
-
-      {/* Text boxes and stamps live above the ink so they stay editable. */}
+      {/* Text boxes, stamps and comment pins */}
       <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
-        {[...studentLayer.x.map((t) => ({ t, own: writeTarget === "student" })),
-          ...teacherLayer.x.map((t) => ({ t, own: writeTarget === "teacher" }))].map(({ t, own }) => (
+        {textOwners.map(({ t, own }) => (
           <div
             key={t.id}
             className="absolute"
-            style={{ left: t.x * scale, top: t.y * scale, width: t.w * scale, pointerEvents: own ? "auto" : "none" }}
+            style={{
+              left: t.x * scale,
+              top: t.y * scale,
+              width: t.w * scale,
+              pointerEvents: own ? overlayPointerEvents : "none",
+            }}
           >
             {own && editingText === t.id ? (
               <textarea
@@ -339,7 +404,7 @@ export default function PageCanvas({
             ) : (
               <div
                 onClick={() => own && setEditingText(t.id)}
-                className={cn("whitespace-pre-wrap break-words", own && "cursor-text hover:bg-blue-50/50 rounded")}
+                className={cn("whitespace-pre-wrap break-words", own && "cursor-text rounded hover:bg-blue-50/50")}
                 style={{ fontSize: t.s * scale, lineHeight: 1.25, color: t.c }}
               >
                 {t.v}
@@ -347,6 +412,7 @@ export default function PageCanvas({
             )}
           </div>
         ))}
+
         {[...studentLayer.e, ...teacherLayer.e].map((s) => (
           <div
             key={s.id}
@@ -356,26 +422,88 @@ export default function PageCanvas({
             {s.e}
           </div>
         ))}
-      </div>
 
-      {/* Pointer surface sits on top so drawing beats text/field hit-testing. */}
-      {interactive && (
-        <div
-          className="absolute inset-0"
-          style={{
-            touchAction: blockTouchScroll ? "none" : "auto",
-            cursor: tool.kind === "eraser" ? "cell" : isDrawTool ? "crosshair" : "copy",
-            // Text and stamp tools place a single mark, then get out of the way of
-            // the element they just created.
-            pointerEvents: "auto",
-          }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={endStroke}
-          onPointerCancel={endStroke}
-          onPointerLeave={endStroke}
-          onContextMenu={(e) => e.preventDefault()}
-        />
+        {comments.map(({ k, own, teacher }, i) => (
+          <CommentPin
+            key={k.id}
+            index={i + 1}
+            comment={k}
+            scale={scale}
+            teacher={teacher}
+            editable={own}
+            open={openComment === k.id}
+            pointerEvents={overlayPointerEvents}
+            onOpen={() => setOpenComment(openComment === k.id ? null : k.id)}
+            onChange={(v) => updateComment(k.id, v)}
+            onDelete={() => removeComment(k.id)}
+            onClose={() => { if (!k.t.trim() && own) removeComment(k.id); else setOpenComment(null); }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CommentPin({
+  index, comment, scale, teacher, editable, open, pointerEvents, onOpen, onChange, onDelete, onClose,
+}: {
+  index: number;
+  comment: { id: string; x: number; y: number; t: string; a?: string };
+  scale: number;
+  teacher: boolean;
+  editable: boolean;
+  open: boolean;
+  pointerEvents: "auto" | "none";
+  onOpen: () => void;
+  onChange: (v: string) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="absolute"
+      style={{ left: comment.x * scale, top: comment.y * scale, pointerEvents }}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        title={comment.t || "Comment"}
+        className={cn(
+          "flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[11px] font-semibold text-white shadow-md ring-2 ring-white",
+          teacher ? "bg-rose-600" : "bg-blue-600",
+        )}
+      >
+        {index}
+      </button>
+
+      {open && (
+        <div className="absolute left-3 top-3 z-20 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+            <MessageSquare className="h-3 w-3" />
+            {comment.a || (teacher ? "Teacher" : "Student")}
+            <button onClick={onClose} className="ml-auto rounded p-0.5 hover:bg-slate-100">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          {editable ? (
+            <>
+              <textarea
+                autoFocus
+                value={comment.t}
+                onChange={(e) => onChange(e.target.value)}
+                rows={3}
+                placeholder="Add a comment…"
+                className="w-full resize-none rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-blue-500"
+              />
+              <div className="mt-1 flex justify-between">
+                <button onClick={onDelete} className="text-[11px] text-rose-600 hover:underline">Delete</button>
+                <button onClick={onClose} className="text-[11px] text-blue-600 hover:underline">Done</button>
+              </div>
+            </>
+          ) : (
+            <p className="whitespace-pre-wrap break-words text-xs text-slate-700">{comment.t}</p>
+          )}
+        </div>
       )}
     </div>
   );

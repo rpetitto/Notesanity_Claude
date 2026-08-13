@@ -10,7 +10,7 @@
  * points and this payload is autosaved repeatedly.
  */
 
-export type ToolKind = "pen" | "highlighter" | "eraser" | "text" | "stamp" | "select";
+export type ToolKind = "pen" | "highlighter" | "eraser" | "text" | "stamp" | "comment" | "select";
 
 export interface Stroke {
   /** 'p' pen, 'h' highlighter */
@@ -44,14 +44,30 @@ export interface Stamp {
   e: string;
 }
 
+/**
+ * A pinned comment. Unlike a free text box this is anchored feedback: it renders
+ * as a numbered marker that expands, so a teacher can respond to one specific
+ * thing a student drew rather than leaving a single note for the whole page.
+ */
+export interface Comment {
+  id: string;
+  x: number;
+  y: number;
+  /** comment body */
+  t: string;
+  /** author display name, so returned work shows who said it */
+  a?: string;
+}
+
 export interface LayerData {
   v: 1;
   s: Stroke[];
   x: TextBox[];
   e: Stamp[];
+  c: Comment[];
 }
 
-export const emptyLayer = (): LayerData => ({ v: 1, s: [], x: [], e: [] });
+export const emptyLayer = (): LayerData => ({ v: 1, s: [], x: [], e: [], c: [] });
 
 export function parseLayer(raw?: string | null): LayerData {
   if (!raw) return emptyLayer();
@@ -62,6 +78,8 @@ export function parseLayer(raw?: string | null): LayerData {
       s: Array.isArray(parsed.s) ? parsed.s : [],
       x: Array.isArray(parsed.x) ? parsed.x : [],
       e: Array.isArray(parsed.e) ? parsed.e : [],
+      // `c` arrived after the first release; older payloads simply lack it.
+      c: Array.isArray(parsed.c) ? parsed.c : [],
     };
   } catch {
     return emptyLayer();
@@ -82,10 +100,12 @@ export function serializeLayer(layer: LayerData): string {
     })),
     x: layer.x.map((t) => ({ ...t, x: r1(t.x), y: r1(t.y), w: r1(t.w), s: r1(t.s) })),
     e: layer.e.map((s) => ({ ...s, x: r1(s.x), y: r1(s.y), s: r1(s.s) })),
+    c: layer.c.map((k) => ({ ...k, x: r1(k.x), y: r1(k.y) })),
   });
 }
 
-export const isEmptyLayer = (l: LayerData) => l.s.length === 0 && l.x.length === 0 && l.e.length === 0;
+export const isEmptyLayer = (l: LayerData) =>
+  l.s.length === 0 && l.x.length === 0 && l.e.length === 0 && l.c.length === 0;
 
 /** Squared distance from point to segment — used by the eraser's hit test. */
 function distToSegmentSq(px: number, py: number, ax: number, ay: number, bx: number, by: number) {

@@ -1,6 +1,10 @@
-import { Eraser, Hand, Highlighter, Pen, Smile, Type, Redo2, Undo2, Hand as FingerIcon } from "lucide-react";
+import {
+  Eraser, Hand, Highlighter, MessageSquarePlus, Pen, Smile, Type, Redo2, Undo2,
+  Hand as FingerIcon,
+} from "lucide-react";
 import type { ToolState } from "./PageCanvas";
 import { HIGHLIGHTER_COLORS, PEN_COLORS, STAMPS, TEACHER_COLORS, type ToolKind } from "../lib/ink";
+import type { ZoomMode } from "./NotebookSurface";
 import { cn } from "../lib/utils";
 import type { SaveStatus } from "../lib/autosave";
 
@@ -15,11 +19,13 @@ interface Props {
   canRedo?: boolean;
   status?: SaveStatus;
   teacherPalette?: boolean;
-  zoom: number;
-  onZoomChange: (z: number) => void;
+  /** Adds the pinned-comment tool (teachers responding to student work). */
+  allowComments?: boolean;
+  zoom: ZoomMode;
+  onZoomChange: (z: ZoomMode) => void;
 }
 
-const TOOLS: { kind: ToolKind; icon: typeof Pen; label: string }[] = [
+const BASE_TOOLS: { kind: ToolKind; icon: typeof Pen; label: string }[] = [
   { kind: "pen", icon: Pen, label: "Pen" },
   { kind: "highlighter", icon: Highlighter, label: "Highlighter" },
   { kind: "eraser", icon: Eraser, label: "Eraser" },
@@ -28,10 +34,25 @@ const TOOLS: { kind: ToolKind; icon: typeof Pen; label: string }[] = [
   { kind: "select", icon: Hand, label: "Scroll only" },
 ];
 
+const COMMENT_TOOL = { kind: "comment" as ToolKind, icon: MessageSquarePlus, label: "Add comment" };
+
+const ZOOM_OPTIONS: { value: string; label: string }[] = [
+  { value: "page", label: "Fit page" },
+  { value: "width", label: "Fit width" },
+  { value: "0.75", label: "75%" },
+  { value: "1", label: "100%" },
+  { value: "1.25", label: "125%" },
+  { value: "1.5", label: "150%" },
+  { value: "2", label: "200%" },
+];
+
 export default function InkToolbar({
   tool, onToolChange, fingerDraw, onFingerDrawChange,
-  onUndo, onRedo, canUndo, canRedo, status, teacherPalette, zoom, onZoomChange,
+  onUndo, onRedo, canUndo, canRedo, status, teacherPalette, allowComments, zoom, onZoomChange,
 }: Props) {
+  const TOOLS = allowComments
+    ? [...BASE_TOOLS.slice(0, 5), COMMENT_TOOL, BASE_TOOLS[5]]
+    : BASE_TOOLS;
   const colors = tool.kind === "highlighter"
     ? HIGHLIGHTER_COLORS
     : teacherPalette ? TEACHER_COLORS : PEN_COLORS;
@@ -143,13 +164,16 @@ export default function InkToolbar({
         </div>
 
         <select
-          value={zoom}
-          onChange={(e) => onZoomChange(Number(e.target.value))}
+          value={String(zoom)}
+          onChange={(e) => {
+            const v = e.target.value;
+            onZoomChange(v === "page" || v === "width" ? v : Number(v));
+          }}
           className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-600"
           aria-label="Zoom"
         >
-          {[0.5, 0.75, 1, 1.25, 1.5, 2].map((z) => (
-            <option key={z} value={z}>{Math.round(z * 100)}%</option>
+          {ZOOM_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
 

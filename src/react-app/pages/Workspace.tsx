@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { api, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { useSession } from "../lib/session";
-import NotebookSurface from "../components/NotebookSurface";
+import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { ErrorNote, Spinner, FlingBadge } from "../components/Shell";
@@ -55,7 +55,7 @@ export default function Workspace() {
     try { localStorage.setItem(FINGER_KEY, fingerDraw ? "1" : "0"); } catch { /* ignore */ }
   }, [fingerDraw]);
 
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState<ZoomMode>("page");
   const [visiblePage, setVisiblePage] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -218,6 +218,7 @@ export default function Workspace() {
           tool={tool}
           fingerDraw={fingerDraw}
           zoom={zoom}
+          authorName={user?.name}
           fieldsEditable={!locked}
           onLayerChange={work.setLayer}
           onFieldChange={work.setFieldValue}

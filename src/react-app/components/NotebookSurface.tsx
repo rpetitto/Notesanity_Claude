@@ -25,6 +25,13 @@ export function buildLayerMaps(layers: LayerRec[]) {
   return { student, teacher, revs };
 }
 
+/**
+ * "page" fits a whole page in view (the default when working through an
+ * assignment), "width" fills the available width, a number is a multiplier of
+ * fit-width.
+ */
+export type ZoomMode = "page" | "width" | number;
+
 interface Props {
   notebookId: string;
   pages: PageRec[];
@@ -35,7 +42,8 @@ interface Props {
   writeTarget: "student" | "teacher" | null;
   tool: ToolState;
   fingerDraw: boolean;
-  zoom: number;
+  zoom: ZoomMode;
+  authorName?: string;
   fieldsEditable: boolean;
   onLayerChange: (pageId: string, layer: LayerData) => void;
   onFieldChange: (fieldId: string, value: string) => void;
@@ -46,31 +54,36 @@ interface Props {
 
 export default function NotebookSurface({
   notebookId, pages, fields, studentLayers, teacherLayers, fieldValues,
-  writeTarget, tool, fingerDraw, zoom, fieldsEditable,
+  writeTarget, tool, fingerDraw, zoom, authorName, fieldsEditable,
   onLayerChange, onFieldChange, onVisiblePageChange, scrollRef, header,
 }: Props) {
   const innerRef = useRef<HTMLDivElement>(null);
   const containerRef = scrollRef ?? innerRef;
-  const [containerWidth, setContainerWidth] = useState(0);
+  const [box, setBox] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => setContainerWidth(el.clientWidth);
+    const measure = () => setBox({ width: el.clientWidth, height: el.clientHeight });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, [containerRef]);
 
-  // Fit the widest page to the available width, then apply the user's zoom.
-  const baseScale = useMemo(() => {
+  const scale = useMemo(() => {
     const widest = pages.reduce((m, p) => Math.max(m, p.width), 0) || 612;
-    const usable = Math.max(280, containerWidth - 48);
-    return Math.min(1.6, usable / widest);
-  }, [pages, containerWidth]);
-
-  const scale = baseScale * zoom;
+    const tallest = pages.reduce((m, p) => Math.max(m, p.height), 0) || 792;
+    const usableW = Math.max(280, box.width - 48);
+    const fitWidth = Math.min(1.6, usableW / widest);
+    if (zoom === "width") return fitWidth;
+    if (zoom === "page") {
+      // Leave room for the page caption and the gap between pages.
+      const usableH = Math.max(240, box.height - 76);
+      return Math.max(0.15, Math.min(fitWidth, usableH / tallest));
+    }
+    return fitWidth * zoom;
+  }, [pages, box, zoom]);
 
   const fieldsByPage = useMemo(() => {
     const map: Record<string, FieldRec[]> = {};
@@ -145,6 +158,7 @@ export default function NotebookSurface({
                 tool={tool}
                 fingerDraw={fingerDraw}
                 fieldsEditable={fieldsEditable}
+                authorName={authorName}
               />
             </LazyPage>
           </div>

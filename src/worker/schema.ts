@@ -222,3 +222,16 @@ migrate("001_core", async () => {
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_submissions_assignment ON submissions(assignment_id)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_submissions_student ON submissions(student_id)`).run();
 });
+
+/**
+ * Page grouping — lets a teacher label runs of pages ("Warm-up", "Lab", "Homework")
+ * in the notebook's page list. Purely organisational: grouping never moves a page
+ * or touches the UUID student work is anchored to.
+ */
+migrate("002_page_groups", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(pages)`).all<{ name: string }>();
+  const has = (name: string) => (cols.results ?? []).some((c) => c.name === name);
+  if (!has("group_name")) {
+    await db.prepare(`ALTER TABLE pages ADD COLUMN group_name TEXT NOT NULL DEFAULT ''`).run();
+  }
+});

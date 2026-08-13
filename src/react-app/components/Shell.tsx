@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { BookOpen, GraduationCap, LayoutGrid, LogOut, Settings } from "lucide-react";
+import { BookOpen, ClipboardList, GraduationCap, LayoutGrid, LogOut, Settings } from "lucide-react";
 import { signOutHref, useSession } from "../lib/session";
 import { cn, initials } from "../lib/utils";
 
@@ -61,6 +61,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
   const nav = user?.role === "teacher"
     ? [
         { to: "/classes", label: "Classes", icon: LayoutGrid },
+        { to: "/assignments", label: "Assignments", icon: ClipboardList },
         { to: "/settings", label: "Settings", icon: Settings },
       ]
     : [
