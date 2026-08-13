@@ -1,0 +1,186 @@
+import { auth, db } from "flingit";
+import type { Context } from "hono";
+
+export const uid = () => crypto.randomUUID();
+export const now = () => new Date().toISOString();
+
+export interface AppUser {
+  id: string;
+  org_id: string;
+  email: string;
+  name: string;
+  picture: string | null;
+  role: "teacher" | "student" | "pending";
+  is_admin: number;
+}
+
+export interface Org {
+  id: string;
+  name: string;
+  primary_domain: string;
+  teacher_domains: string;
+  student_domains: string;
+}
+
+export class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+/** Route params are typed as possibly-undefined; every caller here requires one. */
+export function param(c: Context, name: string): string {
+  const value = c.req.param(name);
+  if (!value) throw new HttpError(400, `Missing ${name} parameter`);
+  return value;
+}
+
+const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";
+const csv = (s: string) =>
+  s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+
+/**
+ * Resolve the signed-in Google account to a Notesanity user row.
+ *
+ * The very first person to sign in bootstraps the org from their own email
+ * domain and becomes its admin + a teacher. Everyone after that must share one
+ * of the org's configured domains, which is what keeps the app scoped to a
+ * single school without any manual provisioning step.
+ */
+export async function currentUser(c: Context): Promise<AppUser | null> {
+  const account = await auth.user(c);
+  if (!account?.email) return null;
+
+  const email = account.email.toLowerCase();
+  const existing = await db
+    .prepare(`SELECT * FROM users WHERE email = ?`)
+    .bind(email)
+    .first<AppUser>();
+
+  if (existing) {
+    await db
+      .prepare(`UPDATE users SET name = ?, picture = ?, last_seen_at = ? WHERE id = ?`)
+      .bind(account.name ?? existing.name, account.picture ?? existing.picture, now(), existing.id)
+      .run();
+    return { ...existing, name: account.name ?? existing.name };
+  }
+
+  const domain = domainOf(email);
+  if (!domain) throw new HttpError(403, "Your account has no email domain.");
+
+  const org = await db.prepare(`SELECT * FROM orgs LIMIT 1`).first<Org>();
+
+  // Bootstrap: first ever sign-in creates the org and becomes admin/teacher.
+  if (!org) {
+    const orgId = uid();
+    await db
+      .prepare(
+        `INSERT INTO orgs (id, name, primary_domain, teacher_domains, student_domains, created_at)
+         VALUES (?, ?, ?, '', '', ?)`,
+      )
+      .bind(orgId, domain, domain, now())
+      .run();
+    const userId = uid();
+    await db
+      .prepare(
+        `INSERT INTO users (id, org_id, email, name, picture, role, is_admin, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, 'teacher', 1, ?, ?)`,
+      )
+      .bind(userId, orgId, email, account.name ?? email, account.picture ?? null, now(), now())
+      .run();
+    return {
+      id: userId, org_id: orgId, email, name: account.name ?? email,
+      picture: account.picture ?? null, role: "teacher", is_admin: 1,
+    };
+  }
+
+  const allowed = new Set([
+    org.primary_domain.toLowerCase(),
+    ...csv(org.teacher_domains),
+    ...csv(org.student_domains),
+  ]);
+  if (!allowed.has(domain)) {
+    throw new HttpError(
+      403,
+      `Notesanity is limited to ${org.primary_domain}. Your account (${email}) isn't on an approved domain — ask your Notesanity admin to add it.`,
+    );
+  }
+
+  // Role by domain when the school separates staff and student domains,
+  // otherwise the user picks on first run.
+  let role: AppUser["role"] = "pending";
+  if (csv(org.teacher_domains).includes(domain)) role = "teacher";
+  else if (csv(org.student_domains).includes(domain)) role = "student";
+
+  const userId = uid();
+  await db
+    .prepare(
+      `INSERT INTO users (id, org_id, email, name, picture, role, is_admin, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    )
+    .bind(userId, org.id, email, account.name ?? email, account.picture ?? null, role, now(), now())
+    .run();
+
+  return {
+    id: userId, org_id: org.id, email, name: account.name ?? email,
+    picture: account.picture ?? null, role, is_admin: 0,
+  };
+}
+
+export async function requireUser(c: Context): Promise<AppUser> {
+  const user = await currentUser(c);
+  if (!user) throw new HttpError(401, "Not signed in");
+  return user;
+}
+
+export async function requireTeacher(c: Context): Promise<AppUser> {
+  const user = await requireUser(c);
+  if (user.role !== "teacher") throw new HttpError(403, "Teacher access required");
+  return user;
+}
+
+/** Throws unless the user teaches this class. */
+export async function requireClassTeacher(c: Context, classId: string): Promise<AppUser> {
+  const user = await requireUser(c);
+  const cls = await db
+    .prepare(`SELECT * FROM classes WHERE id = ?`)
+    .bind(classId)
+    .first<any>();
+  if (!cls) throw new HttpError(404, "Class not found");
+  if (cls.owner_id === user.id) return user;
+  const enrolled = await db
+    .prepare(`SELECT id FROM enrollments WHERE class_id = ? AND user_id = ? AND role = 'teacher' AND status = 'active'`)
+    .bind(classId, user.id)
+    .first();
+  if (!enrolled) throw new HttpError(403, "You don't teach this class");
+  return user;
+}
+
+/** Throws unless the user teaches this class or is an active student in it. */
+export async function requireClassMember(c: Context, classId: string): Promise<{ user: AppUser; isTeacher: boolean }> {
+  const user = await requireUser(c);
+  const cls = await db.prepare(`SELECT * FROM classes WHERE id = ?`).bind(classId).first<any>();
+  if (!cls) throw new HttpError(404, "Class not found");
+  if (cls.owner_id === user.id) return { user, isTeacher: true };
+  const enrolled = await db
+    .prepare(`SELECT role FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`)
+    .bind(classId, user.id)
+    .first<{ role: string }>();
+  if (!enrolled) throw new HttpError(403, "You're not in this class");
+  return { user, isTeacher: enrolled.role === "teacher" };
+}
+
+/** Wrap a handler so thrown HttpErrors become clean JSON responses. */
+export function handler(fn: (c: Context) => Promise<Response>) {
+  return async (c: Context) => {
+    try {
+      return await fn(c);
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        return c.json({ error: err.message }, err.status as any);
+      }
+      console.error("Unhandled error:", err?.stack || err);
+      return c.json({ error: err?.message ?? "Server error" }, 500);
+    }
+  };
+}
