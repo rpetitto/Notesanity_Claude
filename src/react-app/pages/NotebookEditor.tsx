@@ -91,6 +91,32 @@ const FIELD_TYPE_LABEL: Record<string, string> = {
 };
 const fieldTypeLabel = (t: string) => FIELD_TYPE_LABEL[t] ?? t;
 
+interface FieldDraft { label: string; options: string; prompt: string; content: string }
+
+/** Only the parts this field type actually shows — an omitted key means "leave it". */
+function fieldPatch(f: FieldRow, d: FieldDraft): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!["image", "audio", "richtext", "figure"].includes(f.type)) out.label = d.label;
+  if (f.type === "choice") out.options = d.options.split("\n").map((v) => v.trim()).filter(Boolean);
+  if (f.type === "prompt") out.prompt = d.prompt;
+  if (f.type === "richtext") out.content = d.content;
+  return out;
+}
+
+function fieldIsDirty(f: FieldRow, d: FieldDraft): boolean {
+  const p = fieldPatch(f, d);
+  if ("label" in p && d.label !== (f.label ?? "")) return true;
+  if ("options" in p && JSON.stringify(p.options) !== JSON.stringify(safeOptions(f.options))) return true;
+  if ("prompt" in p && d.prompt !== (f.prompt ?? "")) return true;
+  if ("content" in p && d.content !== (f.content ?? "")) return true;
+  return false;
+}
+
+/** Options are stored as a JSON array; treat anything unparseable as empty. */
+function safeOptions(raw?: string): string[] {
+  try { const v = JSON.parse(raw || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
 const MIN_FIELD = 8;
 
 /** Sensible default size when a teacher taps rather than drags to place a field. */
@@ -860,7 +886,8 @@ export default function NotebookEditor() {
             field={(query.data.fields ?? []).find((f) => f.id === selectedField)}
             notebookId={notebookId}
             onClose={() => setSelectedField(null)}
-            onSave={(patch) => updateField.mutate({ id: selectedField, ...patch })}
+            onSave={(patch, fieldId) => updateField.mutate({ id: fieldId ?? selectedField, ...patch })}
+            saving={updateField.isPending}
             onDelete={() => deleteField.mutate(selectedField)}
             onInvalidate={invalidate}
           />
@@ -1294,8 +1321,8 @@ function FieldLayer({
  * being edited changes.
  */
 function RichTextEditor({
-  fieldId, value, onSave,
-}: { fieldId: string; value: string; onSave: (html: string) => void }) {
+  fieldId, value, onChange,
+}: { fieldId: string; value: string; onChange: (html: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const loadedFor = useRef<string | null>(null);
 
@@ -1309,8 +1336,8 @@ function RichTextEditor({
   const exec = (command: string, arg?: string) => {
     ref.current?.focus();
     document.execCommand(command, false, arg);
-    // Formatting doesn't blur, so nothing else would persist the change.
-    onSave(ref.current?.innerHTML ?? "");
+    // Formatting doesn't blur, so nothing else would pick the change up.
+    onChange(ref.current?.innerHTML ?? "");
   };
 
   const BUTTONS: { cmd: string; arg?: string; label: string; className?: string }[] = [
@@ -1347,7 +1374,7 @@ function RichTextEditor({
         ref={ref}
         contentEditable
         suppressContentEditableWarning
-        onBlur={() => onSave(ref.current?.innerHTML ?? "")}
+        onBlur={() => onChange(ref.current?.innerHTML ?? "")}
         className="rich-text max-h-64 min-h-24 overflow-y-auto rounded-[12px] border-2 border-pine/25 bg-white p-2 outline-none focus:border-pine"
       />
       <p className="mt-1 text-[14px] text-pine/55">
@@ -1406,12 +1433,14 @@ function MoreMenu({ items }: { items: { label: string; icon: typeof Plus; onClic
 }
 
 function FieldInspector({
-  field, notebookId, onClose, onSave, onDelete, onInvalidate,
+  field, notebookId, onClose, onSave, onDelete, onInvalidate, saving,
 }: {
   field?: FieldRow;
   notebookId: string;
   onClose: () => void;
-  onSave: (patch: any) => void;
+  onSave: (patch: any, fieldId?: string) => void;
+  /** True while the field PATCH is in flight, so Save can say so. */
+  saving?: boolean;
   onDelete: () => void;
   onInvalidate: () => void;
 }) {
@@ -1420,6 +1449,9 @@ function FieldInspector({
     try { return (JSON.parse(field?.options || "[]") as string[]).join("\n"); } catch { return ""; }
   });
   const [prompt, setPrompt] = useState(field?.prompt ?? "");
+  const [content, setContent] = useState(field?.content ?? "");
+  /** Bumped by Cancel to remount the rich text editor with the reverted value. */
+  const [revertNonce, setRevertNonce] = useState(0);
   const [mediaBump, setMediaBump] = useState(0);
   const [mediaBusy, setMediaBusy] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement>(null);
@@ -1431,12 +1463,42 @@ function FieldInspector({
   // every such change would blow away text the teacher is mid-typing but
   // hasn't blurred out of yet, so only resync when the selected field itself
   // actually changes.
+  /**
+   * Pending edits survive leaving the inspector, however you leave it.
+   *
+   * Switching to another field is handled below, but *deselecting* unmounts
+   * this component entirely, so that path needs its own cleanup or the edit
+   * would vanish with the panel.
+   */
+  const pending = useRef<{ field?: FieldRow; draft: FieldDraft; save: typeof onSave }>({
+    field, draft: { label, options, prompt, content }, save: onSave,
+  });
+  pending.current = { field, draft: { label, options, prompt, content }, save: onSave };
+  useEffect(() => () => {
+    const { field: f, draft: d, save } = pending.current;
+    if (f && fieldIsDirty(f, d)) save(fieldPatch(f, d), f.id);
+  }, []);
+
+  const lastField = useRef<FieldRow | undefined>(field);
   useEffect(() => {
-    if (field?.id === syncedFieldId.current) return;
+    if (field?.id === syncedFieldId.current) { lastField.current = field; return; }
+    // Selecting another field is not "discard": nobody types a label and then
+    // clicks away meaning to lose it. Pending edits go with the field they
+    // belong to, and Cancel stays the way to actually throw them away.
+    const prev = lastField.current;
+    if (prev && prev.id === syncedFieldId.current) {
+      const pending = { label, options, prompt, content };
+      if (fieldIsDirty(prev, pending)) onSave(fieldPatch(prev, pending), prev.id);
+    }
     syncedFieldId.current = field?.id;
+    lastField.current = field;
     setLabel(field?.label ?? "");
     setPrompt(field?.prompt ?? "");
-    try { setOptions((JSON.parse(field?.options || "[]") as string[]).join("\n")); } catch { setOptions(""); }
+    setContent(field?.content ?? "");
+    setOptions(safeOptions(field?.options).join("\n"));
+    // Only the identity of the selected field should drive a resync; including
+    // the draft here would reset it on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [field]);
 
   useEffect(() => {
@@ -1444,6 +1506,17 @@ function FieldInspector({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const draft: FieldDraft = { label, options, prompt, content };
+  const dirty = !!field && fieldIsDirty(field, draft);
+
+  const revert = () => {
+    setLabel(field?.label ?? "");
+    setPrompt(field?.prompt ?? "");
+    setContent(field?.content ?? "");
+    setOptions(safeOptions(field?.options).join("\n"));
+    setRevertNonce((n) => n + 1);
+  };
 
   if (!field) return null;
 
@@ -1491,7 +1564,6 @@ function FieldInspector({
           <Input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            onBlur={() => onSave({ label })}
             className="mt-1 text-[16px]"
             placeholder="e.g. Your answer"
           />
@@ -1504,7 +1576,6 @@ function FieldInspector({
           <Textarea
             value={options}
             onChange={(e) => setOptions(e.target.value)}
-            onBlur={() => onSave({ options: options.split("\n").map((s) => s.trim()).filter(Boolean) })}
             rows={4}
             className="mt-1 text-[16px]"
           />
@@ -1515,9 +1586,10 @@ function FieldInspector({
         <>
           <label className="label-caps mt-4 block text-pine/70">Text</label>
           <RichTextEditor
+            key={`${field.id}:${revertNonce}`}
             fieldId={field.id}
-            value={field.content ?? ""}
-            onSave={(html) => onSave({ content: html })}
+            value={content}
+            onChange={setContent}
           />
         </>
       )}
@@ -1573,7 +1645,6 @@ function FieldInspector({
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            onBlur={() => onSave({ prompt })}
             rows={4}
             placeholder="e.g. Explain your reasoning in 2-3 sentences."
             className="mt-1 text-[16px]"
@@ -1644,6 +1715,28 @@ function FieldInspector({
           Students will see a record button here and can record a short answer in place.
         </p>
       )}
+
+      {/* Typed settings wait for Save. Dragging and resizing on the page commit
+          as they happen — direct manipulation you can already see the result of,
+          where a confirm step would only get in the way. */}
+      <div className="sticky bottom-0 -mx-4 mt-4 border-t-2 border-pine/12 bg-white px-4 pb-1 pt-3">
+        {dirty && (
+          <p className="mb-2 text-[16px] font-bold text-[#8a6a1f]">Unsaved changes</p>
+        )}
+        <div className="flex gap-2">
+          <Button
+            variant="primary"
+            className="flex-1"
+            disabled={!dirty || saving}
+            onClick={() => field && onSave(fieldPatch(field, draft))}
+          >
+            <Check className="h-4 w-4" strokeWidth={2.5} /> {saving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="secondary" disabled={!dirty || saving} onClick={revert}>
+            Cancel
+          </Button>
+        </div>
+      </div>
 
       <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[16px] leading-relaxed text-pine/70">
         Moving or resizing a field keeps every answer students have already typed into it.
