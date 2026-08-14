@@ -123,3 +123,33 @@ a {
   height: 100vh;
   height: 100dvh;
 }
+
+/**
+ * Teacher-authored rich text on a page.
+ *
+ * Tailwind's reset flattens headings and lists, which is right everywhere else
+ * but wrong here: this is prose a teacher wrote and expects to look like prose.
+ * Sizes are in em so a block scales with whatever the page is set to.
+ */
+.rich-text { font-size: 15px; line-height: 1.4; }
+.rich-text p { margin: 0 0 0.5em; }
+.rich-text p:last-child { margin-bottom: 0; }
+.rich-text h1 { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 1.5em; margin: 0 0 0.4em; }
+.rich-text h2 { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 1.25em; margin: 0 0 0.4em; }
+.rich-text h3 { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 1.1em; margin: 0 0 0.35em; }
+.rich-text ul,
+.rich-text ol { margin: 0 0 0.5em; padding-left: 1.4em; }
+.rich-text ul { list-style: disc; }
+.rich-text ol { list-style: decimal; }
+.rich-text li { margin: 0.15em 0; }
+.rich-text strong, .rich-text b { font-weight: 700; }
+.rich-text em, .rich-text i { font-style: italic; }
+.rich-text u { text-decoration: underline; }
+.rich-text s { text-decoration: line-through; }
+.rich-text blockquote {
+  margin: 0 0 0.5em;
+  padding-left: 0.7em;
+  border-left: 3px solid var(--color-pine);
+  opacity: 0.85;
+}
+.rich-text a { color: var(--color-pine); text-decoration: underline; }

@@ -445,3 +445,20 @@ migrate("011_blank_pages", async () => {
     await db.prepare(`ALTER TABLE pages ADD COLUMN pattern_color TEXT NOT NULL DEFAULT ''`).run();
   }
 });
+
+/**
+ * Teacher-authored page content.
+ *
+ * Until now everything a teacher placed on a page was something a student had
+ * to fill in. `richtext` and `figure` are content instead: formatted text and
+ * pictures that belong to the page itself and take no answer. `content` holds
+ * the sanitised markup for `richtext`; `figure` reuses the existing `media_key`
+ * that prompt illustrations already use.
+ */
+migrate("012_page_content", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(fields)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("content")) {
+    await db.prepare(`ALTER TABLE fields ADD COLUMN content TEXT NOT NULL DEFAULT ''`).run();
+  }
+});

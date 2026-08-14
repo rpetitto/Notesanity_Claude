@@ -1,10 +1,20 @@
 import { app, db, storage } from "flingit";
 import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+import { sanitizeRichText } from "../lib/richtext";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
-export const FIELD_TYPES = ["text", "checkbox", "choice", "prompt", "image", "audio"];
+/** Everything a teacher can place on a page. */
+export const FIELD_TYPES = [
+  // Things a student fills in.
+  "text", "checkbox", "choice", "prompt", "image", "audio",
+  // Things the teacher writes or shows, which take no answer.
+  "richtext", "figure",
+];
+
+/** The subset a student is expected to complete — what progress is measured against. */
+export const INPUT_FIELD_TYPES = ["text", "checkbox", "choice", "prompt", "image", "audio"];
 
 /** Teacher-or-enrolled-student access to a notebook, resolved via its class. */
 async function notebookAccess(c: any, notebookId: string) {
@@ -88,7 +98,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
     .bind(nb.id)
     .all();
   const fields = await db
-    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, media_key IS NOT NULL AS has_media
+    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, content, media_key IS NOT NULL AS has_media
          FROM fields WHERE notebook_id = ? AND archived = 0`)
     .bind(nb.id)
     .all();
@@ -473,7 +483,7 @@ app.post("/api/notebooks/:id/fields", handler(async (c) => {
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
   const body = await c.req.json<{
     pageId: string; type: string; x: number; y: number; w: number; h: number;
-    label?: string; options?: string[]; prompt?: string;
+    label?: string; options?: string[]; prompt?: string; content?: string;
   }>();
   const page = await db
     .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
@@ -484,12 +494,13 @@ app.post("/api/notebooks/:id/fields", handler(async (c) => {
   const id = uid();
   await db
     .prepare(
-      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id, nb.id, body.pageId, body.type, body.x, body.y, body.w, body.h,
-      body.label ?? "", JSON.stringify(body.options ?? []), body.prompt ?? "", now(), now(),
+      body.label ?? "", JSON.stringify(body.options ?? []), body.prompt ?? "",
+      sanitizeRichText(body.content ?? ""), now(), now(),
     )
     .run();
   await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
@@ -508,13 +519,15 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
   const b = await c.req.json<any>();
   await db
     .prepare(
-      `UPDATE fields SET x = ?, y = ?, w = ?, h = ?, label = ?, options = ?, prompt = ?, archived = ?, updated_at = ?
+      `UPDATE fields SET x = ?, y = ?, w = ?, h = ?, label = ?, options = ?, prompt = ?, content = ?, archived = ?, updated_at = ?
         WHERE id = ?`,
     )
     .bind(
       b.x ?? field.x, b.y ?? field.y, b.w ?? field.w, b.h ?? field.h,
       b.label ?? field.label, b.options ? JSON.stringify(b.options) : field.options,
       b.prompt ?? field.prompt ?? "",
+      // Sanitised on the way in, so what is stored is already safe to render.
+      b.content === undefined ? field.content ?? "" : sanitizeRichText(b.content),
       b.archived === undefined ? field.archived : b.archived ? 1 : 0, now(), field.id,
     )
     .run();
@@ -524,7 +537,7 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
 
 const MAX_FIELD_MEDIA_BYTES = 6 * 1024 * 1024;
 
-/** Attach the teacher's illustration to a prompt field. */
+/** Attach a teacher-supplied image — a prompt illustration or a `figure` block. */
 app.post("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
   const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
@@ -538,8 +551,8 @@ app.post("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
   const form = await c.req.parseBody();
   const file = form["file"] as File | undefined;
   if (!file) throw new HttpError(400, "No image uploaded");
-  if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) throw new HttpError(400, "Prompt images must be an image file");
-  if (file.size > MAX_FIELD_MEDIA_BYTES) throw new HttpError(413, "Prompt images are limited to 6MB");
+  if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) throw new HttpError(400, "That needs to be an image file");
+  if (file.size > MAX_FIELD_MEDIA_BYTES) throw new HttpError(413, "Images are limited to 6MB");
 
   const key = `notebooks/${nb.id}/fields/${fieldId}-${uid()}`;
   await storage.put(key, await file.arrayBuffer(), { contentType: file.type });

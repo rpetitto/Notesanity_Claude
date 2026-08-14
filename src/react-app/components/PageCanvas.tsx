@@ -49,8 +49,11 @@ import { cn } from "../lib/utils";
  * a plain `text`/`checkbox`/`choice` field from the server still satisfies this.
  */
 export type FieldLike = Omit<FieldRec, "type"> & {
-  type: FieldRec["type"] | "prompt" | "image" | "audio";
+  type: FieldRec["type"] | "prompt" | "image" | "audio" | "richtext" | "figure";
   prompt?: string;
+  /** Sanitised markup for a `richtext` block. Safe to render as-is: the server
+   * cleans it on write, so nothing unclean is ever stored. */
+  content?: string;
   has_media?: number | boolean;
 };
 
@@ -723,6 +726,46 @@ function FieldControl({
           style={{ fontSize: Math.max(11, Math.min(16, field.h * scale * 0.16)), lineHeight: 1.2 }}
         />
       </div>
+    );
+  }
+
+  // ---- teacher-authored page content: shown to everyone, answered by no one ----
+
+  if (field.type === "richtext") {
+    return (
+      <div
+        className="pointer-events-none absolute overflow-hidden"
+        style={style}
+        title={field.label}
+      >
+        <div
+          className="rich-text h-full w-full overflow-hidden text-pine"
+          // Already sanitised server-side against a strict allowlist; see
+          // worker/lib/richtext.ts for what survives and why.
+          dangerouslySetInnerHTML={{ __html: field.content ?? "" }}
+        />
+      </div>
+    );
+  }
+
+  if (field.type === "figure") {
+    if (!field.has_media) {
+      return (
+        <div
+          className="pointer-events-none absolute flex items-center justify-center rounded border-2 border-dashed border-pine/30 bg-oat/60 text-[14px] text-pine/50"
+          style={style}
+        >
+          {editable ? "Add a picture" : ""}
+        </div>
+      );
+    }
+    return (
+      <img
+        src={`/api/notebooks/${notebookId}/fields/${field.id}/media`}
+        alt={field.label || ""}
+        className="pointer-events-none absolute object-contain"
+        style={style}
+      />
     );
   }
 

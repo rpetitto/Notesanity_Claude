@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
-  FolderPlus, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
-  Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
+  FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
+  PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type FieldRec, type PageRec } from "../lib/api";
@@ -30,7 +30,7 @@ const BUTTON_ROW =
   "font-display text-[17px] font-bold text-pine shadow-[4px_4px_0_0_var(--color-pine)] " +
   "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none";
 
-type FieldTool = "none" | "text" | "checkbox" | "choice" | "prompt" | "image" | "audio";
+type FieldTool = "none" | "text" | "checkbox" | "choice" | "prompt" | "image" | "audio" | "richtext" | "figure";
 
 /** Alias kept for readability at the call sites below — `FieldRec` already
  * covers the new prompt/image/audio types and the `prompt`/`has_media` columns. */
@@ -78,6 +78,19 @@ interface NotebookAssignment {
   total: number;
 }
 
+/** What each field type is called in the interface, where the raw name reads badly. */
+const FIELD_TYPE_LABEL: Record<string, string> = {
+  text: "Text box",
+  checkbox: "Checkbox",
+  choice: "Dropdown",
+  prompt: "Prompt",
+  image: "Image upload",
+  audio: "Audio recording",
+  richtext: "Rich text",
+  figure: "Picture",
+};
+const fieldTypeLabel = (t: string) => FIELD_TYPE_LABEL[t] ?? t;
+
 const MIN_FIELD = 8;
 
 /** Sensible default size when a teacher taps rather than drags to place a field. */
@@ -88,6 +101,8 @@ const DEFAULT_FIELD_SIZE: Record<Exclude<FieldTool, "none">, { w: number; h: num
   prompt: { w: 260, h: 120 },
   image: { w: 180, h: 140 },
   audio: { w: 220, h: 56 },
+  richtext: { w: 300, h: 110 },
+  figure: { w: 220, h: 165 },
 };
 
 export default function NotebookEditor() {
@@ -237,8 +252,11 @@ export default function NotebookEditor() {
   };
 
   const createField = useMutation({
-    mutationFn: (body: any) => api.post(`/api/notebooks/${notebookId}/fields`, body),
-    onSuccess: () => invalidate(),
+    mutationFn: (body: any) => api.post<{ field: { id: string } }>(`/api/notebooks/${notebookId}/fields`, body),
+    // Select what was just placed. A rich text block or a picture is empty
+    // until its inspector is open, so dropping one and being handed nothing to
+    // type into is a dead end.
+    onSuccess: (res) => { invalidate(); setSelectedField(res.field.id); },
     onError: (e: Error) => toast.error(e.message),
   });
   const addBlankPages = useMutation({
@@ -583,7 +601,7 @@ export default function NotebookEditor() {
       )}
 
       <div className="flex flex-wrap items-center gap-2 border-b-2 border-pine/12 bg-white px-3 py-2">
-        <span className="label-caps text-pine/60">Add field:</span>
+        <span className="label-caps text-pine/60">Student fills in:</span>
         {([
           { k: "text", label: "Text box", icon: TypeIcon },
           { k: "checkbox", label: "Checkbox", icon: CheckSquare },
@@ -591,6 +609,23 @@ export default function NotebookEditor() {
           { k: "prompt", label: "Prompt", icon: MessageSquareText },
           { k: "image", label: "Image", icon: ImagePlus },
           { k: "audio", label: "Audio", icon: Mic },
+        ] as const).map(({ k, label, icon: Icon }) => (
+          <button
+            key={k}
+            onClick={() => { setAnnotateMode(false); setTool(tool === k ? "none" : k); }}
+            className={cn(
+              "inline-flex h-11 items-center gap-2 rounded-full border-2 px-4 font-display text-[16px] font-bold transition-colors",
+              tool === k ? "border-pine bg-mint text-pine" : "border-pine/20 text-pine/70 hover:bg-oat",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" strokeWidth={2.5} /> {label}
+          </button>
+        ))}
+        <span className="mx-1 h-5 w-px bg-pine/20" aria-hidden />
+        <span className="label-caps text-pine/60">You add:</span>
+        {([
+          { k: "richtext", label: "Rich text", icon: PenLine },
+          { k: "figure", label: "Picture", icon: ImageIcon },
         ] as const).map(({ k, label, icon: Icon }) => (
           <button
             key={k}
@@ -1208,7 +1243,7 @@ function FieldLayer({
             }}
           >
             <span className="pointer-events-none absolute -top-5 left-0 whitespace-nowrap rounded bg-pine px-1.5 py-0.5 text-[16px] font-bold text-oat">
-              {f.type}{f.label ? ` · ${f.label}` : ""}
+              {fieldTypeLabel(f.type)}{f.label ? ` · ${f.label}` : ""}
             </span>
             <div
               className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-full border-2 border-white bg-pine"
@@ -1232,6 +1267,82 @@ function FieldLayer({
           style={{ left: draft.x * scale, top: draft.y * scale, width: draft.w * scale, height: draft.h * scale }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * A small WYSIWYG for a rich text block.
+ *
+ * `document.execCommand` is deprecated and still the only thing every browser
+ * implements for contentEditable formatting; a replacement means shipping an
+ * editor framework, which is a lot of weight for bold and bullets.
+ *
+ * The DOM is the source of truth while typing — writing React state back into
+ * a contentEditable on every keystroke would fight the caret — so the value is
+ * read out and saved on blur, and the initial HTML is set only when the field
+ * being edited changes.
+ */
+function RichTextEditor({
+  fieldId, value, onSave,
+}: { fieldId: string; value: string; onSave: (html: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const loadedFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (ref.current && loadedFor.current !== fieldId) {
+      loadedFor.current = fieldId;
+      ref.current.innerHTML = value || "";
+    }
+  }, [fieldId, value]);
+
+  const exec = (command: string, arg?: string) => {
+    ref.current?.focus();
+    document.execCommand(command, false, arg);
+    // Formatting doesn't blur, so nothing else would persist the change.
+    onSave(ref.current?.innerHTML ?? "");
+  };
+
+  const BUTTONS: { cmd: string; arg?: string; label: string; className?: string }[] = [
+    { cmd: "bold", label: "B", className: "font-bold" },
+    { cmd: "italic", label: "I", className: "italic" },
+    { cmd: "underline", label: "U", className: "underline" },
+    { cmd: "formatBlock", arg: "h2", label: "H" },
+    { cmd: "insertUnorderedList", label: "•" },
+    { cmd: "insertOrderedList", label: "1." },
+    { cmd: "removeFormat", label: "⌫" },
+  ];
+
+  return (
+    <div className="mt-1.5">
+      <div className="mb-1.5 flex flex-wrap gap-1">
+        {BUTTONS.map((b) => (
+          <button
+            key={b.label}
+            type="button"
+            // Keep the caret where it is: a toolbar press must not steal focus
+            // out of the text, or the command has no selection to act on.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => exec(b.cmd, b.arg)}
+            className={cn(
+              "h-9 min-w-9 rounded-[8px] border-2 border-pine/20 px-2 text-[15px] text-pine hover:bg-oat",
+              b.className,
+            )}
+          >
+            {b.label}
+          </button>
+        ))}
+      </div>
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        onBlur={() => onSave(ref.current?.innerHTML ?? "")}
+        className="rich-text max-h-64 min-h-24 overflow-y-auto rounded-[12px] border-2 border-pine/25 bg-white p-2 outline-none focus:border-pine"
+      />
+      <p className="mt-1 text-[14px] text-pine/55">
+        Headings, emphasis and lists are kept. Anything else is stripped when it saves.
+      </p>
     </div>
   );
 }
@@ -1314,9 +1425,9 @@ function FieldInspector({
           <ChevronDown className="h-4 w-4" strokeWidth={2.5} />
         </button>
       </div>
-      <p className="mt-1 text-[16px] capitalize text-pine/70">{field.type}</p>
+      <p className="mt-1 text-[16px] text-pine/70">{fieldTypeLabel(field.type)}</p>
 
-      {field.type !== "image" && field.type !== "audio" && (
+      {!["image", "audio", "richtext", "figure"].includes(field.type) && (
         <>
           <label className="label-caps mt-4 block text-pine/70">Label / placeholder</label>
           <Input
@@ -1339,6 +1450,62 @@ function FieldInspector({
             rows={4}
             className="mt-1 text-[16px]"
           />
+        </>
+      )}
+
+      {field.type === "richtext" && (
+        <>
+          <label className="label-caps mt-4 block text-pine/70">Text</label>
+          <RichTextEditor
+            fieldId={field.id}
+            value={field.content ?? ""}
+            onSave={(html) => onSave({ content: html })}
+          />
+        </>
+      )}
+
+      {field.type === "figure" && (
+        <>
+          <label className="label-caps mt-4 block text-pine/70">Picture</label>
+          {field.has_media ? (
+            <div className="mt-1.5">
+              <img
+                src={`/api/notebooks/${notebookId}/fields/${field.id}/media?v=${mediaBump}`}
+                alt=""
+                className="w-full rounded-[12px] border-2 border-pine/20 object-contain"
+              />
+              <div className="mt-1.5 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => mediaInputRef.current?.click()}
+                  disabled={mediaBusy}
+                  className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
+                >
+                  {mediaBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" strokeWidth={2.5} />}
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void removeMedia()}
+                  disabled={mediaBusy}
+                  className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-[16px] text-pine/70 hover:bg-oat disabled:opacity-50"
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2.5} /> Remove
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => mediaInputRef.current?.click()}
+              disabled={mediaBusy}
+              className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
+            >
+              {mediaBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" strokeWidth={2.5} />}
+              Upload picture
+            </button>
+          )}
+          <p className="mt-1.5 text-[14px] text-pine/55">Drag the box on the page to size and place it.</p>
         </>
       )}
 

@@ -61,7 +61,7 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     .bind(nb.id)
     .all();
   const fields = await db
-    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, media_key IS NOT NULL AS has_media
+    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, content, media_key IS NOT NULL AS has_media
          FROM fields WHERE notebook_id = ? AND archived = 0`)
     .bind(nb.id)
     .all();

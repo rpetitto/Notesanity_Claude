@@ -2,6 +2,7 @@ import { app, db } from "flingit";
 import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { logActivity } from "../lib/activity";
+import { INPUT_FIELD_TYPES } from "./notebooks";
 
 /** An empty ink layer still serializes to a few characters, so require real content. */
 const HAS_CONTENT = 24;
@@ -33,13 +34,17 @@ async function pageComponents(
   const fieldsByPage = new Map<string, number>();
   if (pageIds.length === 0) return { fieldsByPage, total: 0, unit: "page" };
   const placeholders = pageIds.map(() => "?").join(",");
+  // Only fields a student answers count. A rich text block or a picture the
+  // teacher placed is page content — counting it would make the denominator
+  // grow every time a teacher explained something.
+  const inputs = INPUT_FIELD_TYPES.map(() => "?").join(",");
   const counted = await db
     .prepare(
       `SELECT page_id, COUNT(*) AS n FROM fields
-        WHERE archived = 0 AND page_id IN (${placeholders})
+        WHERE archived = 0 AND type IN (${inputs}) AND page_id IN (${placeholders})
         GROUP BY page_id`,
     )
-    .bind(...pageIds)
+    .bind(...INPUT_FIELD_TYPES, ...pageIds)
     .all<{ page_id: string; n: number }>();
   for (const row of counted.results ?? []) fieldsByPage.set(row.page_id, row.n);
   let total = 0;
@@ -63,11 +68,12 @@ async function completionFor(
     .prepare(
       `SELECT f.page_id, COUNT(*) AS n FROM field_values v
          JOIN fields f ON f.id = v.field_id
-        WHERE v.instance_id = ? AND f.archived = 0 AND f.page_id IN (${placeholders})
+        WHERE v.instance_id = ? AND f.archived = 0 AND f.type IN (${INPUT_FIELD_TYPES.map(() => "?").join(",")})
+          AND f.page_id IN (${placeholders})
           AND (TRIM(v.value) <> '' OR v.asset_key IS NOT NULL)
         GROUP BY f.page_id`,
     )
-    .bind(instanceId, ...pageIds)
+    .bind(instanceId, ...INPUT_FIELD_TYPES, ...pageIds)
     .all<{ page_id: string; n: number }>();
   const answeredByPage = new Map((answered.results ?? []).map((r) => [r.page_id, r.n]));
 
