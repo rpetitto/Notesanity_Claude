@@ -71,6 +71,8 @@ export interface PageRec {
   width: number;
   height: number;
   label: string;
+  /** Section this page belongs to, "" when ungrouped. */
+  group_name?: string;
   archived?: number;
   /**
    * Set on teacher-inserted blank pages: the ruling to draw instead of a PDF.

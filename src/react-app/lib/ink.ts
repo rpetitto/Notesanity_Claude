@@ -21,6 +21,8 @@ export interface Stroke {
   w: number;
   /** flat [x, y, pressure, x, y, pressure, ...] */
   p: number[];
+  /** When it was drawn, epoch ms. Absent on marks made before this was recorded. */
+  ts?: number;
 }
 
 export interface TextBox {
@@ -32,6 +34,7 @@ export interface TextBox {
   s: number;
   c: string;
   v: string;
+  ts?: number;
 }
 
 export interface Stamp {
@@ -42,6 +45,7 @@ export interface Stamp {
   s: number;
   /** the emoji itself */
   e: string;
+  ts?: number;
 }
 
 /**
@@ -57,6 +61,7 @@ export interface Comment {
   t: string;
   /** author display name, so returned work shows who said it */
   a?: string;
+  ts?: number;
 }
 
 export interface LayerData {
@@ -97,6 +102,9 @@ export function serializeLayer(layer: LayerData): string {
       c: st.c,
       w: r1(st.w),
       p: st.p.map((n, i) => (i % 3 === 2 ? r2(n) : r1(n))),
+      // Rebuilt field by field rather than spread, so anything new has to be
+      // named here or it is silently dropped on the next save.
+      ...(st.ts ? { ts: st.ts } : {}),
     })),
     x: layer.x.map((t) => ({ ...t, x: r1(t.x), y: r1(t.y), w: r1(t.w), s: r1(t.s) })),
     e: layer.e.map((s) => ({ ...s, x: r1(s.x), y: r1(s.y), s: r1(s.s) })),
@@ -266,3 +274,46 @@ export const TEACHER_COLORS = ["#A3341F", "#7A5C8E", "#2E7D6B", "#3F6C9E"];
 // Highlighters sit under the text, so they stay pale.
 export const HIGHLIGHTER_COLORS = ["#7FD1AE", "#F2D98D", "#9EC5E8", "#E5B3C6"];
 export const STAMPS = ["✅", "⭐", "👍", "❤️", "🎯", "🔥", "💡", "❓", "❌", "🤔", "👏", "📌"];
+
+/** What a mark is, for the history tooltip. */
+export interface MarkHit {
+  kind: "stroke" | "highlight" | "text" | "stamp" | "comment";
+  ts?: number;
+  detail?: string;
+}
+
+/**
+ * Topmost mark at a point, for hovering rather than erasing.
+ *
+ * Searches back to front so the answer matches what the eye sees on top, and
+ * covers every kind of mark — a teacher pointing at a stamp or a typed note
+ * wants its history as much as they want a pen stroke's.
+ */
+export function markAt(layer: LayerData, x: number, y: number, radius: number): MarkHit | null {
+  for (let i = layer.c.length - 1; i >= 0; i--) {
+    const k = layer.c[i];
+    if ((k.x - x) ** 2 + (k.y - y) ** 2 <= (radius + 8) ** 2) {
+      return { kind: "comment", ts: k.ts, detail: k.t };
+    }
+  }
+  for (let i = layer.e.length - 1; i >= 0; i--) {
+    const st = layer.e[i];
+    if (Math.abs(st.x - x) <= st.s / 2 && Math.abs(st.y - y) <= st.s / 2) {
+      return { kind: "stamp", ts: st.ts, detail: st.e };
+    }
+  }
+  for (let i = layer.x.length - 1; i >= 0; i--) {
+    const t = layer.x[i];
+    const lines = (t.v.match(/\n/g)?.length ?? 0) + 1;
+    const height = Math.max(t.s * 1.5, lines * t.s * 1.3);
+    if (x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + height) {
+      return { kind: "text", ts: t.ts, detail: t.v };
+    }
+  }
+  const si = hitStroke(layer.s, x, y, radius);
+  if (si >= 0) {
+    const st = layer.s[si];
+    return { kind: st.t === "h" ? "highlight" : "stroke", ts: st.ts };
+  }
+  return null;
+}

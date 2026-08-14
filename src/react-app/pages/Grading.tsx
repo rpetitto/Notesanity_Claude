@@ -675,6 +675,7 @@ export default function Grading() {
               fingerDraw={fingerDraw}
               zoom={zoom}
               fieldsEditable={false}
+              showMarkHistory
               onLayerChange={notebookWork.setLayer}
               onFieldChange={() => {}}
               onVisiblePageChange={setVisiblePage}

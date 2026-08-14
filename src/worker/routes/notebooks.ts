@@ -121,22 +121,27 @@ app.get("/api/notebooks/:id", handler(async (c) => {
 async function seqWindow(notebookId: string, insertAfterPageId: string | null | undefined, count: number) {
   if (insertAfterPageId) {
     const anchor = await db
-      .prepare(`SELECT seq FROM pages WHERE id = ? AND notebook_id = ?`)
+      .prepare(`SELECT seq, group_name FROM pages WHERE id = ? AND notebook_id = ?`)
       .bind(insertAfterPageId, notebookId)
-      .first<{ seq: number }>();
+      .first<{ seq: number; group_name: string }>();
     if (!anchor) throw new HttpError(404, "Anchor page not found");
     const next = await db
       .prepare(`SELECT seq FROM pages WHERE notebook_id = ? AND seq > ? ORDER BY seq LIMIT 1`)
       .bind(notebookId, anchor.seq)
       .first<{ seq: number }>();
     const gap = (next ? next.seq : anchor.seq + 1) - anchor.seq;
-    return { start: anchor.seq, step: gap / (count + 1) };
+    // A page dropped into the middle of a section belongs to that section —
+    // otherwise inserting one silently cuts the section in two.
+    return { start: anchor.seq, step: gap / (count + 1), groupName: anchor.group_name ?? "" };
   }
+  // Appending is "after the last page", so it inherits the same way. Choosing
+  // "at the end" and choosing "after page N" where N is last are the same
+  // request, and must not give different answers.
   const last = await db
-    .prepare(`SELECT MAX(seq) AS m FROM pages WHERE notebook_id = ?`)
+    .prepare(`SELECT seq, group_name FROM pages WHERE notebook_id = ? ORDER BY seq DESC LIMIT 1`)
     .bind(notebookId)
-    .first<{ m: number | null }>();
-  return { start: last?.m ?? 0, step: 1 };
+    .first<{ seq: number; group_name: string }>();
+  return { start: last?.seq ?? 0, step: 1, groupName: last?.group_name ?? "" };
 }
 
 /** Keep `notebooks.page_count` in step after pages are added or removed. */
@@ -167,7 +172,7 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
   const assetKey = body.assetKey || nb.asset_key;
   if (!assetKey) throw new HttpError(400, "No asset to draw pages from");
 
-  const { start, step } = await seqWindow(nb.id, body.insertAfterPageId, body.pages?.length ?? 1);
+  const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, body.pages?.length ?? 1);
 
   const created: string[] = [];
   let i = 1;
@@ -175,10 +180,10 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
     const id = uid();
     await db
       .prepare(
-        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, group_name, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(id, nb.id, start + step * i, assetKey, p.sourceIndex, p.width, p.height, now())
+      .bind(id, nb.id, start + step * i, assetKey, p.sourceIndex, p.width, p.height, groupName, now())
       .run();
     created.push(id);
     i++;
@@ -234,17 +239,17 @@ app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
   const width = sizeSource?.width ?? 612;
   const height = sizeSource?.height ?? 792;
 
-  const { start, step } = await seqWindow(nb.id, body.insertAfterPageId, count);
+  const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, count);
 
   const created: string[] = [];
   for (let i = 1; i <= count; i++) {
     const id = uid();
     await db
       .prepare(
-        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, pattern, pattern_color, created_at)
-         VALUES (?, ?, ?, '', -1, ?, ?, ?, ?, ?)`,
+        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, pattern, pattern_color, group_name, created_at)
+         VALUES (?, ?, ?, '', -1, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(id, nb.id, start + step * i, width, height, pattern, color, now())
+      .bind(id, nb.id, start + step * i, width, height, pattern, color, groupName, now())
       .run();
     created.push(id);
   }

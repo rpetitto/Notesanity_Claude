@@ -37,11 +37,12 @@ import {
 import { toast } from "sonner";
 import type { FieldRec } from "../lib/api";
 import {
-  type LayerData, type Stroke, type ToolKind, drawLayer, drawStroke, hitStroke, straightenHighlight,
+  type LayerData, type MarkHit, type Stroke, type ToolKind,
+  drawLayer, drawStroke, hitStroke, markAt, straightenHighlight,
 } from "../lib/ink";
 import { renderPageToCanvas } from "../lib/pdf";
 import { isPattern, renderPatternToCanvas, DEFAULT_PATTERN_COLOR } from "../lib/patterns";
-import { cn } from "../lib/utils";
+import { cn, relativeTime } from "../lib/utils";
 
 /**
  * `FieldRec` doesn't (yet) declare the `prompt`/`image`/`audio` field types or
@@ -106,7 +107,18 @@ interface Props {
   studentId?: string;
   /** Called after a student uploads or removes an `image`/`audio` response, so the parent can refresh. */
   onResponseUploaded?: (fieldId: string) => void;
+  /** Teacher view: hovering a student's mark reveals when it was made. */
+  showMarkHistory?: boolean;
 }
+
+/** How each kind of mark is named in the history tooltip. */
+const MARK_LABEL: Record<MarkHit["kind"], string> = {
+  stroke: "Pen mark",
+  highlight: "Highlight",
+  text: "Typed note",
+  stamp: "Stamp",
+  comment: "Comment",
+};
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
@@ -133,7 +145,7 @@ export default function PageCanvas({
   fields, fieldValues, onFieldChange,
   studentLayer, teacherLayer, masterLayer, onLayerChange,
   writeTarget, tool, fingerDraw, fieldsEditable, authorName, className,
-  notebookId = "", studentId, onResponseUploaded,
+  notebookId = "", studentId, onResponseUploaded, showMarkHistory,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const masterRef = useRef<HTMLCanvasElement>(null);
@@ -144,6 +156,7 @@ export default function PageCanvas({
   const [baseReady, setBaseReady] = useState(false);
   const [editingText, setEditingText] = useState<string | null>(null);
   const [openComment, setOpenComment] = useState<string | null>(null);
+  const [markHover, setMarkHover] = useState<{ x: number; y: number; hit: MarkHit } | null>(null);
 
   const cssW = pageWidth * scale;
   const cssH = pageHeight * scale;
@@ -243,6 +256,7 @@ export default function PageCanvas({
       c: tool.color,
       w: tool.width,
       p: path.slice(),
+      ts: Date.now(),
     };
     onLayerChange({ ...activeLayer, s: [...activeLayer.s, stroke] });
     points.current = [];
@@ -304,7 +318,7 @@ export default function PageCanvas({
       const id = uid();
       onLayerChange?.({
         ...activeLayer,
-        x: [...activeLayer.x, { id, x, y, w: Math.min(220, pageWidth - x - 8), s: tool.fontSize, c: tool.color, v: "" }],
+        x: [...activeLayer.x, { id, x, y, w: Math.min(220, pageWidth - x - 8), s: tool.fontSize, c: tool.color, v: "", ts: Date.now() }],
       });
       setEditingText(id);
       return;
@@ -314,7 +328,7 @@ export default function PageCanvas({
       e.preventDefault();
       onLayerChange?.({
         ...activeLayer,
-        e: [...activeLayer.e, { id: uid(), x, y, s: tool.fontSize * 1.8, e: tool.stamp }],
+        e: [...activeLayer.e, { id: uid(), x, y, s: tool.fontSize * 1.8, e: tool.stamp, ts: Date.now() }],
       });
       return;
     }
@@ -325,7 +339,7 @@ export default function PageCanvas({
       const id = uid();
       onLayerChange?.({
         ...activeLayer,
-        c: [...activeLayer.c, { id, x, y, t: "", a: authorName }],
+        c: [...activeLayer.c, { id, x, y, t: "", a: authorName, ts: Date.now() }],
       });
       setOpenComment(id);
       return;
@@ -462,6 +476,22 @@ export default function PageCanvas({
     setOpenComment(null);
   };
 
+  /**
+   * Hovering a student's mark reports when it was made.
+   *
+   * Hit-testing runs against the student layer only: a teacher wants the
+   * provenance of the work being marked, not of their own marking. Marks made
+   * before timestamps were recorded say so rather than guessing.
+   */
+  const onHoverMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!showMarkHistory) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const hit = markAt(studentLayer, px / scale, py / scale, 5 / scale);
+    setMarkHover(hit ? { x: px, y: py, hit } : null);
+  };
+
   const interactive = canWrite && tool.kind !== "select";
   const blockTouchScroll = interactive && fingerDraw && isMarking;
 
@@ -484,6 +514,8 @@ export default function PageCanvas({
   return (
     <div
       className={cn("relative bg-white shadow-sm select-none", className)}
+      onMouseMove={onHoverMove}
+      onMouseLeave={() => setMarkHover(null)}
       style={{
         width: cssW,
         height: cssH,
@@ -537,6 +569,29 @@ export default function PageCanvas({
           />
         ))}
       </div>
+
+      {markHover && (
+        <div
+          className="pointer-events-none absolute z-40 max-w-[240px] rounded-[10px] border-2 border-pine bg-white px-2.5 py-1.5 text-[14px] leading-snug text-pine shadow-[3px_3px_0_0_var(--color-pine)]"
+          style={{
+            // Nudged up and right of the cursor, and kept inside the page.
+            left: Math.min(markHover.x + 12, cssW - 250),
+            top: Math.max(4, markHover.y - 52),
+          }}
+        >
+          <span className="font-display font-bold">{MARK_LABEL[markHover.hit.kind]}</span>
+          <span className="block text-pine/75">
+            {markHover.hit.ts
+              ? `${relativeTime(new Date(markHover.hit.ts).toISOString())} · ${new Date(markHover.hit.ts).toLocaleString(undefined, {
+                  day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+                })}`
+              : "Time not recorded"}
+          </span>
+          {markHover.hit.detail && (
+            <span className="mt-0.5 block truncate text-pine/60">{markHover.hit.detail}</span>
+          )}
+        </div>
+      )}
 
       {/* Text boxes, stamps and comment pins */}
       <div className="absolute inset-0" style={{ pointerEvents: "none" }}>

@@ -367,6 +367,7 @@ export default function StudentNotebook() {
             zoom={zoom}
             authorName={user?.name}
             fieldsEditable={false}
+            showMarkHistory
             onLayerChange={notebookWork.setLayer}
             onFieldChange={() => {}}
             onVisiblePageChange={setVisiblePage}

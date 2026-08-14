@@ -47,6 +47,8 @@ interface Props {
   zoom: ZoomMode;
   authorName?: string;
   fieldsEditable: boolean;
+  /** Teacher view: hovering a student's mark reveals when it was made. */
+  showMarkHistory?: boolean;
   onLayerChange: (pageId: string, layer: LayerData) => void;
   onFieldChange: (fieldId: string, value: string) => void;
   onVisiblePageChange?: (pageId: string) => void;
@@ -60,7 +62,7 @@ interface Props {
 
 export default function NotebookSurface({
   notebookId, pages, fields, studentLayers, teacherLayers, masterLayers, fieldValues,
-  writeTarget, tool, fingerDraw, zoom, authorName, fieldsEditable,
+  writeTarget, tool, fingerDraw, zoom, authorName, fieldsEditable, showMarkHistory,
   onLayerChange, onFieldChange, onVisiblePageChange, scrollRef, header,
   studentId, onResponseUploaded,
 }: Props) {
@@ -163,6 +165,7 @@ export default function NotebookSurface({
                 tool={tool}
                 fingerDraw={fingerDraw}
                 fieldsEditable={fieldsEditable}
+                showMarkHistory={showMarkHistory}
                 authorName={authorName}
                 notebookId={notebookId}
                 studentId={studentId}

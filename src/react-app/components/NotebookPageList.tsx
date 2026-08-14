@@ -56,7 +56,8 @@ export default function NotebookPageList({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ id: string; y: number } | null>(null);
-  const [dropAt, setDropAt] = useState<number | null>(null);
+  /** Which page the dragged one would land in front of; `null` means the end. */
+  const [dropBefore, setDropBefore] = useState<{ id: string | null } | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -97,16 +98,24 @@ export default function NotebookPageList({
     onSelectionChange(next);
   };
 
-  /** Which gap in the flat list is the pointer currently over? */
-  const computeDropIndex = useCallback((clientY: number) => {
-    let index = pages.length;
-    for (let i = 0; i < pages.length; i++) {
-      const el = rowRefs.current[pages[i].id];
+  /**
+   * Which page would the dragged one land in front of?
+   *
+   * The dragged page is skipped, so the answer is a position in the list as it
+   * will be *after* the move. Measuring against every row including the dragged
+   * one meant its own height sat between it and its neighbour: nudging a page
+   * one place down landed back where it started, and only a drag of more than a
+   * full row registered at all.
+   */
+  const computeDropBefore = useCallback((clientY: number, draggingId: string) => {
+    for (const page of pages) {
+      if (page.id === draggingId) continue;
+      const el = rowRefs.current[page.id];
       if (!el) continue;
       const rect = el.getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) { index = i; break; }
+      if (clientY < rect.top + rect.height / 2) return { id: page.id };
     }
-    return index;
+    return { id: null };
   }, [pages]);
 
   const startDrag = (e: React.PointerEvent, pageId: string) => {
@@ -114,14 +123,14 @@ export default function NotebookPageList({
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     setDrag({ id: pageId, y: e.clientY });
-    setDropAt(computeDropIndex(e.clientY));
+    setDropBefore(computeDropBefore(e.clientY, pageId));
   };
 
   const moveDrag = (e: React.PointerEvent) => {
     if (!drag) return;
     e.preventDefault();
     setDrag({ ...drag, y: e.clientY });
-    setDropAt(computeDropIndex(e.clientY));
+    setDropBefore(computeDropBefore(e.clientY, drag.id));
 
     // Auto-scroll when dragging near the edges of the list.
     const el = listRef.current;
@@ -135,15 +144,17 @@ export default function NotebookPageList({
   const endDrag = (e: React.PointerEvent) => {
     if (!drag) return;
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    const from = pages.findIndex((p) => p.id === drag.id);
-    const target = dropAt ?? from;
+    const moved = pages.find((p) => p.id === drag.id);
+    const beforeId = dropBefore?.id ?? null;
     setDrag(null);
-    setDropAt(null);
-    if (from < 0 || target === from || target === from + 1) return;
+    setDropBefore(null);
+    if (!moved) return;
 
-    const next = pages.slice();
-    const [moved] = next.splice(from, 1);
-    next.splice(target > from ? target - 1 : target, 0, moved);
+    const next = pages.filter((p) => p.id !== moved.id);
+    const at = beforeId ? next.findIndex((p) => p.id === beforeId) : next.length;
+    next.splice(at < 0 ? next.length : at, 0, moved);
+    // Nothing actually moved — don't churn the server or the list.
+    if (next.every((p, i) => p.id === pages[i].id)) return;
 
     // A page adopts the section of whatever it now sits beneath; landing at the
     // very top of the list means it joins whatever section starts there.
@@ -167,7 +178,7 @@ export default function NotebookPageList({
           <>
             {!isCollapsed && section.pages.map((p) => {
               const index = flatIndex++;
-              const showDropLine = dropAt === index;
+              const showDropLine = dropBefore?.id === p.id;
               const isDragging = drag?.id === p.id;
               const count = assignmentCounts[p.id] ?? 0;
               return (
@@ -347,7 +358,7 @@ export default function NotebookPageList({
       })}
 
       {/* Trailing drop zone so a page can be moved to the very end. */}
-      {dropAt === pages.length && <div className="mx-1 h-0.5 rounded bg-mint" />}
+      {drag && dropBefore?.id === null && <div className="mx-1 h-0.5 rounded bg-mint" />}
     </div>
   );
 }
