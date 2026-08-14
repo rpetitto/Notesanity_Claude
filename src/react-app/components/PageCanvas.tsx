@@ -10,8 +10,10 @@
  *
  * Hit-testing rule: the pointer surface sits *below* the interactive overlay, so
  * form fields, text boxes and comment pins stay clickable without switching
- * tools. Only while a marking tool (pen/highlighter/eraser) is selected does the
- * overlay go pointer-transparent so ink can be laid down across the whole page.
+ * tools. Only while a tool that places something on the page itself is selected
+ * (pen/highlighter/eraser/stamp/text/comment) does the overlay go
+ * pointer-transparent, so the tap reaches the page instead of the field on top
+ * of it.
  *
  * iOS Safari / Apple Pencil notes:
  *  - Apple Pencil arrives as `pointerType === 'pen'` and carries real `pressure`.
@@ -97,8 +99,14 @@ interface Props {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
 
-/** Tools that paint across the page and therefore need the whole surface. */
-const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser"];
+/**
+ * Tools that place something directly on the page — as opposed to `select`,
+ * which just reads it — and therefore need the whole pointer surface. Stamp,
+ * text and comment don't paint a stroke, but a tap with one of them selected
+ * still has to land on the page underneath the fields overlay, not get
+ * swallowed by it.
+ */
+const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "text", "comment"];
 
 export default function PageCanvas({
   pdfUrl, sourceIndex, pageWidth, pageHeight, scale,
