@@ -20,8 +20,9 @@ import {
 import { toast } from "sonner";
 import { api, assetUrl, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
+import { parseLayer } from "../lib/ink";
 import { useBackTo } from "../lib/useBackTo";
-import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
+import NotebookSurface, { type LayerMap, type ZoomMode } from "../components/NotebookSurface";
 import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
@@ -314,6 +315,12 @@ export default function Grading() {
     writeTarget: studentId ? "teacher" : null,
     data: work.data,
   });
+
+  const masterLayers = useMemo<LayerMap>(() => {
+    const map: LayerMap = {};
+    for (const a of (work.data as any)?.masterAnnotations ?? []) map[a.pageId] = parseLayer(a.data);
+    return map;
+  }, [work.data]);
 
   const assignedPages = useMemo(() => {
     const all = work.data?.pages ?? [];
@@ -629,7 +636,9 @@ export default function Grading() {
               pages={visiblePages}
               fields={work.data?.fields ?? []}
               studentLayers={notebookWork.studentLayers}
+              studentId={studentId}
               teacherLayers={notebookWork.teacherLayers}
+              masterLayers={masterLayers}
               fieldValues={notebookWork.fieldValues}
               writeTarget="teacher"
               tool={tool}

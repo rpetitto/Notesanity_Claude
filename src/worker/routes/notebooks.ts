@@ -4,6 +4,8 @@ import {
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+export const FIELD_TYPES = ["text", "checkbox", "choice", "prompt", "image", "audio"];
+
 /** Teacher-or-enrolled-student access to a notebook, resolved via its class. */
 async function notebookAccess(c: any, notebookId: string) {
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
@@ -85,7 +87,8 @@ app.get("/api/notebooks/:id", handler(async (c) => {
     .bind(nb.id)
     .all();
   const fields = await db
-    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options FROM fields WHERE notebook_id = ? AND archived = 0`)
+    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, media_key IS NOT NULL AS has_media
+         FROM fields WHERE notebook_id = ? AND archived = 0`)
     .bind(nb.id)
     .all();
   return c.json({
@@ -393,23 +396,23 @@ app.post("/api/notebooks/:id/fields", handler(async (c) => {
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
   const body = await c.req.json<{
     pageId: string; type: string; x: number; y: number; w: number; h: number;
-    label?: string; options?: string[];
+    label?: string; options?: string[]; prompt?: string;
   }>();
   const page = await db
     .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
     .bind(body.pageId, nb.id)
     .first();
   if (!page) throw new HttpError(404, "Page not found");
-  if (!["text", "checkbox", "choice"].includes(body.type)) throw new HttpError(400, "Unsupported field type");
+  if (!FIELD_TYPES.includes(body.type)) throw new HttpError(400, "Unsupported field type");
   const id = uid();
   await db
     .prepare(
-      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id, nb.id, body.pageId, body.type, body.x, body.y, body.w, body.h,
-      body.label ?? "", JSON.stringify(body.options ?? []), now(), now(),
+      body.label ?? "", JSON.stringify(body.options ?? []), body.prompt ?? "", now(), now(),
     )
     .run();
   await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
@@ -428,15 +431,69 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
   const b = await c.req.json<any>();
   await db
     .prepare(
-      `UPDATE fields SET x = ?, y = ?, w = ?, h = ?, label = ?, options = ?, archived = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE fields SET x = ?, y = ?, w = ?, h = ?, label = ?, options = ?, prompt = ?, archived = ?, updated_at = ?
+        WHERE id = ?`,
     )
     .bind(
       b.x ?? field.x, b.y ?? field.y, b.w ?? field.w, b.h ?? field.h,
       b.label ?? field.label, b.options ? JSON.stringify(b.options) : field.options,
+      b.prompt ?? field.prompt ?? "",
       b.archived === undefined ? field.archived : b.archived ? 1 : 0, now(), field.id,
     )
     .run();
   await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
+  return c.json({ ok: true });
+}));
+
+const MAX_FIELD_MEDIA_BYTES = 6 * 1024 * 1024;
+
+/** Attach the teacher's illustration to a prompt field. */
+app.post("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const fieldId = param(c, "fieldId");
+  const field = await db
+    .prepare(`SELECT id FROM fields WHERE id = ? AND notebook_id = ?`)
+    .bind(fieldId, nb.id)
+    .first();
+  if (!field) throw new HttpError(404, "Field not found");
+
+  const form = await c.req.parseBody();
+  const file = form["file"] as File | undefined;
+  if (!file) throw new HttpError(400, "No image uploaded");
+  if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) throw new HttpError(400, "Prompt images must be an image file");
+  if (file.size > MAX_FIELD_MEDIA_BYTES) throw new HttpError(413, "Prompt images are limited to 6MB");
+
+  const key = `notebooks/${nb.id}/fields/${fieldId}-${uid()}`;
+  await storage.put(key, await file.arrayBuffer(), { contentType: file.type });
+  await db
+    .prepare(`UPDATE fields SET media_key = ?, updated_at = ? WHERE id = ?`)
+    .bind(key, now(), fieldId)
+    .run();
+  return c.json({ ok: true });
+}));
+
+app.get("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
+  const { nb } = await notebookAccess(c, param(c, "id"));
+  const field = await db
+    .prepare(`SELECT media_key FROM fields WHERE id = ? AND notebook_id = ?`)
+    .bind(param(c, "fieldId"), nb.id)
+    .first<any>();
+  if (!field?.media_key) throw new HttpError(404, "No image on this field");
+  const obj = await storage.get(field.media_key);
+  if (!obj) throw new HttpError(404, "Image not found");
+  return new Response(await obj.arrayBuffer(), {
+    headers: { "Content-Type": obj.contentType ?? "image/png", "Cache-Control": "private, max-age=3600" },
+  });
+}));
+
+app.delete("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  await db
+    .prepare(`UPDATE fields SET media_key = NULL, updated_at = ? WHERE id = ? AND notebook_id = ?`)
+    .bind(now(), param(c, "fieldId"), nb.id)
+    .run();
   return c.json({ ok: true });
 }));
 
@@ -505,6 +562,65 @@ app.get("/api/notebooks/:id/cover", handler(async (c) => {
 }));
 
 /**
+ * Teacher annotations on the master page — worked examples, callouts, model
+ * answers. Distinct from marking one student's copy: this is part of the
+ * template, so it reaches everyone, and it follows the same draft/publish rule
+ * as pages and fields.
+ */
+app.get("/api/notebooks/:id/annotations", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  const rows = await db
+    .prepare(`SELECT page_id, draft_data, published_data, rev FROM page_annotations WHERE notebook_id = ?`)
+    .bind(nb.id)
+    .all<any>();
+  // Students only ever see what has been published.
+  return c.json({
+    annotations: (rows.results ?? []).map((r) => ({
+      pageId: r.page_id,
+      data: isTeacher ? r.draft_data : r.published_data,
+      publishedData: r.published_data,
+      rev: r.rev,
+      unpublished: isTeacher ? r.draft_data !== r.published_data : false,
+    })),
+  });
+}));
+
+app.put("/api/notebooks/:id/annotations/:pageId", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const pageId = param(c, "pageId");
+  const page = await db
+    .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
+    .bind(pageId, nb.id)
+    .first();
+  if (!page) throw new HttpError(404, "Page not found");
+
+  const { data } = await c.req.json<{ data: string }>();
+  if (typeof data !== "string") throw new HttpError(400, "data must be a string");
+  if (data.length > 512 * 1024) throw new HttpError(413, "That page has too much ink to save");
+
+  const existing = await db
+    .prepare(`SELECT page_id, rev FROM page_annotations WHERE page_id = ?`)
+    .bind(pageId)
+    .first<any>();
+  if (existing) {
+    await db
+      .prepare(`UPDATE page_annotations SET draft_data = ?, rev = ?, updated_at = ? WHERE page_id = ?`)
+      .bind(data, existing.rev + 1, now(), pageId)
+      .run();
+    return c.json({ ok: true, rev: existing.rev + 1 });
+  }
+  await db
+    .prepare(
+      `INSERT INTO page_annotations (page_id, notebook_id, draft_data, published_data, rev, updated_at)
+       VALUES (?, ?, ?, '', 1, ?)`,
+    )
+    .bind(pageId, nb.id, data, now())
+    .run();
+  return c.json({ ok: true, rev: 1 });
+}));
+
+/**
  * Publish / "Update Student Notebooks".
  *
  * Because student work is anchored to page and field UUIDs, propagation is
@@ -529,6 +645,16 @@ app.post("/api/notebooks/:id/publish", handler(async (c) => {
           .bind(nb.id, since).first<{ n: number }>())?.n ?? 0,
       }
     : null;
+
+  // Promote annotation drafts so they reach students with this update.
+  const pendingAnnotations = await db
+    .prepare(`SELECT COUNT(*) AS n FROM page_annotations WHERE notebook_id = ? AND draft_data <> published_data`)
+    .bind(nb.id)
+    .first<{ n: number }>();
+  await db
+    .prepare(`UPDATE page_annotations SET published_data = draft_data, published_at = ? WHERE notebook_id = ?`)
+    .bind(now(), nb.id)
+    .run();
 
   const students = await db
     .prepare(`SELECT user_id FROM enrollments WHERE class_id = ? AND role = 'student' AND status = 'active'`)
@@ -555,7 +681,7 @@ app.post("/api/notebooks/:id/publish", handler(async (c) => {
     .bind(now(), now(), nb.id)
     .run();
 
-  return c.json({ ok: true, provisioned, summary });
+  return c.json({ ok: true, provisioned, summary, annotationsPublished: pendingAnnotations?.n ?? 0 });
 }));
 
 /** Notebooks visible to the signed-in student, across all their classes. */

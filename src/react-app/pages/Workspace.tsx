@@ -5,9 +5,10 @@ import { ArrowLeft, CheckCircle2, ChevronRight, Lock, PanelLeft, Send } from "lu
 import { toast } from "sonner";
 import { api, assetUrl, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
+import { parseLayer } from "../lib/ink";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
-import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
+import NotebookSurface, { type LayerMap, type ZoomMode } from "../components/NotebookSurface";
 import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
@@ -66,6 +67,13 @@ export default function Workspace() {
   useEffect(() => {
     try { localStorage.setItem(FINGER_KEY, fingerDraw ? "1" : "0"); } catch { /* ignore */ }
   }, [fingerDraw]);
+
+  // Published teacher annotations on the template — read-only for the student.
+  const masterLayers = useMemo<LayerMap>(() => {
+    const map: LayerMap = {};
+    for (const a of (data as any)?.masterAnnotations ?? []) map[a.pageId] = parseLayer(a.data);
+    return map;
+  }, [data]);
 
   const [zoom, setZoom] = useState<ZoomMode>("page");
   const [visiblePage, setVisiblePage] = useState<string>("");
@@ -357,6 +365,7 @@ export default function Workspace() {
             fields={data.fields}
             studentLayers={work.studentLayers}
             teacherLayers={work.teacherLayers}
+          masterLayers={masterLayers}
             fieldValues={work.fieldValues}
             writeTarget={locked ? null : "student"}
             tool={tool}
@@ -366,6 +375,7 @@ export default function Workspace() {
             fieldsEditable={!locked}
             onLayerChange={work.setLayer}
             onFieldChange={work.setFieldValue}
+          onResponseUploaded={() => workQuery.refetch()}
             onVisiblePageChange={setVisiblePage}
             scrollRef={scrollRef}
           />

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assetUrl, type FieldRec, type LayerRec, type PageRec } from "../lib/api";
 import { type LayerData, emptyLayer, parseLayer } from "../lib/ink";
-import PageCanvas, { type ToolState } from "./PageCanvas";
+import PageCanvas, { type FieldValue, type ToolState } from "./PageCanvas";
 import LazyPage from "./LazyPage";
 
 export type LayerMap = Record<string, LayerData>;
@@ -38,7 +38,9 @@ interface Props {
   fields: FieldRec[];
   studentLayers: LayerMap;
   teacherLayers: LayerMap;
-  fieldValues: Record<string, string>;
+  /** Published teacher template annotations, keyed by page id — painted below student ink, never editable. */
+  masterLayers?: LayerMap;
+  fieldValues: Record<string, FieldValue>;
   writeTarget: "student" | "teacher" | null;
   tool: ToolState;
   fingerDraw: boolean;
@@ -50,12 +52,17 @@ interface Props {
   onVisiblePageChange?: (pageId: string) => void;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
   header?: React.ReactNode;
+  /** Whose response is being shown/edited — omitted means "the signed-in student". */
+  studentId?: string;
+  /** Called after a student uploads or removes an `image`/`audio` response. */
+  onResponseUploaded?: (fieldId: string) => void;
 }
 
 export default function NotebookSurface({
-  notebookId, pages, fields, studentLayers, teacherLayers, fieldValues,
+  notebookId, pages, fields, studentLayers, teacherLayers, masterLayers, fieldValues,
   writeTarget, tool, fingerDraw, zoom, authorName, fieldsEditable,
   onLayerChange, onFieldChange, onVisiblePageChange, scrollRef, header,
+  studentId, onResponseUploaded,
 }: Props) {
   const innerRef = useRef<HTMLDivElement>(null);
   const containerRef = scrollRef ?? innerRef;
@@ -153,12 +160,16 @@ export default function NotebookSurface({
                 onFieldChange={onFieldChange}
                 studentLayer={studentLayers[page.id] ?? emptyLayer()}
                 teacherLayer={teacherLayers[page.id] ?? emptyLayer()}
+                masterLayer={masterLayers?.[page.id]}
                 onLayerChange={writeTarget ? handleLayerChange(page.id) : undefined}
                 writeTarget={writeTarget}
                 tool={tool}
                 fingerDraw={fingerDraw}
                 fieldsEditable={fieldsEditable}
                 authorName={authorName}
+                notebookId={notebookId}
+                studentId={studentId}
+                onResponseUploaded={onResponseUploaded}
               />
             </LazyPage>
           </div>

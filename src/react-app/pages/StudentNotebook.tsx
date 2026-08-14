@@ -11,9 +11,10 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronRight, ImageOff, PanelLeft } from "lucide-react";
 import { api, assetUrl, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
+import { parseLayer } from "../lib/ink";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
-import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
+import NotebookSurface, { type ZoomMode, type LayerMap } from "../components/NotebookSurface";
 import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
@@ -148,6 +149,13 @@ export default function StudentNotebook() {
       api.get<WorkResponse>(`/api/notebooks/${notebookId}/work?student=${encodeURIComponent(studentId)}`),
     enabled: !!notebookId && !!studentId,
   });
+
+  // Published teacher annotations on the template, shown beneath the student's work.
+  const masterLayers = useMemo<LayerMap>(() => {
+    const map: LayerMap = {};
+    for (const a of (work.data as any)?.masterAnnotations ?? []) map[a.pageId] = parseLayer(a.data);
+    return map;
+  }, [work.data]);
 
   const notebookWork = useNotebookWork({
     notebookId,
@@ -349,6 +357,8 @@ export default function StudentNotebook() {
             fields={work.data.fields}
             studentLayers={notebookWork.studentLayers}
             teacherLayers={notebookWork.teacherLayers}
+            masterLayers={masterLayers}
+            studentId={studentId}
             fieldValues={notebookWork.fieldValues}
             writeTarget="teacher"
             tool={tool}

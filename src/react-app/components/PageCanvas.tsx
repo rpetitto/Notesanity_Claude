@@ -24,13 +24,37 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { MessageSquare, X } from "lucide-react";
+import {
+  ImageIcon, Loader2, MessageSquare, Mic, Music, RefreshCw, Square, Trash2, X,
+} from "lucide-react";
+import { toast } from "sonner";
 import type { FieldRec } from "../lib/api";
 import {
   type LayerData, type Stroke, type ToolKind, drawLayer, drawStroke, hitStroke,
 } from "../lib/ink";
 import { renderPageToCanvas } from "../lib/pdf";
 import { cn } from "../lib/utils";
+
+/**
+ * `FieldRec` doesn't (yet) declare the `prompt`/`image`/`audio` field types or
+ * their extra columns — widen locally rather than editing the shared type, since
+ * a plain `text`/`checkbox`/`choice` field from the server still satisfies this.
+ */
+export type FieldLike = Omit<FieldRec, "type"> & {
+  type: FieldRec["type"] | "prompt" | "image" | "audio";
+  prompt?: string;
+  has_media?: number | boolean;
+};
+
+/**
+ * A field value entry is normally just the typed text, but `image`/`audio`
+ * fields report an uploaded file via `asset_key`/`content_type` instead.
+ * Widening this stays backward compatible: a plain string map (what every
+ * existing caller passes today) is still assignable here.
+ */
+export type FieldValue = string | { value?: string; asset_key?: string; content_type?: string };
+
+const fieldText = (v: FieldValue | undefined): string => (typeof v === "string" ? v : v?.value ?? "");
 
 export interface ToolState {
   kind: ToolKind;
@@ -47,10 +71,12 @@ interface Props {
   pageHeight: number;
   scale: number;
   fields: FieldRec[];
-  fieldValues: Record<string, string>;
+  fieldValues: Record<string, FieldValue>;
   onFieldChange?: (fieldId: string, value: string) => void;
   studentLayer: LayerData;
   teacherLayer: LayerData;
+  /** Published teacher template annotations, painted below student ink and never editable. */
+  masterLayer?: LayerData;
   onLayerChange?: (layer: LayerData) => void;
   /** Which layer new marks go to. `null` makes the page read-only. */
   writeTarget: "student" | "teacher" | null;
@@ -60,6 +86,12 @@ interface Props {
   /** Display name stamped onto new comments. */
   authorName?: string;
   className?: string;
+  /** Needed to build asset/response URLs for `prompt`, `image` and `audio` fields. */
+  notebookId?: string;
+  /** Whose response is being shown/edited — omitted means "the signed-in student". */
+  studentId?: string;
+  /** Called after a student uploads or removes an `image`/`audio` response, so the parent can refresh. */
+  onResponseUploaded?: (fieldId: string) => void;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -71,10 +103,12 @@ const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser"];
 export default function PageCanvas({
   pdfUrl, sourceIndex, pageWidth, pageHeight, scale,
   fields, fieldValues, onFieldChange,
-  studentLayer, teacherLayer, onLayerChange,
+  studentLayer, teacherLayer, masterLayer, onLayerChange,
   writeTarget, tool, fingerDraw, fieldsEditable, authorName, className,
+  notebookId = "", studentId, onResponseUploaded,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
+  const masterRef = useRef<HTMLCanvasElement>(null);
   const studentRef = useRef<HTMLCanvasElement>(null);
   const teacherRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
@@ -111,6 +145,9 @@ export default function PageCanvas({
     drawLayer(ctx, layer, scale);
   }, [cssW, cssH, scale]);
 
+  useLayoutEffect(() => {
+    if (masterLayer) paint(masterRef.current, masterLayer);
+  }, [paint, masterLayer]);
   useLayoutEffect(() => { paint(studentRef.current, studentLayer); }, [paint, studentLayer]);
   useLayoutEffect(() => { paint(teacherRef.current, teacherLayer); }, [paint, teacherLayer]);
 
@@ -342,6 +379,9 @@ export default function PageCanvas({
       <canvas ref={baseRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block" />
       {!baseReady && <div className="absolute inset-0 animate-pulse bg-slate-100" />}
 
+      {masterLayer && (
+        <canvas ref={masterRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
+      )}
       <canvas ref={studentRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
       <canvas ref={teacherRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
       <canvas ref={liveRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
@@ -371,9 +411,12 @@ export default function PageCanvas({
             key={f.id}
             field={f}
             scale={scale}
-            value={fieldValues[f.id] ?? ""}
+            value={fieldValues[f.id]}
             editable={fieldsEditable}
             onChange={(v) => onFieldChange?.(f.id, v)}
+            notebookId={notebookId}
+            studentId={studentId}
+            onResponseUploaded={onResponseUploaded}
           />
         ))}
       </div>
@@ -510,9 +553,16 @@ function CommentPin({
 }
 
 function FieldControl({
-  field, scale, value, editable, onChange,
+  field, scale, value, editable, onChange, notebookId, studentId, onResponseUploaded,
 }: {
-  field: FieldRec; scale: number; value: string; editable: boolean; onChange: (v: string) => void;
+  field: FieldLike;
+  scale: number;
+  value: FieldValue | undefined;
+  editable: boolean;
+  onChange: (v: string) => void;
+  notebookId: string;
+  studentId?: string;
+  onResponseUploaded?: (fieldId: string) => void;
 }) {
   const style = {
     left: field.x * scale,
@@ -521,21 +571,86 @@ function FieldControl({
     height: field.h * scale,
   } as const;
 
+  if (field.type === "prompt") {
+    return (
+      <div
+        className="absolute flex flex-col overflow-hidden rounded border-2 border-blue-300/70 bg-white/70"
+        style={style}
+        title={field.label}
+      >
+        {field.prompt && (
+          <div
+            className="shrink-0 px-1.5 pt-1 text-[11px] font-semibold text-slate-700"
+            style={{ fontSize: Math.max(10, Math.min(13, field.h * scale * 0.14)) }}
+          >
+            {field.prompt}
+          </div>
+        )}
+        {field.has_media && (
+          <img
+            src={`/api/notebooks/${notebookId}/fields/${field.id}/media`}
+            alt=""
+            className="min-h-0 flex-1 object-contain px-1"
+          />
+        )}
+        <textarea
+          disabled={!editable}
+          value={fieldText(value)}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Your answer"
+          className={cn(
+            "min-h-0 flex-1 resize-none bg-transparent px-1.5 py-0.5 outline-none",
+            editable ? "focus:bg-white/60" : "",
+          )}
+          style={{ fontSize: Math.max(11, Math.min(16, field.h * scale * 0.16)), lineHeight: 1.2 }}
+        />
+      </div>
+    );
+  }
+
+  if (field.type === "image") {
+    return (
+      <ResponseImageField
+        field={field}
+        style={style}
+        editable={editable}
+        notebookId={notebookId}
+        studentId={studentId}
+        onResponseUploaded={onResponseUploaded}
+      />
+    );
+  }
+
+  if (field.type === "audio") {
+    return (
+      <ResponseAudioField
+        field={field}
+        style={style}
+        editable={editable}
+        notebookId={notebookId}
+        studentId={studentId}
+        onResponseUploaded={onResponseUploaded}
+      />
+    );
+  }
+
+  const text = fieldText(value);
+
   if (field.type === "checkbox") {
     return (
       <button
         type="button"
         disabled={!editable}
-        onClick={() => onChange(value === "1" ? "" : "1")}
+        onClick={() => onChange(text === "1" ? "" : "1")}
         title={field.label}
         className={cn(
           "absolute flex items-center justify-center rounded border-2 transition-colors",
-          value === "1" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-blue-300/70 bg-white/60",
+          text === "1" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-blue-300/70 bg-white/60",
           editable ? "cursor-pointer hover:border-blue-500" : "cursor-default",
         )}
         style={style}
       >
-        {value === "1" && (
+        {text === "1" && (
           <svg viewBox="0 0 24 24" className="h-4/5 w-4/5" fill="none" stroke="currentColor" strokeWidth={3}>
             <path d="M4 12l5 5L20 6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -550,7 +665,7 @@ function FieldControl({
     return (
       <select
         disabled={!editable}
-        value={value}
+        value={text}
         onChange={(e) => onChange(e.target.value)}
         title={field.label}
         className="absolute rounded border-2 border-blue-300/70 bg-white/80 px-1 outline-none focus:border-blue-500"
@@ -565,7 +680,7 @@ function FieldControl({
   return (
     <textarea
       disabled={!editable}
-      value={value}
+      value={text}
       onChange={(e) => onChange(e.target.value)}
       placeholder={field.label}
       className={cn(
@@ -574,5 +689,337 @@ function FieldControl({
       )}
       style={{ ...style, fontSize: Math.max(11, Math.min(16, field.h * scale * 0.42)), lineHeight: 1.2 }}
     />
+  );
+}
+
+/** Builds the URL for a student's uploaded image/audio response, with an optional cache-buster. */
+function responseUrl(notebookId: string, fieldId: string, studentId: string | undefined, v: number) {
+  const params = new URLSearchParams();
+  if (studentId) params.set("student", studentId);
+  if (v) params.set("v", String(v));
+  const qs = params.toString();
+  return `/api/notebooks/${notebookId}/responses/${fieldId}${qs ? `?${qs}` : ""}`;
+}
+
+/**
+ * Probe whether a student response exists yet, via a lightweight HEAD request.
+ * Only run on mount / after `nonce` changes — after an upload or delete we
+ * already know the answer, so callers set state directly instead of re-probing.
+ */
+function useResponseProbe(url: string, nonce: number) {
+  const [exists, setExists] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setExists(null);
+    fetch(url, { method: "HEAD", credentials: "same-origin" })
+      .then((res) => { if (!cancelled) setExists(res.ok); })
+      .catch(() => { if (!cancelled) setExists(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, nonce]);
+  return [exists, setExists] as const;
+}
+
+function ResponseImageField({
+  field, style, editable, notebookId, studentId, onResponseUploaded,
+}: {
+  field: FieldLike;
+  style: { left: number; top: number; width: number; height: number };
+  editable: boolean;
+  notebookId: string;
+  studentId?: string;
+  onResponseUploaded?: (fieldId: string) => void;
+}) {
+  const [cacheBust, setCacheBust] = useState(0);
+  const url = responseUrl(notebookId, field.id, studentId, cacheBust);
+  const [exists, setExists] = useResponseProbe(url, 0);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const qs = studentId ? `?student=${encodeURIComponent(studentId)}` : "";
+      const res = await fetch(`/api/notebooks/${notebookId}/responses/${field.id}${qs}`, {
+        method: "POST",
+        credentials: "same-origin",
+        body: form,
+      });
+      if (!res.ok) throw new Error(await res.text().catch(() => "Upload failed"));
+      setExists(true);
+      setCacheBust((n) => n + 1);
+      onResponseUploaded?.(field.id);
+    } catch {
+      toast.error("Couldn't upload that image");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = async () => {
+    try {
+      const qs = studentId ? `?student=${encodeURIComponent(studentId)}` : "";
+      const res = await fetch(`/api/notebooks/${notebookId}/responses/${field.id}${qs}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error();
+      setExists(false);
+      onResponseUploaded?.(field.id);
+    } catch {
+      toast.error("Couldn't remove that image");
+    }
+  };
+
+  return (
+    <div
+      className="absolute overflow-hidden rounded border-2 border-blue-300/70 bg-white/60"
+      style={style}
+      title={field.label}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }}
+      />
+
+      {uploading ? (
+        <div className="flex h-full w-full items-center justify-center">
+          <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+        </div>
+      ) : exists ? (
+        <div className="group relative h-full w-full">
+          <img src={url} alt={field.label} className="h-full w-full object-contain" />
+          {editable && (
+            <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-black/40 to-transparent p-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                title="Replace image"
+                className="flex h-6 w-6 items-center justify-center rounded bg-white/90 text-slate-700 hover:bg-white"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void remove()}
+                title="Remove image"
+                className="flex h-6 w-6 items-center justify-center rounded bg-white/90 text-rose-600 hover:bg-white"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      ) : editable ? (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-slate-300 bg-slate-50/70 text-slate-500 hover:border-blue-400 hover:text-blue-600"
+        >
+          <ImageIcon className="h-5 w-5" />
+          <span className="text-[11px] font-medium">Add image</span>
+        </button>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">No image</div>
+      )}
+    </div>
+  );
+}
+
+const MAX_RECORDING_SECONDS = 180;
+
+function ResponseAudioField({
+  field, style, editable, notebookId, studentId, onResponseUploaded,
+}: {
+  field: FieldLike;
+  style: { left: number; top: number; width: number; height: number };
+  editable: boolean;
+  notebookId: string;
+  studentId?: string;
+  onResponseUploaded?: (fieldId: string) => void;
+}) {
+  const [cacheBust, setCacheBust] = useState(0);
+  const url = responseUrl(notebookId, field.id, studentId, cacheBust);
+  const [exists, setExists] = useResponseProbe(url, 0);
+  const [uploading, setUploading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const canRecord =
+    typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia && typeof window.MediaRecorder !== "undefined";
+
+  const stopTracks = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  useEffect(() => () => {
+    // Never leave a microphone open when the field unmounts mid-recording.
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
+    stopTracks();
+  }, [stopTracks]);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const qs = studentId ? `?student=${encodeURIComponent(studentId)}` : "";
+      const res = await fetch(`/api/notebooks/${notebookId}/responses/${field.id}${qs}`, {
+        method: "POST",
+        credentials: "same-origin",
+        body: form,
+      });
+      if (!res.ok) throw new Error(await res.text().catch(() => "Upload failed"));
+      setExists(true);
+      setCacheBust((n) => n + 1);
+      onResponseUploaded?.(field.id);
+    } catch {
+      toast.error("Couldn't upload that recording");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = async () => {
+    try {
+      const qs = studentId ? `?student=${encodeURIComponent(studentId)}` : "";
+      const res = await fetch(`/api/notebooks/${notebookId}/responses/${field.id}${qs}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error();
+      setExists(false);
+      onResponseUploaded?.(field.id);
+    } catch {
+      toast.error("Couldn't remove that recording");
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined;
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        stopTracks();
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setRecording(false);
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        chunksRef.current = [];
+        if (blob.size > 0) {
+          const ext = (recorder.mimeType || "audio/webm").includes("webm") ? "webm" : "mp4";
+          void upload(new File([blob], `recording.${ext}`, { type: blob.type }));
+        }
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+      setElapsed(0);
+      timerRef.current = setInterval(() => {
+        setElapsed((s) => {
+          const next = s + 1;
+          if (next >= MAX_RECORDING_SECONDS) recorderRef.current?.stop();
+          return next;
+        });
+      }, 1000);
+    } catch {
+      toast.error("Couldn't access the microphone");
+      stopTracks();
+    }
+  };
+
+  const stopRecording = () => recorderRef.current?.stop();
+
+  return (
+    <div
+      className="absolute overflow-hidden rounded border-2 border-blue-300/70 bg-white/60"
+      style={style}
+      title={field.label}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="audio/*"
+        capture
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }}
+      />
+
+      {uploading ? (
+        <div className="flex h-full w-full items-center justify-center">
+          <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+        </div>
+      ) : exists ? (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1">
+          <audio controls src={url} className="w-full" style={{ height: 40, minHeight: 40 }} />
+          {editable && (
+            <div className="flex gap-2">
+              <button type="button" onClick={() => inputRef.current?.click()} className="text-[11px] text-blue-600 hover:underline">
+                Replace
+              </button>
+              <button type="button" onClick={() => void remove()} className="text-[11px] text-rose-600 hover:underline">
+                Remove
+              </button>
+            </div>
+          )}
+        </div>
+      ) : editable ? (
+        recording ? (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-slate-600">
+            <button
+              type="button"
+              onClick={stopRecording}
+              title="Stop recording"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-600 text-white hover:bg-rose-700"
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+            <span className="text-[11px] tabular-nums">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
+          </div>
+        ) : (
+          <div className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-slate-300 bg-slate-50/70 text-slate-500">
+            <div className="flex items-center gap-2">
+              {canRecord && (
+                <button
+                  type="button"
+                  onClick={() => void startRecording()}
+                  title="Record audio"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  <Mic className="h-4 w-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
+                title="Attach audio file"
+              >
+                <Music className="h-4 w-4" />
+              </button>
+            </div>
+            <span className="text-center text-[11px] font-medium leading-tight">Record or attach audio</span>
+          </div>
+        )
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">No recording</div>
+      )}
+    </div>
   );
 }

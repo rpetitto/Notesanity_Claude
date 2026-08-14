@@ -3,21 +3,27 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
-  FolderPlus, ImageOff, ListChecks, Loader2, Palette, Plus, RotateCcw, Send, Trash2,
-  Type as TypeIcon, Upload, X, PanelLeft,
+  FolderPlus, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
+  Plus, RotateCcw, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, type FieldRec, type PageRec } from "../lib/api";
 import { readPageSizes } from "../lib/pdf";
 import { convertToPdf, needsConversion } from "../lib/google";
-import PageCanvas from "../components/PageCanvas";
+import PageCanvas, { type ToolState } from "../components/PageCanvas";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
-import { emptyLayer } from "../lib/ink";
+import InkToolbar from "../components/InkToolbar";
+import { emptyLayer, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData } from "../lib/ink";
+import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue } from "../lib/utils";
 
-type FieldTool = "none" | "text" | "checkbox" | "choice";
+type FieldTool = "none" | "text" | "checkbox" | "choice" | "prompt" | "image" | "audio";
+
+/** Alias kept for readability at the call sites below — `FieldRec` already
+ * covers the new prompt/image/audio types and the `prompt`/`has_media` columns. */
+type FieldRow = FieldRec;
 
 interface EditorPage extends PageRec {
   group_name?: string;
@@ -30,8 +36,16 @@ interface NotebookResponse {
     accentColor: string; hasCover: boolean;
   };
   pages: EditorPage[];
-  fields: FieldRec[];
+  fields: FieldRow[];
   isTeacher: boolean;
+}
+
+interface AnnotationRow {
+  pageId: string;
+  data: string;
+  publishedData: string;
+  rev: number;
+  unpublished: boolean;
 }
 
 const ACCENT_SWATCHES = [
@@ -55,6 +69,16 @@ interface NotebookAssignment {
 
 const MIN_FIELD = 8;
 
+/** Sensible default size when a teacher taps rather than drags to place a field. */
+const DEFAULT_FIELD_SIZE: Record<Exclude<FieldTool, "none">, { w: number; h: number }> = {
+  text: { w: 160, h: 28 },
+  checkbox: { w: 18, h: 18 },
+  choice: { w: 160, h: 28 },
+  prompt: { w: 260, h: 120 },
+  image: { w: 180, h: 140 },
+  audio: { w: 220, h: 56 },
+};
+
 export default function NotebookEditor() {
   const { notebookId = "" } = useParams();
   const navigate = useNavigate();
@@ -70,6 +94,12 @@ export default function NotebookEditor() {
   const assignmentsQuery = useQuery({
     queryKey: ["notebook-assignments", notebookId],
     queryFn: () => api.get<{ assignments: NotebookAssignment[] }>(`/api/notebooks/${notebookId}/assignments`),
+    enabled: !!notebookId,
+  });
+
+  const annotationsQuery = useQuery({
+    queryKey: ["annotations", notebookId],
+    queryFn: () => api.get<{ annotations: AnnotationRow[] }>(`/api/notebooks/${notebookId}/annotations`),
     enabled: !!notebookId,
   });
 
@@ -102,6 +132,30 @@ export default function NotebookEditor() {
     return () => window.removeEventListener("keydown", onKey);
   }, [pagesDrawerOpen]);
 
+  // ---- master-page annotation mode ----
+  const [annotateMode, setAnnotateMode] = useState(false);
+  const [inkTool, setInkTool] = useState<ToolState>({
+    kind: "pen", color: TEACHER_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14,
+  });
+  const [inkFingerDraw, setInkFingerDraw] = useState(false);
+  const [annotationLayer, setAnnotationLayer] = useState<LayerData>(emptyLayer());
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadedAnnotationPage = useRef<string | null>(null);
+
+  const saveAnnotation = useMutation({
+    mutationFn: ({ pageId, data }: { pageId: string; data: string }) =>
+      api.put(`/api/notebooks/${notebookId}/annotations/${pageId}`, { data }),
+    onSuccess: () => {
+      setSaveStatus("saved");
+      qc.invalidateQueries({ queryKey: ["annotations", notebookId] });
+    },
+    onError: (e: Error) => {
+      setSaveStatus("idle");
+      toast.error(e.message);
+    },
+  });
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -119,6 +173,35 @@ export default function NotebookEditor() {
     () => (query.data?.fields ?? []).filter((f) => page && f.page_id === page.id),
     [query.data?.fields, page],
   );
+
+  const annotationRows = annotationsQuery.data?.annotations ?? [];
+  const hasUnpublishedAnnotations = annotationRows.some((a) => a.unpublished);
+
+  // Load the current page's draft annotation into local state whenever the
+  // page changes (or the query first resolves) — but never while the teacher
+  // is actively mid-edit, so a background refetch can't clobber their strokes.
+  useEffect(() => {
+    if (!page) return;
+    const key = `${page.id}:${annotationsQuery.dataUpdatedAt}`;
+    if (loadedAnnotationPage.current === key) return;
+    const row = annotationRows.find((a) => a.pageId === page.id);
+    setAnnotationLayer(parseLayer(row?.data));
+    setSaveStatus("idle");
+    loadedAnnotationPage.current = key;
+  }, [page, annotationRows, annotationsQuery.dataUpdatedAt]);
+
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
+
+  const handleAnnotationChange = (layer: LayerData) => {
+    setAnnotationLayer(layer);
+    if (!page) return;
+    setSaveStatus("saving");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    const pageId = page.id;
+    saveTimer.current = setTimeout(() => {
+      saveAnnotation.mutate({ pageId, data: serializeLayer(layer) });
+    }, 1000);
+  };
 
   // How many assignments reference each page — surfaced as a badge on the
   // thumbnail, since a page can legitimately be assigned more than once.
@@ -213,14 +296,21 @@ export default function NotebookEditor() {
   });
 
   const publish = useMutation({
-    mutationFn: () => api.post<{ provisioned: number; summary: any }>(`/api/notebooks/${notebookId}/publish`),
+    mutationFn: () =>
+      api.post<{ provisioned: number; summary: any; annotationsPublished: number }>(
+        `/api/notebooks/${notebookId}/publish`,
+      ),
     onSuccess: (res) => {
       invalidate();
+      qc.invalidateQueries({ queryKey: ["annotations", notebookId] });
       const s = res.summary;
+      const annotated = res.annotationsPublished > 0
+        ? ` …and ${res.annotationsPublished} annotated page${res.annotationsPublished === 1 ? "" : "s"}.`
+        : "";
       toast.success(
-        s
+        (s
           ? `Students updated — ${s.pagesAdded} page(s) added, ${s.fieldsChanged} field(s) changed. Existing work untouched.`
-          : `Published to ${res.provisioned} student${res.provisioned === 1 ? "" : "s"}.`,
+          : `Published to ${res.provisioned} student${res.provisioned === 1 ? "" : "s"}.`) + annotated,
       );
     },
     onError: (e: Error) => toast.error(e.message),
@@ -429,6 +519,14 @@ export default function NotebookEditor() {
           >
             <Plus className="h-4 w-4" /> {busyMessage || "Add pages"}
           </button>
+          {hasUnpublishedAnnotations && (
+            <span
+              title="Students will see these annotations after you Update student notebooks."
+              className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"
+            >
+              <Pen className="h-3 w-3" /> Unpublished annotations
+            </span>
+          )}
           <button
             onClick={() => publish.mutate()}
             disabled={publish.isPending}
@@ -472,10 +570,13 @@ export default function NotebookEditor() {
           { k: "text", label: "Text box", icon: TypeIcon },
           { k: "checkbox", label: "Checkbox", icon: CheckSquare },
           { k: "choice", label: "Dropdown", icon: ListChecks },
+          { k: "prompt", label: "Prompt", icon: MessageSquareText },
+          { k: "image", label: "Image", icon: ImagePlus },
+          { k: "audio", label: "Audio", icon: Mic },
         ] as const).map(({ k, label, icon: Icon }) => (
           <button
             key={k}
-            onClick={() => setTool(tool === k ? "none" : k)}
+            onClick={() => { setAnnotateMode(false); setTool(tool === k ? "none" : k); }}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors",
               tool === k ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50",
@@ -485,6 +586,19 @@ export default function NotebookEditor() {
           </button>
         ))}
         {tool !== "none" && <span className="text-xs text-slate-500">Drag on the page to place it</span>}
+
+        <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden />
+        <button
+          onClick={() => { setTool("none"); setAnnotateMode((v) => !v); }}
+          aria-pressed={annotateMode}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors",
+            annotateMode ? "border-rose-400 bg-rose-50 text-rose-700" : "border-slate-200 text-slate-600 hover:bg-slate-50",
+          )}
+        >
+          <Pen className="h-3.5 w-3.5" /> Annotate
+        </button>
+
         <div className="ml-auto">
           <select
             value={zoom}
@@ -496,6 +610,22 @@ export default function NotebookEditor() {
           </select>
         </div>
       </div>
+
+      {annotateMode && (
+        <div className="overflow-x-auto">
+          <InkToolbar
+            tool={inkTool}
+            onToolChange={setInkTool}
+            fingerDraw={inkFingerDraw}
+            onFingerDrawChange={setInkFingerDraw}
+            status={saveStatus}
+            teacherPalette
+            allowComments
+            zoom={zoom}
+            onZoomChange={(z) => setZoom(typeof z === "number" ? z : 1)}
+          />
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white sm:flex">
@@ -550,42 +680,71 @@ export default function NotebookEditor() {
               </div>
 
               <div className="relative">
-                <PageCanvas
-                  pdfUrl={assetUrl(notebookId, page.asset_key)}
-                  sourceIndex={page.source_index}
-                  pageWidth={page.width}
-                  pageHeight={page.height}
-                  scale={scale}
-                  fields={[]}
-                  fieldValues={{}}
-                  studentLayer={emptyLayer()}
-                  teacherLayer={emptyLayer()}
-                  writeTarget={null}
-                  tool={{ kind: "select", color: "#000", width: 2, stamp: "", fontSize: 14 }}
-                  fingerDraw={false}
-                  fieldsEditable={false}
-                />
-                <FieldLayer
-                  key={page.id}
-                  pageWidth={page.width}
-                  pageHeight={page.height}
-                  scale={scale}
-                  fields={fields}
-                  tool={tool}
-                  selected={selectedField}
-                  onSelect={setSelectedField}
-                  onCreate={(rect) => {
-                    createField.mutate({
-                      pageId: page.id,
-                      type: tool === "none" ? "text" : tool,
-                      ...rect,
-                      label: "",
-                      options: tool === "choice" ? ["Option A", "Option B"] : [],
-                    });
-                    setTool("none");
-                  }}
-                  onCommit={(id, rect) => updateField.mutate({ id, ...rect })}
-                />
+                {annotateMode ? (
+                  <PageCanvas
+                    key={page.id}
+                    pdfUrl={assetUrl(notebookId, page.asset_key)}
+                    sourceIndex={page.source_index}
+                    pageWidth={page.width}
+                    pageHeight={page.height}
+                    scale={scale}
+                    fields={[]}
+                    fieldValues={{}}
+                    studentLayer={emptyLayer()}
+                    teacherLayer={annotationLayer}
+                    onLayerChange={handleAnnotationChange}
+                    writeTarget="teacher"
+                    tool={inkTool}
+                    fingerDraw={inkFingerDraw}
+                    fieldsEditable={false}
+                  />
+                ) : (
+                  <>
+                    <PageCanvas
+                      pdfUrl={assetUrl(notebookId, page.asset_key)}
+                      sourceIndex={page.source_index}
+                      pageWidth={page.width}
+                      pageHeight={page.height}
+                      scale={scale}
+                      fields={[]}
+                      fieldValues={{}}
+                      studentLayer={emptyLayer()}
+                      teacherLayer={annotationLayer}
+                      writeTarget={null}
+                      tool={{ kind: "select", color: "#000", width: 2, stamp: "", fontSize: 14 }}
+                      fingerDraw={false}
+                      fieldsEditable={false}
+                    />
+                    <FieldLayer
+                      key={page.id}
+                      pageWidth={page.width}
+                      pageHeight={page.height}
+                      scale={scale}
+                      fields={fields}
+                      tool={tool}
+                      selected={selectedField}
+                      onSelect={setSelectedField}
+                      onCreate={(rect) => {
+                        const defaultSize = tool === "none" ? DEFAULT_FIELD_SIZE.text : DEFAULT_FIELD_SIZE[tool];
+                        const size = rect.w < MIN_FIELD || rect.h < MIN_FIELD
+                          ? { w: defaultSize.w, h: defaultSize.h }
+                          : { w: rect.w, h: rect.h };
+                        createField.mutate({
+                          pageId: page.id,
+                          type: tool === "none" ? "text" : tool,
+                          x: rect.x,
+                          y: rect.y,
+                          ...size,
+                          label: "",
+                          prompt: "",
+                          options: tool === "choice" ? ["Option A", "Option B"] : [],
+                        });
+                        setTool("none");
+                      }}
+                      onCommit={(id, rect) => updateField.mutate({ id, ...rect })}
+                    />
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -642,9 +801,11 @@ export default function NotebookEditor() {
         {selectedField && (
           <FieldInspector
             field={(query.data.fields ?? []).find((f) => f.id === selectedField)}
+            notebookId={notebookId}
             onClose={() => setSelectedField(null)}
             onSave={(patch) => updateField.mutate({ id: selectedField, ...patch })}
             onDelete={() => deleteField.mutate(selectedField)}
+            onInvalidate={invalidate}
           />
         )}
       </div>
@@ -780,7 +941,7 @@ function FieldLayer({
   pageWidth: number;
   pageHeight: number;
   scale: number;
-  fields: FieldRec[];
+  fields: FieldRow[];
   tool: FieldTool;
   selected: string | null;
   onSelect: (id: string | null) => void;
@@ -790,7 +951,7 @@ function FieldLayer({
   const ref = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [drag, setDrag] = useState<
-    { id: string; mode: "move" | "resize"; startX: number; startY: number; orig: FieldRec } | null
+    { id: string; mode: "move" | "resize"; startX: number; startY: number; orig: FieldRow } | null
   >(null);
   const [preview, setPreview] = useState<Record<string, { x: number; y: number; w: number; h: number }>>({});
 
@@ -846,12 +1007,9 @@ function FieldLayer({
       return;
     }
     if (draft) {
-      // A quick tap places a sensibly-sized default rather than a zero-size field.
-      const rect =
-        draft.w < MIN_FIELD || draft.h < MIN_FIELD
-          ? { x: draft.x, y: draft.y, w: tool === "checkbox" ? 18 : 160, h: tool === "checkbox" ? 18 : 28 }
-          : draft;
-      onCreate(rect);
+      // A quick tap yields a near-zero-size rect; the caller substitutes a
+      // sensible per-type default rather than placing a field you can't see.
+      onCreate(draft);
       setDraft(null);
       start.current = null;
     }
@@ -918,20 +1076,27 @@ function FieldLayer({
 }
 
 function FieldInspector({
-  field, onClose, onSave, onDelete,
+  field, notebookId, onClose, onSave, onDelete, onInvalidate,
 }: {
-  field?: FieldRec;
+  field?: FieldRow;
+  notebookId: string;
   onClose: () => void;
   onSave: (patch: any) => void;
   onDelete: () => void;
+  onInvalidate: () => void;
 }) {
   const [label, setLabel] = useState(field?.label ?? "");
   const [options, setOptions] = useState<string>(() => {
     try { return (JSON.parse(field?.options || "[]") as string[]).join("\n"); } catch { return ""; }
   });
+  const [prompt, setPrompt] = useState(field?.prompt ?? "");
+  const [mediaBump, setMediaBump] = useState(0);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLabel(field?.label ?? "");
+    setPrompt(field?.prompt ?? "");
     try { setOptions((JSON.parse(field?.options || "[]") as string[]).join("\n")); } catch { setOptions(""); }
   }, [field]);
 
@@ -943,6 +1108,34 @@ function FieldInspector({
 
   if (!field) return null;
 
+  const uploadMedia = async (file: File) => {
+    setMediaBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      await api.upload(`/api/notebooks/${notebookId}/fields/${field.id}/media`, form);
+      setMediaBump((n) => n + 1);
+      onInvalidate();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+
+  const removeMedia = async () => {
+    setMediaBusy(true);
+    try {
+      await api.del(`/api/notebooks/${notebookId}/fields/${field.id}/media`);
+      setMediaBump((n) => n + 1);
+      onInvalidate();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+
   const body = (
     <>
       <div className="flex items-center justify-between">
@@ -953,14 +1146,18 @@ function FieldInspector({
       </div>
       <p className="mt-1 text-xs capitalize text-slate-500">{field.type}</p>
 
-      <label className="mt-4 block text-xs font-medium text-slate-600">Label / placeholder</label>
-      <input
-        value={label}
-        onChange={(e) => setLabel(e.target.value)}
-        onBlur={() => onSave({ label })}
-        className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-blue-500"
-        placeholder="e.g. Your answer"
-      />
+      {field.type !== "image" && field.type !== "audio" && (
+        <>
+          <label className="mt-4 block text-xs font-medium text-slate-600">Label / placeholder</label>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={() => onSave({ label })}
+            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-blue-500"
+            placeholder="e.g. Your answer"
+          />
+        </>
+      )}
 
       {field.type === "choice" && (
         <>
@@ -973,6 +1170,84 @@ function FieldInspector({
             className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-blue-500"
           />
         </>
+      )}
+
+      {field.type === "prompt" && (
+        <>
+          <label className="mt-4 block text-xs font-medium text-slate-600">Instruction / prompt</label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onBlur={() => onSave({ prompt })}
+            rows={4}
+            placeholder="e.g. Explain your reasoning in 2-3 sentences."
+            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-blue-500"
+          />
+
+          <label className="mt-4 block text-xs font-medium text-slate-600">Illustration (optional)</label>
+          {field.has_media ? (
+            <div className="mt-1.5">
+              <img
+                src={`/api/notebooks/${notebookId}/fields/${field.id}/media?v=${mediaBump}`}
+                alt="Prompt illustration"
+                className="w-full rounded-lg border border-slate-200 object-cover"
+              />
+              <div className="mt-1.5 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => mediaInputRef.current?.click()}
+                  disabled={mediaBusy}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-2.5 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {mediaBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void removeMedia()}
+                  disabled={mediaBusy}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <X className="h-3.5 w-3.5" /> Remove image
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => mediaInputRef.current?.click()}
+              disabled={mediaBusy}
+              className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-2.5 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-50"
+            >
+              {mediaBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              Upload image
+            </button>
+          )}
+          <input
+            ref={mediaInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void uploadMedia(f);
+            }}
+          />
+        </>
+      )}
+
+      {field.type === "image" && (
+        <p className="mt-4 rounded-lg bg-slate-50 px-2.5 py-2 text-[11px] leading-relaxed text-slate-500">
+          Students will see an empty box here and can add their own picture. The box's shape is the
+          crop area, so size it to the aspect ratio you want their photo to fit.
+        </p>
+      )}
+
+      {field.type === "audio" && (
+        <p className="mt-4 rounded-lg bg-slate-50 px-2.5 py-2 text-[11px] leading-relaxed text-slate-500">
+          Students will see a record button here and can record a short answer in place.
+        </p>
       )}
 
       <p className="mt-4 rounded-lg bg-slate-50 px-2.5 py-2 text-[11px] leading-relaxed text-slate-500">

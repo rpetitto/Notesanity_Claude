@@ -659,12 +659,10 @@ export default function ClassView() {
               style={{ background: `linear-gradient(135deg, ${cls.accent_color || "#1A73E8"}, ${cls.accent_color || "#1A73E8"}99)` }}
             />
           )}
-          {cls.hasCover && (
-            <div
-              className="absolute inset-0"
-              style={{ background: "linear-gradient(to top, rgba(15,23,42,.7), rgba(15,23,42,0) 65%)" }}
-            />
-          )}
+          <div
+            className="absolute inset-0"
+            style={{ background: "linear-gradient(to top, rgba(15,23,42,.55), rgba(15,23,42,0) 65%)" }}
+          />
           <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 p-4">
             {cls.emoji && (
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/90 text-2xl shadow-sm">

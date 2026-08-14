@@ -77,13 +77,25 @@ export interface PageRec {
 export interface FieldRec {
   id: string;
   page_id: string;
-  type: "text" | "checkbox" | "choice";
+  /**
+   * `prompt` pairs a teacher instruction (and optional image) with an answer box;
+   * `image` and `audio` take a student upload inside the teacher-defined box.
+   */
+  type: "text" | "checkbox" | "choice" | "prompt" | "image" | "audio";
   x: number;
   y: number;
   w: number;
   h: number;
   label: string;
   options: string;
+  /** Teacher instruction, used by `prompt` fields. */
+  prompt?: string;
+  /**
+   * Truthy when the teacher attached an illustration to a `prompt` field.
+   * SQLite returns the `IS NOT NULL` test as 0/1, but drivers may hand back a
+   * boolean, so accept either rather than forcing casts at every call site.
+   */
+  has_media?: number | boolean;
 }
 
 export interface LayerRec {

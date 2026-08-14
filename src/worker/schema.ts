@@ -236,6 +236,62 @@ migrate("002_page_groups", async () => {
   }
 });
 
+/**
+ * Richer field types.
+ *
+ *  - `prompt` pairs a teacher instruction (and optionally an image) with a text
+ *    answer box, so a question and its response are one object.
+ *  - `image` and `audio` accept a student upload inside the teacher-defined box.
+ *
+ * `media_key` holds the teacher's own attachment for a prompt. Student uploads
+ * are stored per response and referenced from field_values.
+ */
+migrate("005_rich_fields", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(fields)`).all<{ name: string }>();
+  const has = (name: string) => (cols.results ?? []).some((c) => c.name === name);
+  if (!has("prompt")) {
+    await db.prepare(`ALTER TABLE fields ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`).run();
+  }
+  if (!has("media_key")) {
+    await db.prepare(`ALTER TABLE fields ADD COLUMN media_key TEXT`).run();
+  }
+
+  // A student response can now be a file rather than text.
+  const vcols = await db.prepare(`PRAGMA table_info(field_values)`).all<{ name: string }>();
+  const vhas = (name: string) => (vcols.results ?? []).some((c) => c.name === name);
+  if (!vhas("asset_key")) {
+    await db.prepare(`ALTER TABLE field_values ADD COLUMN asset_key TEXT`).run();
+  }
+  if (!vhas("content_type")) {
+    await db.prepare(`ALTER TABLE field_values ADD COLUMN content_type TEXT`).run();
+  }
+});
+
+/**
+ * Teacher annotations on the master page.
+ *
+ * These are ink the teacher draws on the template itself — worked examples,
+ * corrections, callouts — as opposed to marks on one student's copy. They follow
+ * the same publish model as the rest of the template: `draft_data` is what the
+ * teacher is editing, `published_data` is what students actually see, and
+ * "Update student notebooks" promotes one to the other. That way a half-finished
+ * annotation never appears mid-lesson on thirty screens.
+ */
+migrate("006_master_annotations", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS page_annotations (
+      page_id TEXT PRIMARY KEY,
+      notebook_id TEXT NOT NULL,
+      draft_data TEXT NOT NULL DEFAULT '',
+      published_data TEXT NOT NULL DEFAULT '',
+      rev INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      published_at TEXT
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_page_annotations_nb ON page_annotations(notebook_id)`).run();
+});
+
 /** Class identity: an emoji badge and an optional featured image. */
 migrate("004_class_identity", async () => {
   const cols = await db.prepare(`PRAGMA table_info(classes)`).all<{ name: string }>();

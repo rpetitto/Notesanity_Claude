@@ -1,4 +1,4 @@
-import { app, db } from "flingit";
+import { app, db, storage } from "flingit";
 import { handler, now, uid, requireUser, requireClassMember, HttpError, param} from "../lib/session";
 
 // A single page's ink payload. Generous for real handwriting (a dense page of
@@ -60,7 +60,8 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     .bind(nb.id)
     .all();
   const fields = await db
-    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options FROM fields WHERE notebook_id = ? AND archived = 0`)
+    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, media_key IS NOT NULL AS has_media
+         FROM fields WHERE notebook_id = ? AND archived = 0`)
     .bind(nb.id)
     .all();
   const layers = await db
@@ -68,9 +69,15 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     .bind(instance.id)
     .all();
   const values = await db
-    .prepare(`SELECT field_id, value FROM field_values WHERE instance_id = ?`)
+    .prepare(`SELECT field_id, value, asset_key, content_type FROM field_values WHERE instance_id = ?`)
     .bind(instance.id)
     .all();
+  // Published teacher annotations on the master pages — the same for everyone.
+  const masterAnnotations = await db
+    .prepare(`SELECT page_id, published_data FROM page_annotations WHERE notebook_id = ? AND published_data <> ''`)
+    .bind(nb.id)
+    .all<any>();
+
   const student = await db
     .prepare(`SELECT id, name, email, picture FROM users WHERE id = ?`)
     .bind(studentId)
@@ -83,6 +90,9 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     fields: fields.results ?? [],
     layers: layers.results ?? [],
     values: values.results ?? [],
+    masterAnnotations: (masterAnnotations.results ?? []).map((a: any) => ({
+      pageId: a.page_id, data: a.published_data,
+    })),
     student,
     isTeacher,
     canEditStudentLayer: !isTeacher || studentId === (await requireUser(c)).id,
@@ -146,6 +156,106 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     .bind(uid(), instance.id, pageId, kind, body.data, now())
     .run();
   return c.json({ ok: true, rev: 1 });
+}));
+
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+
+// Checked against the *field's* type, not just "is this any media file" — an
+// audio clip dropped into an image box would render as a broken picture.
+const ACCEPTED: Record<string, RegExp> = {
+  image: /^image\/(png|jpe?g|webp|gif|heic|heif)$/,
+  audio: /^audio\/(webm|mpeg|mp3|mp4|ogg|wav|x-wav|x-m4a|m4a|aac)$/,
+};
+
+/**
+ * Upload a student's image or audio response into an `image` / `audio` field.
+ *
+ * The file is stored under the notebook and referenced from the field value, so
+ * it travels with the same permission model as everything else: only the owning
+ * student can write it, and only class members can read it.
+ */
+app.post("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
+  const studentParam = c.req.query("student") || undefined;
+  const { nb, user, isTeacher, instance } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (isTeacher && instance.student_id !== user.id) {
+    throw new HttpError(403, "Teachers can't answer on a student's behalf");
+  }
+  const fieldId = param(c, "fieldId");
+  const field = await db
+    .prepare(`SELECT id, type FROM fields WHERE id = ? AND notebook_id = ? AND archived = 0`)
+    .bind(fieldId, nb.id)
+    .first<any>();
+  if (!field) throw new HttpError(404, "Field not found");
+  if (field.type !== "image" && field.type !== "audio") {
+    throw new HttpError(400, "That field doesn't accept a file");
+  }
+
+  const form = await c.req.parseBody();
+  const file = form["file"] as File | undefined;
+  if (!file) throw new HttpError(400, "No file uploaded");
+  const accepted = ACCEPTED[field.type];
+  if (!accepted.test(file.type)) {
+    throw new HttpError(
+      400,
+      field.type === "image"
+        ? `That's a ${file.type || "file"} — this box takes an image.`
+        : `That's a ${file.type || "file"} — this box takes an audio recording.`,
+    );
+  }
+  if (file.size > MAX_RESPONSE_BYTES) throw new HttpError(413, "Uploads are limited to 10MB");
+
+  const key = `notebooks/${nb.id}/responses/${instance.id}/${fieldId}-${uid()}`;
+  await storage.put(key, await file.arrayBuffer(), { contentType: file.type });
+
+  const existing = await db
+    .prepare(`SELECT id FROM field_values WHERE instance_id = ? AND field_id = ?`)
+    .bind(instance.id, fieldId)
+    .first<{ id: string }>();
+  if (existing) {
+    await db
+      .prepare(`UPDATE field_values SET asset_key = ?, content_type = ?, value = '', updated_at = ? WHERE id = ?`)
+      .bind(key, file.type, now(), existing.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO field_values (id, instance_id, field_id, value, asset_key, content_type, updated_at)
+         VALUES (?, ?, ?, '', ?, ?, ?)`,
+      )
+      .bind(uid(), instance.id, fieldId, key, file.type, now())
+      .run();
+  }
+  return c.json({ ok: true, contentType: file.type });
+}));
+
+/** Serve a student's uploaded response to anyone who may view their work. */
+app.get("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
+  const studentParam = c.req.query("student") || undefined;
+  const { instance } = await resolveInstance(c, param(c, "id"), studentParam);
+  const row = await db
+    .prepare(`SELECT asset_key, content_type FROM field_values WHERE instance_id = ? AND field_id = ?`)
+    .bind(instance.id, param(c, "fieldId"))
+    .first<any>();
+  if (!row?.asset_key) throw new HttpError(404, "Nothing uploaded yet");
+  const obj = await storage.get(row.asset_key);
+  if (!obj) throw new HttpError(404, "File not found");
+  return new Response(await obj.arrayBuffer(), {
+    headers: {
+      "Content-Type": row.content_type ?? obj.contentType ?? "application/octet-stream",
+      "Cache-Control": "private, max-age=300",
+    },
+  });
+}));
+
+app.delete("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
+  const studentParam = c.req.query("student") || undefined;
+  const { user, isTeacher, instance } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (isTeacher && instance.student_id !== user.id) throw new HttpError(403, "Not your response to remove");
+  await db
+    .prepare(`UPDATE field_values SET asset_key = NULL, content_type = NULL, updated_at = ? WHERE instance_id = ? AND field_id = ?`)
+    .bind(now(), instance.id, param(c, "fieldId"))
+    .run();
+  return c.json({ ok: true });
 }));
 
 /** Save typed answers to teacher-defined form fields. */
