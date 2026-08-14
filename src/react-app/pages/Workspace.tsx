@@ -74,7 +74,7 @@ export default function Workspace() {
   });
 
   const [tool, setTool] = useState<ToolState>({
-    kind: "pen", color: "#202124", width: 2.5, stamp: "⭐", fontSize: 14,
+    kind: "select", color: "#202124", width: 2.5, stamp: "⭐", fontSize: 14,
   });
   const [fingerDraw, setFingerDraw] = useState<boolean>(() => {
     try { return localStorage.getItem(FINGER_KEY) === "1"; } catch { return false; }

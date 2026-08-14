@@ -148,10 +148,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function StudentRows({
+  assignmentId,
   rows,
   grading,
   pointsMax,
 }: {
+  assignmentId: string;
   rows: AssignmentDetailRow[];
   grading: "none" | "complete" | "points" | "letter";
   pointsMax: number;
@@ -162,12 +164,15 @@ function StudentRows({
       <table className="w-full min-w-[420px] text-[16px]">
         <tbody className="divide-y divide-pine/10">
           {rows.map((r) => (
-            <tr key={r.student.id}>
-              <td className="py-2 pr-3">
-                <div className="flex min-w-0 items-center gap-2">
+            <tr key={r.student.id} className="group">
+              <td className="p-0">
+                <Link
+                  to={`/assignments/${assignmentId}?student=${encodeURIComponent(r.student.id)}`}
+                  className="flex min-w-0 items-center gap-2 py-2 pr-3 group-hover:underline"
+                >
                   <Avatar name={r.student.name} picture={r.student.picture} size={24} />
                   <span className="truncate text-pine">{r.student.name}</span>
-                </div>
+                </Link>
               </td>
               <td className="py-2 pr-3">
                 <Chip tone={STATUS_TONE[r.status] ?? "quiet"} className="text-[16px]">
@@ -315,7 +320,12 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
             {detailQ.isLoading && <Spinner label="Loading students…" />}
             {detailQ.error && <ErrorNote error={detailQ.error as Error} />}
             {detailQ.data?.rows && (
-              <StudentRows rows={detailQ.data.rows} grading={detailQ.data.assignment.grading} pointsMax={detailQ.data.assignment.pointsMax} />
+              <StudentRows
+                assignmentId={a.id}
+                rows={detailQ.data.rows}
+                grading={detailQ.data.assignment.grading}
+                pointsMax={detailQ.data.assignment.pointsMax}
+              />
             )}
           </div>
         )}

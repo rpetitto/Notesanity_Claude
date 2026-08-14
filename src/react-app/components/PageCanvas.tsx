@@ -666,7 +666,7 @@ function FieldControl({
             {field.prompt}
           </div>
         )}
-        {field.has_media && (
+        {!!field.has_media && (
           <img
             src={`/api/notebooks/${notebookId}/fields/${field.id}/media`}
             alt=""

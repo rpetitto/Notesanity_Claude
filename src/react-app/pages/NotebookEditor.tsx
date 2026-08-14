@@ -1109,8 +1109,17 @@ function FieldInspector({
   const [mediaBump, setMediaBump] = useState(0);
   const [mediaBusy, setMediaBusy] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+  const syncedFieldId = useRef(field?.id);
 
+  // `field` is looked up fresh from query data every render, so it gets a new
+  // object identity whenever *anything* invalidates the notebook query — an
+  // unrelated field move, an image upload, a background refetch. Resetting on
+  // every such change would blow away text the teacher is mid-typing but
+  // hasn't blurred out of yet, so only resync when the selected field itself
+  // actually changes.
   useEffect(() => {
+    if (field?.id === syncedFieldId.current) return;
+    syncedFieldId.current = field?.id;
     setLabel(field?.label ?? "");
     setPrompt(field?.prompt ?? "");
     try { setOptions((JSON.parse(field?.options || "[]") as string[]).join("\n")); } catch { setOptions(""); }

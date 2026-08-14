@@ -208,7 +208,7 @@ export default function Grading() {
   const [rosterOpen, setRosterOpen] = useState(false);
   const [zoom, setZoom] = useState<ZoomMode>("page");
   const [tool, setTool] = useState<ToolState>({
-    kind: "pen", color: "#D93025", width: 2.5, stamp: "✅", fontSize: 14,
+    kind: "select", color: "#D93025", width: 2.5, stamp: "✅", fontSize: 14,
   });
   const [fingerDraw, setFingerDraw] = useState(false);
 
