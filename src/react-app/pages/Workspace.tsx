@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Check, CheckCheck, ChevronRight, PanelLeft, Send, Undo2 } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronRight, PanelLeft, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
@@ -28,20 +28,22 @@ const RAIL_KEY = "notesanity:studentRail";
 /**
  * The student's page rail.
  *
- * Sections and page names are the teacher's own labelling of the notebook —
- * "Warm up", "Practice", "Homework" — and a student navigating by "page 7" when
- * their teacher says "the practice section" is being made to translate. So the
- * rail shows the same names the teacher gave, in the same order.
+ * Deliberately the same shape as the teacher's page list — thumbnail beside the
+ * name, sections as cards — because it is the same notebook, and a student who
+ * is told "the practice section, page 3" should be reading the same furniture
+ * their teacher is looking at.
  *
  * One component, rendered twice (drawer on small screens, aside on large), so
  * the two can't drift apart.
  */
 function PageRail({
-  pages, notebookId, visiblePage, onSelect,
+  pages, notebookId, visiblePage, assignedIds, onSelect,
 }: {
   pages: PageRec[];
   notebookId: string;
   visiblePage: string;
+  /** When browsing the whole notebook, which pages the assignment actually covers. */
+  assignedIds?: Set<string>;
   onSelect: (id: string) => void;
 }) {
   // Consecutive runs, not a group-by: a section is a stretch of the notebook,
@@ -54,30 +56,79 @@ function PageRail({
     else sections.push({ name, pages: [{ page, number: i + 1 }] });
   });
 
+  const row = ({ page, number }: { page: PageRec; number: number }) => (
+    <button
+      key={page.id}
+      type="button"
+      onClick={() => onSelect(page.id)}
+      className={cn(
+        "mb-1 flex w-full items-start gap-2 rounded-lg border-2 p-1.5 text-left transition-colors",
+        visiblePage === page.id ? "border-pine bg-mint/30" : "border-transparent hover:bg-oat",
+      )}
+    >
+      <PageThumb {...pageSource(notebookId, page)} width={52} />
+      <span className="min-w-0 flex-1 pt-0.5">
+        <span className="block truncate text-[16px] font-medium text-pine">
+          {page.label || `Page ${number}`}
+        </span>
+        <span className="mt-0.5 block text-[16px] text-pine/55">
+          #{number}
+          {assignedIds?.has(page.id) && <span className="text-pine"> · assigned</span>}
+        </span>
+      </span>
+    </button>
+  );
+
   return (
-    <div className="flex flex-col gap-3">
-      {sections.map((section, si) => (
-        <div key={`${section.name}-${si}`} className="flex flex-col gap-3">
-          {section.name && (
-            <div className="label-caps sticky top-0 bg-white/95 pt-1 text-pine/60">{section.name}</div>
+    <div>
+      {sections.map((section, si) =>
+        // Ungrouped runs render bare, so the list isn't a wall of cards.
+        section.name === "" ? (
+          <div key={`plain-${si}`}>{section.pages.map(row)}</div>
+        ) : (
+          <div key={`${section.name}-${si}`} className="mb-2 rounded-xl border border-pine/20 bg-oat/60 p-1.5">
+            <div className="mb-1 flex items-center gap-1 px-1">
+              <span className="label-caps min-w-0 flex-1 truncate text-pine/80">{section.name}</span>
+              <span className="text-[16px] text-pine/55">{section.pages.length}</span>
+            </div>
+            {section.pages.map(row)}
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
+/**
+ * Switches the rail (and the pages on screen) between the assignment and the
+ * whole notebook.
+ *
+ * No counts on the pills: at the 16px interface floor the two labels plus two
+ * numbers overflow a rail this narrow, and the numbers are already visible —
+ * the list is right underneath, and each section carries its own count.
+ */
+function ScopeToggle({
+  showAll, onChange,
+}: { showAll: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="mb-3 flex gap-1 overflow-hidden rounded-full border-2 border-pine bg-white p-1">
+      {[
+        { all: false, label: "Assignment" },
+        { all: true, label: "All pages" },
+      ].map((opt) => (
+        <button
+          key={opt.label}
+          type="button"
+          onClick={() => onChange(opt.all)}
+          aria-pressed={showAll === opt.all}
+          className={cn(
+            "inline-flex h-9 min-w-0 flex-1 items-center justify-center truncate rounded-full px-2",
+            "font-display text-[16px] font-bold transition-colors",
+            showAll === opt.all ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
           )}
-          {section.pages.map(({ page, number }) => (
-            <button
-              key={page.id}
-              type="button"
-              onClick={() => onSelect(page.id)}
-              className={cn(
-                "flex flex-col items-center gap-1 rounded-[12px] border-2 p-1.5 text-left transition-colors",
-                visiblePage === page.id ? "border-pine bg-mint/40" : "border-transparent hover:bg-oat",
-              )}
-            >
-              <PageThumb {...pageSource(notebookId, page)} width={64} />
-              <span className="w-full truncate text-center text-[16px] text-pine/70">
-                {number}{page.label ? ` · ${page.label}` : ""}
-              </span>
-            </button>
-          ))}
-        </div>
+        >
+          {opt.label}
+        </button>
       ))}
     </div>
   );
@@ -177,13 +228,22 @@ export default function Workspace() {
     setMobileRailOpen(false);
   };
 
-  // When opened from an assignment, show only the pages that assignment covers.
+  /**
+   * An assignment scopes the notebook down to its own pages, which is the right
+   * default — but the rest of the notebook is where the notes and worked
+   * examples are, so the student can widen the scope rather than being sent
+   * somewhere else to read them.
+   */
+  const [showAllPages, setShowAllPages] = useState(false);
+  const assignedIds = useMemo(
+    () => new Set<string>(assignment?.pageIds ?? []),
+    [assignment?.pageIds],
+  );
   const pages = useMemo(() => {
     const all = data?.pages ?? [];
-    if (!assignment?.pageIds?.length) return all;
-    const allowed = new Set<string>(assignment.pageIds);
-    return all.filter((p) => allowed.has(p.id));
-  }, [data?.pages, assignment]);
+    if (!assignedIds.size || showAllPages) return all;
+    return all.filter((p) => assignedIds.has(p.id));
+  }, [data?.pages, assignedIds, showAllPages]);
 
   useEffect(() => {
     if (!visiblePage && pages[0]) setVisiblePage(pages[0].id);
@@ -266,28 +326,25 @@ export default function Workspace() {
         </button>
         <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate font-display text-[16px] font-bold text-pine">{data.notebook.title}</div>
-          <div className="truncate text-[16px] text-pine/70">
-            {assignment ? assignment.title : "Notebook"}
-            {pages.length > 0 && ` · Page ${Math.max(1, pageIndex + 1)} of ${pages.length}`}
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[16px] text-pine/70">
+              {assignment ? assignment.title : "Notebook"}
+              {pages.length > 0 && ` · Page ${Math.max(1, pageIndex + 1)} of ${pages.length}`}
+            </span>
+            {assignment && (
+              <span
+                className={cn(
+                  "shrink-0 whitespace-nowrap text-[16px]",
+                  isOverdue(assignment.dueAt) && !locked ? "font-display font-bold text-[#a3341f]" : "text-pine/60",
+                )}
+              >
+                Due {formatDue(assignment.dueAt)}
+              </span>
+            )}
           </div>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* An assignment shows only its own pages. The rest of the notebook is
-              still the student's to read — notes, worked examples, the pages
-              before this one — so give them the way back to it. */}
-          {assignment && (
-            <Link to={`/notebooks/${notebookId}`} className={cn(BUTTON_ROW, "hidden md:inline-flex")}>
-              <BookOpen className="h-4 w-4" strokeWidth={2.5} /> Full notebook
-            </Link>
-          )}
-          {assignment && (
-            <span className="hidden sm:inline">
-              <Chip tone={isOverdue(assignment.dueAt) && !locked ? "warn" : "quiet"}>
-                Due {formatDue(assignment.dueAt)}
-              </Chip>
-            </span>
-          )}
           {/* Marked work is finished: show that, don't offer to hand it in again. */}
           {assignment && marked && (
             <Chip tone="mint" icon={<CheckCheck className="h-4 w-4" strokeWidth={2.5} />}>
@@ -370,7 +427,7 @@ export default function Workspace() {
             onClick={() => setMobileRailOpen(false)}
             aria-hidden
           />
-          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 shadow-xl">
+          <aside className="relative flex h-full w-[248px] max-w-[85vw] flex-col overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 shadow-xl">
             <div className="mb-2 flex items-center justify-between px-1">
               <span className="label-caps text-pine/70">Pages</span>
               <button
@@ -382,15 +439,33 @@ export default function Workspace() {
                 <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
               </button>
             </div>
-            <PageRail pages={pages} notebookId={notebookId} visiblePage={visiblePage} onSelect={goToPage} />
+            {assignedIds.size > 0 && (
+              <ScopeToggle showAll={showAllPages} onChange={setShowAllPages} />
+            )}
+            <PageRail
+              pages={pages}
+              notebookId={notebookId}
+              visiblePage={visiblePage}
+              assignedIds={showAllPages ? assignedIds : undefined}
+              onSelect={goToPage}
+            />
           </aside>
         </div>
       )}
 
       <div className="relative flex min-h-0 flex-1">
         {railOpen && (
-          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 sm:block">
-            <PageRail pages={pages} notebookId={notebookId} visiblePage={visiblePage} onSelect={goToPage} />
+          <aside className="hidden w-[244px] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 sm:block">
+            {assignedIds.size > 0 && (
+              <ScopeToggle showAll={showAllPages} onChange={setShowAllPages} />
+            )}
+            <PageRail
+              pages={pages}
+              notebookId={notebookId}
+              visiblePage={visiblePage}
+              assignedIds={showAllPages ? assignedIds : undefined}
+              onSelect={goToPage}
+            />
           </aside>
         )}
         {!railOpen && (
