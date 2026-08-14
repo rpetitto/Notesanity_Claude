@@ -371,3 +371,57 @@ migrate("008_brand_accents", async () => {
   await db.prepare(`UPDATE classes SET accent_color = '#2E7D6B' WHERE accent_color = '#1A73E8'`).run();
   await db.prepare(`UPDATE notebooks SET accent_color = '#2E7D6B' WHERE accent_color = '#1A73E8'`).run();
 });
+
+/**
+ * Activity log.
+ *
+ * Every change to a student's work, and every teacher action on it, is recorded
+ * with a timestamp. This exists to settle exactly one kind of dispute: a page
+ * edited after it was marked, with the student saying the teacher missed it. The
+ * log is shown to both sides — a record only one party can see isn't evidence,
+ * it's surveillance.
+ *
+ * `detail` is a short human sentence, not a diff: the point is a readable
+ * history, and storing full page contents per revision would dwarf the work.
+ */
+migrate("009_activity_log", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS activity (
+      id TEXT PRIMARY KEY,
+      notebook_id TEXT,
+      instance_id TEXT,
+      page_id TEXT,
+      assignment_id TEXT,
+      student_id TEXT,
+      actor_id TEXT NOT NULL,
+      actor_role TEXT NOT NULL DEFAULT 'student',
+      action TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_activity_instance ON activity(instance_id, created_at)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_activity_assignment ON activity(assignment_id, created_at)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_activity_student ON activity(student_id, created_at)`).run();
+});
+
+/**
+ * Explicit lock state on a submission.
+ *
+ * Submitting already froze the assigned pages, but returning the work unfroze
+ * them — which is precisely the window where a student could edit a page and
+ * claim it was always that way. Work now stays locked once handed in, including
+ * after it comes back, until a teacher deliberately reopens it.
+ */
+migrate("010_submission_lock", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(submissions)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("locked")) {
+    await db.prepare(`ALTER TABLE submissions ADD COLUMN locked INTEGER NOT NULL DEFAULT 0`).run();
+  }
+  if (!has("reopened_at")) {
+    await db.prepare(`ALTER TABLE submissions ADD COLUMN reopened_at TEXT`).run();
+  }
+  // Anything already handed in stays that way.
+  await db.prepare(`UPDATE submissions SET locked = 1 WHERE submitted_at IS NOT NULL`).run();
+});

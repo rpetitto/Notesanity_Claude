@@ -164,6 +164,14 @@ export default function PageCanvas({
   // ---- pointer input ----
   const drawing = useRef(false);
   const points = useRef<number[]>([]);
+  /**
+   * A press that lands on a text box or a field while a pen is selected is
+   * ambiguous: the user may be starting a stroke across it, or reaching for the
+   * box to type in. We hold the gesture until it declares itself — movement
+   * means draw, release without movement means select.
+   */
+  const pendingTap = useRef<{ x: number; y: number; clientX: number; clientY: number; target: HTMLElement } | null>(null);
+  const DRAG_SLOP = 5;
   const drawnUpTo = useRef(0);
   const lastPenAt = useRef(0);
   const activePointer = useRef<number | null>(null);
@@ -268,11 +276,32 @@ export default function PageCanvas({
     if (!isDrawTool) return;
 
     e.preventDefault();
-    drawing.current = true;
     activePointer.current = e.pointerId;
     surface.setPointerCapture(e.pointerId);
     points.current = [x, y, e.pressure > 0 ? e.pressure : 0.5];
     drawnUpTo.current = 0;
+
+    // Did this press land on something typeable? If so, wait to see whether it
+    // becomes a stroke before stealing the tap from it.
+    const under = typeableUnder(e.clientX, e.clientY);
+    if (under) {
+      pendingTap.current = { x, y, clientX: e.clientX, clientY: e.clientY, target: under };
+      drawing.current = false;
+      return;
+    }
+    drawing.current = true;
+  };
+
+  /**
+   * The interactive overlay sits above the pointer surface but is made
+   * pointer-transparent while marking, so we hit-test it by hand.
+   */
+  const typeableUnder = (clientX: number, clientY: number): HTMLElement | null => {
+    for (const el of document.elementsFromPoint(clientX, clientY)) {
+      const node = el as HTMLElement;
+      if (node.dataset?.typeable === "1") return node;
+    }
+    return null;
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -284,6 +313,16 @@ export default function PageCanvas({
       const { x, y } = toPage(e, surface);
       eraseAt(x, y);
       return;
+    }
+
+    // Movement past the slop turns a held tap into a stroke, starting from where
+    // the press actually began so no ink is lost.
+    if (pendingTap.current) {
+      const dx = e.clientX - pendingTap.current.clientX;
+      const dy = e.clientY - pendingTap.current.clientY;
+      if (dx * dx + dy * dy < DRAG_SLOP * DRAG_SLOP) return;
+      pendingTap.current = null;
+      drawing.current = true;
     }
 
     if (!drawing.current) return;
@@ -311,6 +350,21 @@ export default function PageCanvas({
     if (activePointer.current !== e.pointerId) return;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
     activePointer.current = null;
+
+    // Released without moving, over something typeable — that was a tap to type,
+    // not a stroke. Hand the gesture to the element the user aimed at.
+    if (pendingTap.current) {
+      const target = pendingTap.current.target;
+      pendingTap.current = null;
+      points.current = [];
+      const focusable = target.matches("textarea, input, select")
+        ? target
+        : target.querySelector<HTMLElement>("textarea, input, select");
+      if (focusable) focusable.focus();
+      else target.click();
+      return;
+    }
+
     if (drawing.current) {
       drawing.current = false;
       commitStroke();
@@ -409,6 +463,7 @@ export default function PageCanvas({
         {fields.map((f) => (
           <FieldControl
             key={f.id}
+            typeable
             field={f}
             scale={scale}
             value={fieldValues[f.id]}
@@ -427,6 +482,7 @@ export default function PageCanvas({
           <div
             key={t.id}
             className="absolute"
+            data-typeable={own ? "1" : undefined}
             style={{
               left: t.x * scale,
               top: t.y * scale,
@@ -553,7 +609,7 @@ function CommentPin({
 }
 
 function FieldControl({
-  field, scale, value, editable, onChange, notebookId, studentId, onResponseUploaded,
+  field, scale, value, editable, onChange, typeable, notebookId, studentId, onResponseUploaded,
 }: {
   field: FieldLike;
   scale: number;
@@ -563,6 +619,8 @@ function FieldControl({
   notebookId: string;
   studentId?: string;
   onResponseUploaded?: (fieldId: string) => void;
+  /** Marks the control as a tap target while a marking tool is active. */
+  typeable?: boolean;
 }) {
   const style = {
     left: field.x * scale,
@@ -636,9 +694,12 @@ function FieldControl({
 
   const text = fieldText(value);
 
+  const tap = typeable ? { "data-typeable": "1" } : {};
+
   if (field.type === "checkbox") {
     return (
       <button
+        {...tap}
         type="button"
         disabled={!editable}
         onClick={() => onChange(text === "1" ? "" : "1")}
@@ -664,6 +725,7 @@ function FieldControl({
     try { options = JSON.parse(field.options || "[]"); } catch { options = []; }
     return (
       <select
+        {...tap}
         disabled={!editable}
         value={text}
         onChange={(e) => onChange(e.target.value)}
@@ -679,6 +741,7 @@ function FieldControl({
 
   return (
     <textarea
+      {...tap}
       disabled={!editable}
       value={text}
       onChange={(e) => onChange(e.target.value)}
@@ -920,15 +983,25 @@ function ResponseAudioField({
         stopTracks();
         if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
         setRecording(false);
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        chunksRef.current = [];
-        if (blob.size > 0) {
-          const ext = (recorder.mimeType || "audio/webm").includes("webm") ? "webm" : "mp4";
-          void upload(new File([blob], `recording.${ext}`, { type: blob.type }));
-        }
+        // Let any final dataavailable land before assembling — browsers differ on
+        // whether it arrives before or after this handler.
+        setTimeout(() => {
+          const type = recorder.mimeType || "audio/webm";
+          const blob = new Blob(chunksRef.current, { type });
+          chunksRef.current = [];
+          if (blob.size === 0) {
+            toast.error("That recording came back empty — try once more.");
+            return;
+          }
+          const ext = type.includes("webm") ? "webm" : type.includes("ogg") ? "ogg" : "m4a";
+          void upload(new File([blob], `recording.${ext}`, { type }));
+        }, 0);
       };
+      recorder.onerror = () => toast.error("Recording stopped unexpectedly.");
       recorderRef.current = recorder;
-      recorder.start();
+      // A timeslice makes the browser hand over chunks as it goes, so a crash or
+      // an early stop still leaves usable audio.
+      recorder.start(500);
       setRecording(true);
       setElapsed(0);
       timerRef.current = setInterval(() => {
@@ -944,7 +1017,13 @@ function ResponseAudioField({
     }
   };
 
-  const stopRecording = () => recorderRef.current?.stop();
+  const stopRecording = () => {
+    const rec = recorderRef.current;
+    if (!rec || rec.state === "inactive") return;
+    // Flush whatever is buffered before stopping.
+    try { rec.requestData(); } catch { /* not all browsers implement it */ }
+    rec.stop();
+  };
 
   return (
     <div
@@ -966,8 +1045,8 @@ function ResponseAudioField({
           <Loader2 className="h-5 w-5 animate-spin text-pine" />
         </div>
       ) : exists ? (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1">
-          <audio controls src={url} className="w-full" style={{ height: 40, minHeight: 40 }} />
+        <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden p-1">
+          <audio controls src={url} className="w-full shrink-0" style={{ height: 38, minHeight: 38 }} />
           {editable && (
             <div className="flex gap-2">
               <button type="button" onClick={() => inputRef.current?.click()} className="text-[16px] text-pine hover:underline">
@@ -981,7 +1060,7 @@ function ResponseAudioField({
         </div>
       ) : editable ? (
         recording ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-pine/75">
+          <div className="flex h-full w-full items-center justify-center gap-2 px-2 text-pine/75">
             <button
               type="button"
               onClick={stopRecording}
@@ -993,28 +1072,28 @@ function ResponseAudioField({
             <span className="text-[16px] tabular-nums">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
           </div>
         ) : (
-          <div className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-pine/35 bg-oat/70 text-pine/70">
-            <div className="flex items-center gap-2">
+          <div className="flex h-full w-full items-center justify-center gap-2 border-2 border-dashed border-pine/35 bg-oat/70 px-2 text-pine/70">
+            <div className="flex shrink-0 items-center gap-2">
               {canRecord && (
                 <button
                   type="button"
                   onClick={() => void startRecording()}
                   title="Record audio"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-mint text-white hover:bg-mint"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-mint text-pine"
                 >
-                  <Mic className="h-4 w-4" />
+                  <Mic className="h-4 w-4" strokeWidth={2.5} />
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => inputRef.current?.click()}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-pine/35 text-pine/75 hover:border-pine hover:text-pine"
-                title="Attach audio file"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-pine/45 bg-white text-pine hover:border-pine"
+                title="Attach an audio file"
               >
-                <Music className="h-4 w-4" />
+                <Music className="h-4 w-4" strokeWidth={2.5} />
               </button>
             </div>
-            <span className="text-center text-[16px] font-medium leading-tight">Record or attach audio</span>
+            <span className="min-w-0 truncate text-[16px] leading-tight">Record or attach</span>
           </div>
         )
       ) : (

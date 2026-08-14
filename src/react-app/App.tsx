@@ -1,6 +1,8 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useSession } from "./lib/session";
-import { Spinner } from "./components/Shell";
+import { Spinner, ErrorNote } from "./components/Shell";
+import { api } from "./lib/api";
 import Landing from "./pages/Landing";
 import RolePicker from "./pages/RolePicker";
 import TeacherHome from "./pages/TeacherHome";
@@ -15,6 +17,30 @@ import AssignmentEditor from "./pages/AssignmentEditor";
 import Grading from "./pages/Grading";
 import TeacherAssignments from "./pages/TeacherAssignments";
 import StudentNotebook, { StudentNotebookList } from "./pages/StudentNotebook";
+
+/**
+ * A student who reaches `/assignments/:id` (e.g. a stale link, or a share) never
+ * belongs on the teacher grading screen — send them straight to their own
+ * workspace for that assignment's notebook instead.
+ */
+function StudentAssignmentRedirect() {
+  const { assignmentId } = useParams<{ assignmentId: string }>();
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["assignment", assignmentId],
+    queryFn: () => api.get<{ assignment: { notebookId: string } }>(`/api/assignments/${assignmentId}`),
+    enabled: !!assignmentId,
+  });
+
+  if (isLoading) return <Spinner label="Opening assignment…" />;
+  if (error || !data) return <ErrorNote error={(error as Error) ?? new Error("Assignment not found")} />;
+  return <Navigate to={`/notebooks/${data.assignment.notebookId}?assignment=${assignmentId}`} replace />;
+}
+
+/** Routes `/assignments/:id` by role — teachers grade, students land in their workspace. */
+function AssignmentRoute() {
+  const { user } = useSession();
+  return user?.role === "teacher" ? <Grading /> : <StudentAssignmentRedirect />;
+}
 
 export default function App() {
   const { user, isLoading, error } = useSession();
@@ -50,7 +76,7 @@ export default function App() {
       <Route path="/classes/:classId/students/:studentId" element={<StudentNotebookList />} />
       <Route path="/classes/:classId/students/:studentId/notebooks/:notebookId" element={<StudentNotebook />} />
       <Route path="/assignments" element={<TeacherAssignments />} />
-      <Route path="/assignments/:assignmentId" element={<Grading />} />
+      <Route path="/assignments/:assignmentId" element={<AssignmentRoute />} />
       <Route path="/assignments/:assignmentId/edit" element={<AssignmentEditor />} />
       <Route path="/notebooks/:notebookId/edit" element={<NotebookEditor />} />
       <Route path="/notebooks/:notebookId" element={<Workspace />} />

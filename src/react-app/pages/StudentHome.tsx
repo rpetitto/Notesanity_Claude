@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import { Check, KeyRound } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
-import { Button, Card, CardLink, Chip, Input, Modal } from "../components/ui";
+import { StudentAssignmentCard, type StudentAssignmentData } from "./ClassView";
+import { Button, CardLink, Chip, Input, Modal } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
-import { cn, formatDue, isOverdue } from "../lib/utils";
+import { cn } from "../lib/utils";
 
 /** `GET /api/classes` rows also carry `emoji` — declared locally since `ClassSummary`
  * (shared with other owners' code) doesn't yet. There's no `hasCover` flag on this
@@ -15,6 +15,8 @@ interface ClassRow extends ClassSummary {
   emoji?: string;
 }
 
+/** Raw `/api/my/assignments` row — same information as `StudentAssignmentData`
+ * but the notebook's page count comes back as `total`, not `pageCount`. */
 interface MyAssignment {
   id: string;
   title: string;
@@ -23,6 +25,7 @@ interface MyAssignment {
   accentColor: string;
   notebookId: string;
   notebookTitle: string;
+  notebookColor?: string;
   dueAt: string | null;
   grading: "none" | "complete" | "points" | "letter";
   pointsMax: number;
@@ -32,37 +35,36 @@ interface MyAssignment {
   grade: { points: number | null; letter: string | null; complete: number | null } | null;
 }
 
-interface MyNotebook {
-  id: string;
-  title: string;
-  page_count: number;
-  updated_at: string;
-  class_id: string;
-  class_name: string;
-  accent_color: string;
+function toCardData(a: MyAssignment): StudentAssignmentData {
+  return {
+    id: a.id,
+    title: a.title,
+    notebookId: a.notebookId,
+    notebookTitle: a.notebookTitle,
+    notebookColor: a.notebookColor,
+    pageCount: a.total,
+    dueAt: a.dueAt,
+    grading: a.grading,
+    pointsMax: a.pointsMax,
+    complete: a.complete,
+    status: a.status,
+    grade: a.grade,
+  };
 }
 
-const STATUS_LABEL: Record<MyAssignment["status"], string> = {
-  not_started: "Not started",
-  in_progress: "In progress",
-  submitted: "Submitted",
-  returned: "Returned",
-};
+type WorkTab = "todo" | "handed-in" | "marked";
 
-const STATUS_TONE: Record<MyAssignment["status"], "quiet" | "default" | "warn" | "mint"> = {
-  not_started: "quiet",
-  in_progress: "default",
-  submitted: "warn",
-  returned: "mint",
-};
+const WORK_TABS: { key: WorkTab; label: string }[] = [
+  { key: "todo", label: "To do" },
+  { key: "handed-in", label: "Handed in" },
+  { key: "marked", label: "Marked" },
+];
 
-function gradeLabel(a: MyAssignment): string | null {
-  if (!a.grade) return null;
-  if (a.grading === "points") return a.grade.points === null ? null : `${a.grade.points}/${a.pointsMax}`;
-  if (a.grading === "letter") return a.grade.letter ?? null;
-  if (a.grading === "complete") return a.grade.complete === null ? null : a.grade.complete ? "Complete" : "Incomplete";
-  return null;
-}
+const WORK_EMPTY: Record<WorkTab, string> = {
+  todo: "Nothing due. Enjoy it.",
+  "handed-in": "Nothing waiting to be marked.",
+  marked: "No marked work yet.",
+};
 
 function ClassCard({ cls }: { cls: ClassRow }) {
   const [coverFailed, setCoverFailed] = useState(false);
@@ -97,41 +99,6 @@ function ClassCard({ cls }: { cls: ClassRow }) {
         </div>
       </div>
     </CardLink>
-  );
-}
-
-function AssignmentRow({ a }: { a: MyAssignment }) {
-  const navigate = useNavigate();
-  const submitted = a.status === "submitted" || a.status === "returned";
-  const overdue = isOverdue(a.dueAt) && !submitted;
-  const grade = gradeLabel(a);
-
-  return (
-    <button
-      type="button"
-      onClick={() => navigate(`/notebooks/${a.notebookId}?assignment=${a.id}`)}
-      className="flex w-full items-center gap-4 rounded-[22px] border-[3px] border-pine bg-white px-4 py-3.5 text-left transition-[transform,box-shadow] hover:-translate-y-0.5"
-    >
-      <span className="mt-0.5 h-9 w-1.5 shrink-0 rounded-full border border-pine/30" style={{ backgroundColor: a.accentColor || "#20302C" }} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[16px] font-bold text-pine">{a.title}</span>
-        <span className="block truncate text-[16px] text-pine/70">
-          {a.className} &middot; {a.notebookTitle}
-        </span>
-      </span>
-      <span className="hidden shrink-0 text-[16px] text-pine/70 sm:block">
-        {a.complete}/{a.total} pages
-      </span>
-      <span className={cn("shrink-0 text-[16px]", overdue ? "font-bold text-[#a3341f]" : "text-pine/70")}>
-        {formatDue(a.dueAt)}
-      </span>
-      <Chip tone={STATUS_TONE[a.status]} icon={a.status === "returned" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}>
-        {STATUS_LABEL[a.status]}
-      </Chip>
-      {grade && (
-        <Chip tone="mint" icon={<Check className="h-3 w-3" strokeWidth={2.5} />}>{grade}</Chip>
-      )}
-    </button>
   );
 }
 
@@ -196,12 +163,23 @@ export default function StudentHome() {
     queryKey: ["my-assignments"],
     queryFn: () => api.get<{ assignments: MyAssignment[] }>("/api/my/assignments"),
   });
-  const notebooksQ = useQuery({
-    queryKey: ["my-notebooks"],
-    queryFn: () => api.get<{ notebooks: MyNotebook[] }>("/api/my/notebooks"),
-  });
   const [joinOpen, setJoinOpen] = useState(false);
-  const navigate = useNavigate();
+  const [workTab, setWorkTab] = useState<WorkTab>("todo");
+
+  const assignments = assignmentsQ.data?.assignments ?? [];
+  const buckets = useMemo(() => {
+    const todo: MyAssignment[] = [];
+    const handedIn: MyAssignment[] = [];
+    const marked: MyAssignment[] = [];
+    for (const a of assignments) {
+      if (a.status === "returned") marked.push(a);
+      else if (a.status === "submitted") handedIn.push(a);
+      else todo.push(a);
+    }
+    return { todo, "handed-in": handedIn, marked };
+  }, [assignments]);
+
+  const current = buckets[workTab];
 
   return (
     <Shell>
@@ -238,40 +216,42 @@ export default function StudentHome() {
         )}
       </section>
 
-      <section className="mb-8">
+      <section>
         <h2 className="label-caps mb-3 text-pine/70">Assignments</h2>
-        {assignmentsQ.isLoading && <Spinner />}
-        {assignmentsQ.error && <ErrorNote error={assignmentsQ.error as Error} />}
-        {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length === 0 && (
-          <EmptyState title="No assignments yet" body="Join a class to see assignments here." />
-        )}
-        {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length > 0 && (
-          <div className="space-y-2">
-            {assignmentsQ.data.assignments.map((a) => (
-              <AssignmentRow key={a.id} a={a} />
+
+        <div className="mb-5 flex items-center gap-3 overflow-x-auto">
+          <div className="flex gap-1 rounded-full border-[3px] border-pine bg-white p-1">
+            {WORK_TABS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setWorkTab(key)}
+                className={cn(
+                  "inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-full px-4 font-display text-[17px] transition-colors sm:px-5",
+                  workTab === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
+                )}
+              >
+                {label}
+                <Chip tone={workTab === key ? "mint" : "quiet"} className="h-6 min-w-6 justify-center px-1.5 text-[14px]">
+                  {buckets[key].length}
+                </Chip>
+              </button>
             ))}
           </div>
-        )}
-      </section>
+        </div>
 
-      <section>
-        <h2 className="label-caps mb-3 text-pine/70">My notebooks</h2>
-        {notebooksQ.isLoading && <Spinner />}
-        {notebooksQ.error && <ErrorNote error={notebooksQ.error as Error} />}
-        {!notebooksQ.isLoading && !notebooksQ.error && notebooksQ.data && notebooksQ.data.notebooks.length === 0 && (
-          <EmptyState title="No notebooks yet" body="Notebooks your teachers publish will show up here." />
+        {assignmentsQ.isLoading && <Spinner />}
+        {assignmentsQ.error && <ErrorNote error={assignmentsQ.error as Error} />}
+        {!assignmentsQ.isLoading && !assignmentsQ.error && assignments.length === 0 && (
+          <EmptyState title="No assignments yet" body="Join a class to see assignments here." />
         )}
-        {!notebooksQ.isLoading && !notebooksQ.error && notebooksQ.data && notebooksQ.data.notebooks.length > 0 && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {notebooksQ.data.notebooks.map((nb) => (
-              <Card key={nb.id} pressable className="cursor-pointer" onClick={() => navigate(`/notebooks/${nb.id}`)}>
-                <div className="h-1.5 w-full border-b-2 border-pine/12" style={{ backgroundColor: nb.accent_color || "#20302C" }} />
-                <div className="p-4 text-left">
-                  <div className="truncate font-display text-[16px] font-bold text-pine">{nb.title}</div>
-                  <div className="truncate text-[16px] text-pine/70">{nb.class_name}</div>
-                  <div className="mt-3 text-[16px] text-pine/70">{nb.page_count} pages</div>
-                </div>
-              </Card>
+        {!assignmentsQ.isLoading && !assignmentsQ.error && assignments.length > 0 && current.length === 0 && (
+          <EmptyState title={WORK_EMPTY[workTab]} />
+        )}
+        {!assignmentsQ.isLoading && !assignmentsQ.error && current.length > 0 && (
+          <div className="space-y-3">
+            {current.map((a) => (
+              <StudentAssignmentCard key={a.id} a={toCardData(a)} />
             ))}
           </div>
         )}

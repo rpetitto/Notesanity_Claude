@@ -1,5 +1,6 @@
 import { app, db, storage } from "flingit";
 import { handler, now, uid, requireUser, requireClassMember, HttpError, param} from "../lib/session";
+import { logActivity, pageLock } from "../lib/activity";
 
 // A single page's ink payload. Generous for real handwriting (a dense page of
 // strokes compresses to well under this) while stopping a runaway client.
@@ -120,18 +121,19 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   if (typeof body.data !== "string") throw new HttpError(400, "data must be a string");
   if (body.data.length > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
 
-  // A submitted assignment locks the student layer until the teacher returns it.
+  // Handed-in work stays frozen, including after it is returned, until a teacher
+  // reopens it. That closes the window where a page could be changed after
+  // marking and passed off as the original.
   if (kind === "student") {
-    const locked = await db
-      .prepare(
-        `SELECT s.id FROM submissions s
-           JOIN assignments a ON a.id = s.assignment_id
-          WHERE s.student_id = ? AND s.status = 'submitted'
-            AND a.notebook_id = ? AND a.page_ids LIKE ?`,
-      )
-      .bind(instance.student_id, instance.notebook_id, `%"${pageId}"%`)
-      .first();
-    if (locked) throw new HttpError(423, "This page is locked — it's part of a submitted assignment.");
+    const lock = await pageLock(instance.student_id, instance.notebook_id, pageId);
+    if (lock) {
+      throw new HttpError(
+        423,
+        lock.returned
+          ? `This page is locked — you handed it in for "${lock.title}" and it's been marked. Ask your teacher to reopen it.`
+          : `This page is locked — you handed it in for "${lock.title}".`,
+      );
+    }
   }
 
   const existing = await db
@@ -148,6 +150,13 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
       .prepare(`UPDATE layers SET data = ?, rev = ?, updated_at = ? WHERE id = ?`)
       .bind(body.data, rev, now(), existing.id)
       .run();
+    await logActivity({
+      actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
+      action: kind === "teacher" ? "annotate" : "edit",
+      detail: kind === "teacher" ? "Marked up this page" : "Wrote on this page",
+      notebookId: instance.notebook_id, instanceId: instance.id, pageId,
+      studentId: instance.student_id,
+    });
     return c.json({ ok: true, rev });
   }
 
@@ -155,6 +164,13 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     .prepare(`INSERT INTO layers (id, instance_id, page_id, kind, data, rev, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)`)
     .bind(uid(), instance.id, pageId, kind, body.data, now())
     .run();
+  await logActivity({
+    actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
+    action: kind === "teacher" ? "annotate" : "edit",
+    detail: kind === "teacher" ? "Marked up this page" : "Wrote on this page",
+    notebookId: instance.notebook_id, instanceId: instance.id, pageId,
+    studentId: instance.student_id,
+  });
   return c.json({ ok: true, rev: 1 });
 }));
 
@@ -225,6 +241,11 @@ app.post("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
       .bind(uid(), instance.id, fieldId, key, file.type, now())
       .run();
   }
+  await logActivity({
+    actorId: user.id, actorRole: isTeacher ? "teacher" : "student", action: "upload",
+    detail: field.type === "image" ? "Added an image" : "Added a recording",
+    notebookId: nb.id, instanceId: instance.id, studentId: instance.student_id,
+  });
   return c.json({ ok: true, contentType: file.type });
 }));
 
@@ -266,6 +287,17 @@ app.put("/api/notebooks/:id/values", handler(async (c) => {
     throw new HttpError(403, "Teachers can't type into a student's answers");
   }
   const { values } = await c.req.json<{ values: { fieldId: string; value: string }[] }>();
+
+  // Answers live on a page too, so they freeze with it.
+  for (const v of values ?? []) {
+    const field = await db
+      .prepare(`SELECT page_id FROM fields WHERE id = ?`)
+      .bind(v.fieldId)
+      .first<{ page_id: string }>();
+    if (!field) continue;
+    const lock = await pageLock(instance.student_id, instance.notebook_id, field.page_id);
+    if (lock) throw new HttpError(423, `This page is locked — you handed it in for "${lock.title}".`);
+  }
   for (const v of values ?? []) {
     if (typeof v.value !== "string" || v.value.length > 8192) continue;
     const existing = await db
@@ -283,6 +315,13 @@ app.put("/api/notebooks/:id/values", handler(async (c) => {
         .bind(uid(), instance.id, v.fieldId, v.value, now())
         .run();
     }
+  }
+  if ((values ?? []).length) {
+    await logActivity({
+      actorId: user.id, actorRole: isTeacher ? "teacher" : "student", action: "answer",
+      detail: "Typed an answer", notebookId: instance.notebook_id,
+      instanceId: instance.id, studentId: instance.student_id,
+    });
   }
   return c.json({ ok: true });
 }));

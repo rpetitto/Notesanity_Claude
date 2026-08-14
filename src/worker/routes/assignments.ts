@@ -1,6 +1,7 @@
 import { app, db } from "flingit";
 import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+import { logActivity } from "../lib/activity";
 
 /** An empty ink layer still serializes to a few characters, so require real content. */
 const HAS_CONTENT = 24;
@@ -328,15 +329,19 @@ app.post("/api/assignments/:id/submit", handler(async (c) => {
     .first<{ id: string }>();
   if (existing) {
     await db
-      .prepare(`UPDATE submissions SET status = 'submitted', submitted_at = ?, updated_at = ? WHERE id = ?`)
+      .prepare(`UPDATE submissions SET status = 'submitted', submitted_at = ?, locked = 1, updated_at = ? WHERE id = ?`)
       .bind(now(), now(), existing.id)
       .run();
   } else {
     await db
-      .prepare(`INSERT INTO submissions (id, assignment_id, student_id, status, submitted_at, created_at, updated_at) VALUES (?, ?, ?, 'submitted', ?, ?, ?)`)
+      .prepare(`INSERT INTO submissions (id, assignment_id, student_id, status, submitted_at, locked, created_at, updated_at) VALUES (?, ?, ?, 'submitted', ?, 1, ?, ?)`)
       .bind(uid(), a.id, user.id, now(), now(), now())
       .run();
   }
+  await logActivity({
+    actorId: user.id, actorRole: "student", action: "submit",
+    detail: `Handed in "${a.title}"`, assignmentId: a.id, notebookId: a.notebook_id, studentId: user.id,
+  });
   return c.json({ ok: true });
 }));
 
@@ -350,10 +355,18 @@ app.post("/api/assignments/:id/unsubmit", handler(async (c) => {
     .first<any>();
   if (!sub) throw new HttpError(404, "Nothing submitted yet");
   if (sub.returned_at) throw new HttpError(400, "This work has already been returned");
+  if (sub.graded_at) {
+    throw new HttpError(400, "Your teacher has already marked this. Ask them to reopen it if you need to change something.");
+  }
   await db
-    .prepare(`UPDATE submissions SET status = 'in_progress', submitted_at = NULL, updated_at = ? WHERE id = ?`)
+    .prepare(`UPDATE submissions SET status = 'in_progress', submitted_at = NULL, locked = 0, updated_at = ? WHERE id = ?`)
     .bind(now(), sub.id)
     .run();
+  await logActivity({
+    actorId: user.id, actorRole: "student", action: "unsubmit",
+    detail: `Took back "${a.title}" before it was marked`, assignmentId: a.id,
+    notebookId: a.notebook_id, studentId: user.id,
+  });
   return c.json({ ok: true });
 }));
 
@@ -383,12 +396,16 @@ app.post("/api/assignments/:id/grade", handler(async (c) => {
       .bind(uid(), a.id, b.studentId, b.points ?? null, b.letter ?? null, completeVal, b.feedback ?? "", now(), user.id, now(), now())
       .run();
   }
+  await logActivity({
+    actorId: user.id, actorRole: "teacher", action: "grade",
+    detail: `Marked "${a.title}"`, assignmentId: a.id, notebookId: a.notebook_id, studentId: b.studentId,
+  });
   return c.json({ ok: true });
 }));
 
 /** Release grades — one student, or the whole class at once. */
 app.post("/api/assignments/:id/return", handler(async (c) => {
-  const { a, isTeacher } = await loadAssignment(c, param(c, "id"));
+  const { a, user, isTeacher } = await loadAssignment(c, param(c, "id"));
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
   const { studentId, all } = await c.req.json<{ studentId?: string; all?: boolean }>();
   if (all) {
@@ -396,6 +413,10 @@ app.post("/api/assignments/:id/return", handler(async (c) => {
       .prepare(`UPDATE submissions SET status = 'returned', returned_at = ?, updated_at = ? WHERE assignment_id = ? AND graded_at IS NOT NULL`)
       .bind(now(), now(), a.id)
       .run();
+    await logActivity({
+      actorId: user.id, actorRole: "teacher", action: "return",
+      detail: `Returned "${a.title}" to the class`, assignmentId: a.id, notebookId: a.notebook_id,
+    });
     return c.json({ ok: true, scope: "all" });
   }
   if (!studentId) throw new HttpError(400, "studentId or all is required");
@@ -403,7 +424,108 @@ app.post("/api/assignments/:id/return", handler(async (c) => {
     .prepare(`UPDATE submissions SET status = 'returned', returned_at = ?, updated_at = ? WHERE assignment_id = ? AND student_id = ?`)
     .bind(now(), now(), a.id, studentId)
     .run();
+  await logActivity({
+    actorId: user.id, actorRole: "teacher", action: "return",
+    detail: `Returned "${a.title}"`, assignmentId: a.id, notebookId: a.notebook_id, studentId,
+  });
   return c.json({ ok: true, scope: "one" });
+}));
+
+/**
+ * Reopen a student's submission so they can work on it again.
+ *
+ * This is the only way a locked page becomes editable after it was handed in,
+ * and it is recorded, so "the page changed after marking" always has an
+ * accountable answer.
+ */
+app.post("/api/assignments/:id/reopen", handler(async (c) => {
+  const { a, user, isTeacher } = await loadAssignment(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { studentId } = await c.req.json<{ studentId: string }>();
+  if (!studentId) throw new HttpError(400, "Which student?");
+  const sub = await db
+    .prepare(`SELECT id FROM submissions WHERE assignment_id = ? AND student_id = ?`)
+    .bind(a.id, studentId)
+    .first<{ id: string }>();
+  if (!sub) throw new HttpError(404, "No submission to reopen");
+
+  await db
+    .prepare(
+      `UPDATE submissions SET locked = 0, status = 'in_progress', reopened_at = ?, submitted_at = NULL, updated_at = ?
+        WHERE id = ?`,
+    )
+    .bind(now(), now(), sub.id)
+    .run();
+  await logActivity({
+    actorId: user.id, actorRole: "teacher", action: "reopen",
+    detail: `Reopened "${a.title}" for more work`, assignmentId: a.id,
+    notebookId: a.notebook_id, studentId,
+  });
+  return c.json({ ok: true });
+}));
+
+/**
+ * The shared history of a piece of work. A student sees their own; a teacher of
+ * the class sees any of their students'. Both see the same entries.
+ */
+app.get("/api/activity", handler(async (c) => {
+  const user = await requireUser(c);
+  const assignmentId = c.req.query("assignment");
+  const notebookId = c.req.query("notebook");
+  const studentParam = c.req.query("student");
+
+  let studentId = user.id;
+  if (studentParam && studentParam !== user.id) {
+    // Only a teacher of the relevant class may read someone else's history.
+    const cls = assignmentId
+      ? await db.prepare(`SELECT class_id FROM assignments WHERE id = ?`).bind(assignmentId).first<any>()
+      : await db.prepare(`SELECT class_id FROM notebooks WHERE id = ?`).bind(notebookId ?? "").first<any>();
+    if (!cls) throw new HttpError(404, "Not found");
+    await requireClassTeacher(c, cls.class_id);
+    studentId = studentParam;
+  }
+
+  const clauses = ["student_id = ?"];
+  const binds: any[] = [studentId];
+
+  if (assignmentId) {
+    // Page edits are logged against the page, not the assignment, so asking for
+    // an assignment's history has to pull in work on the pages it covers —
+    // otherwise "they edited it after I marked it" wouldn't show up at all.
+    const a = await db
+      .prepare(`SELECT notebook_id, page_ids FROM assignments WHERE id = ?`)
+      .bind(assignmentId)
+      .first<any>();
+    const pageIds: string[] = a ? JSON.parse(a.page_ids || "[]") : [];
+    if (a && pageIds.length) {
+      const holes = pageIds.map(() => "?").join(",");
+      clauses.push(`(assignment_id = ? OR (notebook_id = ? AND page_id IN (${holes})))`);
+      binds.push(assignmentId, a.notebook_id, ...pageIds);
+    } else {
+      clauses.push("assignment_id = ?");
+      binds.push(assignmentId);
+    }
+  } else if (notebookId) {
+    clauses.push("notebook_id = ?");
+    binds.push(notebookId);
+  }
+
+  const rows = await db
+    .prepare(
+      `SELECT a.id, a.action, a.detail, a.created_at, a.page_id, a.actor_role, u.name AS actor_name
+         FROM activity a LEFT JOIN users u ON u.id = a.actor_id
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY a.created_at DESC LIMIT 200`,
+    )
+    .bind(...binds)
+    .all<any>();
+
+  return c.json({
+    events: (rows.results ?? []).map((r) => ({
+      id: r.id, action: r.action, detail: r.detail, at: r.created_at,
+      pageId: r.page_id, actor: r.actor_name ?? "Someone", actorRole: r.actor_role,
+    })),
+  });
 }));
 
 /** Class gradebook: every active assignment across every student. */

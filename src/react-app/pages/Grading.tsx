@@ -14,8 +14,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Check, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck, Lock, MoreVertical, PanelLeft,
-  Pencil, Pin, PinOff, Send, Trash2, Users, X,
+  ArrowLeft, Check, CheckCheck, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck,
+  History, Lock, Mail, MoreVertical, PanelLeft, Pencil, Pin, PinOff, Send, Trash2, Type as TypeIcon,
+  Undo2, Unlock, Upload, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, type PageRec, type WorkResponse } from "../lib/api";
@@ -196,6 +197,11 @@ export default function Grading() {
   const rows = detail.data?.rows ?? [];
   const isTeacher = detail.data?.isTeacher ?? false;
 
+  // Whether there's anything left for "Return all graded" to actually do.
+  const anyGraded = rows.some((r) => r.graded);
+  const outstanding = rows.some((r) => r.graded && !r.returnedAt);
+  const allMarkedAndReturned = anyGraded && rows.every((r) => !r.graded || !!r.returnedAt);
+
   const [studentIdx, setStudentIdx] = useState(0);
   const [pageIdx, setPageIdx] = useState(0);
   const [pageLocked, setPageLocked] = useState(true);
@@ -235,6 +241,14 @@ export default function Grading() {
   const [deleteImpact, setDeleteImpact] = useState<AssignmentImpact | null>(null);
   const [impactLoading, setImpactLoading] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [reopenModalOpen, setReopenModalOpen] = useState(false);
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setHistoryOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [historyOpen]);
 
   // Deep-link support: `?student=<id>` opens straight to that row, once.
   const appliedStudentParam = useRef(false);
@@ -378,6 +392,15 @@ export default function Grading() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const reopen = useMutation({
+    mutationFn: () => api.post(`/api/assignments/${assignmentId}/reopen`, { studentId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["assignment", assignmentId] });
+      toast.success("Reopened for the student");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   if (detail.isLoading) return <Spinner label="Loading assignment…" />;
   if (detail.error) return <div className="p-6"><ErrorNote error={detail.error as Error} /></div>;
   if (!assignment) return null;
@@ -428,8 +451,22 @@ export default function Grading() {
           <Button variant="secondary" size="sm" onClick={() => setRosterOpen((v) => !v)}>
             <Users className="h-4 w-4" strokeWidth={2.5} /> Roster
           </Button>
-          <Button variant="primary" onClick={() => returnWork.mutate({ all: true })}>
-            <Send className="h-4 w-4" strokeWidth={2.5} /> Return all graded
+          {outstanding ? (
+            <Button variant="primary" onClick={() => returnWork.mutate({ all: true })}>
+              <Send className="h-4 w-4" strokeWidth={2.5} /> Return all graded
+            </Button>
+          ) : allMarkedAndReturned ? (
+            <Chip tone="mint" icon={<CheckCheck className="h-3.5 w-3.5" strokeWidth={2.5} />}>
+              All marked and returned
+            </Chip>
+          ) : (
+            <Button variant="secondary" disabled>
+              <Send className="h-4 w-4" strokeWidth={2.5} /> Nothing to return yet
+            </Button>
+          )}
+
+          <Button variant="secondary" size="sm" onClick={() => setHistoryOpen(true)}>
+            <History className="h-4 w-4" strokeWidth={2.5} /> History
           </Button>
 
           {isTeacher && (
@@ -653,6 +690,7 @@ export default function Grading() {
           row={current}
           onSave={(body) => grade.mutate(body)}
           onReturn={() => returnWork.mutate({ studentId })}
+          onReopen={() => setReopenModalOpen(true)}
           saving={grade.isPending}
           mobileOpen={gradeSheetOpen}
           onMobileClose={() => setGradeSheetOpen(false)}
@@ -680,6 +718,133 @@ export default function Grading() {
           onConfirm={() => deleteMutation.mutate()}
         />
       )}
+
+      {reopenModalOpen && current && (
+        <Modal onClose={() => setReopenModalOpen(false)}>
+          <div className="flex items-start justify-between">
+            <h3 className="text-[17px] text-pine">Reopen for {current.student.name}?</h3>
+            <button
+              onClick={() => setReopenModalOpen(false)}
+              className="rounded-full p-1 text-pine/50 hover:bg-pine/8"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" strokeWidth={2.5} />
+            </button>
+          </div>
+          <p className="mt-3 text-[16px] leading-relaxed text-pine/80">
+            This lets {current.student.name} change their work again. The change will be recorded in the history.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setReopenModalOpen(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={reopen.isPending}
+              onClick={() => { reopen.mutate(undefined, { onSuccess: () => setReopenModalOpen(false) }); }}
+            >
+              <Unlock className="h-4 w-4" strokeWidth={2.5} /> Reopen
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {historyOpen && (
+        <HistoryDrawer
+          assignmentId={assignmentId}
+          studentId={studentId}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+const ACTIVITY_ICON: Record<string, typeof Pencil> = {
+  edit: Pencil,
+  annotate: Pencil,
+  answer: TypeIcon,
+  upload: Upload,
+  submit: Send,
+  unsubmit: Undo2,
+  grade: CheckCheck,
+  return: Mail,
+  reopen: Unlock,
+};
+
+interface ActivityEvent {
+  id: string;
+  action: string;
+  detail: string;
+  at: string;
+  pageId: string | null;
+  actor: string;
+  actorRole: string;
+}
+
+/** Right-hand drawer showing one student's full activity history for this assignment. */
+function HistoryDrawer({
+  assignmentId, studentId, onClose,
+}: {
+  assignmentId: string;
+  studentId?: string;
+  onClose: () => void;
+}) {
+  const activity = useQuery({
+    queryKey: ["activity", assignmentId, studentId],
+    queryFn: () =>
+      api.get<{ events: ActivityEvent[] }>(
+        `/api/activity?assignment=${encodeURIComponent(assignmentId)}&student=${encodeURIComponent(studentId!)}`,
+      ),
+    enabled: !!assignmentId && !!studentId,
+  });
+  const events = activity.data?.events ?? [];
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end">
+      <div className="absolute inset-0 bg-pine/40" onClick={onClose} aria-hidden />
+      <aside className="relative flex h-full w-full max-w-sm flex-col border-l-2 border-pine/12 bg-white shadow-xl">
+        <div className="flex items-start justify-between border-b-2 border-pine/12 px-4 py-3">
+          <div>
+            <h3 className="font-display text-[16px] font-bold text-pine">History</h3>
+            <p className="mt-0.5 text-[16px] leading-relaxed text-pine/70">
+              Everything that's happened to this work. Students see the same list.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-full p-1.5 text-pine/50 hover:bg-pine/8"
+            aria-label="Close history"
+          >
+            <X className="h-4 w-4" strokeWidth={2.5} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {activity.isLoading ? (
+            <Spinner label="Loading history…" />
+          ) : events.length === 0 ? (
+            <p className="py-8 text-center text-[16px] text-pine/60">Nothing recorded yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {events.map((ev) => {
+                const Icon = ACTIVITY_ICON[ev.action] ?? Pencil;
+                return (
+                  <li key={ev.id} className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-pine/20 text-pine">
+                      <Icon className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[16px] leading-snug text-pine">{ev.detail}</p>
+                      <p className="mt-0.5 text-[16px] text-pine/60">
+                        {ev.actor} · <span title={ev.at}>{relativeTime(ev.at)}</span>
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }
@@ -706,12 +871,13 @@ function StatusPill({ row }: { row?: GradeRow }) {
 }
 
 function GradePanel({
-  assignment, row, onSave, onReturn, saving, mobileOpen, onMobileClose,
+  assignment, row, onSave, onReturn, onReopen, saving, mobileOpen, onMobileClose,
 }: {
   assignment: any;
   row?: GradeRow;
   onSave: (body: any) => void;
   onReturn: () => void;
+  onReopen: () => void;
   saving: boolean;
   mobileOpen: boolean;
   onMobileClose: () => void;
@@ -816,6 +982,12 @@ function GradePanel({
         <p className="mt-3 flex items-center gap-1.5 text-[16px] text-pine/70">
           <Lock className="h-3 w-3" strokeWidth={2.5} /> Returned {relativeTime(row.returnedAt)}
         </p>
+      )}
+
+      {row.submittedAt && (
+        <Button variant="secondary" onClick={onReopen} className="mt-3 w-full">
+          <Unlock className="h-4 w-4" strokeWidth={2.5} /> Reopen for student
+        </Button>
       )}
     </>
   );

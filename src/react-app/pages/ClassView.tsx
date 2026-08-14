@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  BookOpen, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus, RefreshCw, Upload, UserPlus, UserX, Users,
+  BookOpen, Check, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus, RefreshCw, Upload, UserPlus, UserX, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import Gradebook from "./Gradebook";
 import PageThumb from "../components/PageThumb";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
-import { Button, ButtonLink, Card, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
-import { api, assetUrl, type AssignmentSummary } from "../lib/api";
+import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
+import { api, assetUrl, type AssignmentSummary, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
@@ -465,6 +465,173 @@ function CustomizeModal({
   );
 }
 
+// ---------- student assignment card (also used by StudentHome's "My work" list) ----------
+
+/** Minimal shape a student-facing assignment card needs — both `/api/my/assignments`
+ * and the student view of `/api/classes/:id/assignments` satisfy this. */
+export interface StudentAssignmentData {
+  id: string;
+  title: string;
+  notebookId: string;
+  notebookTitle: string;
+  notebookColor?: string;
+  pageCount: number;
+  dueAt: string | null;
+  grading: "none" | "complete" | "points" | "letter";
+  pointsMax: number;
+  complete: number;
+  status: "not_started" | "in_progress" | "submitted" | "returned";
+  grade: { points: number | null; letter: string | null; complete: number | null } | null;
+}
+
+/** Compress a sorted-or-not list of page numbers into "4, 7–9" style ranges.
+ * `TeacherAssignments` has an identical private helper — not exported there,
+ * and that file is out of scope here, so this is a small deliberate duplicate. */
+function formatPageNumbers(numbers: number[]): string {
+  const sorted = Array.from(new Set(numbers)).sort((a, b) => a - b);
+  if (sorted.length === 0) return "";
+  const parts: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    const n = sorted[i];
+    if (n === prev + 1) {
+      prev = n;
+      continue;
+    }
+    parts.push(start === prev ? `${start}` : `${start}–${prev}`);
+    if (i < sorted.length) {
+      start = n;
+      prev = n;
+    }
+  }
+  return parts.join(", ");
+}
+
+function studentGradeLabel(
+  grading: "none" | "complete" | "points" | "letter",
+  pointsMax: number,
+  grade: { points: number | null; letter: string | null; complete: number | null } | null,
+): string | null {
+  if (!grade) return null;
+  if (grading === "points") return grade.points === null ? null : `${grade.points}/${pointsMax}`;
+  if (grading === "letter") return grade.letter ?? null;
+  if (grading === "complete") return grade.complete === null ? null : grade.complete ? "Complete" : "Incomplete";
+  return null;
+}
+
+const STUDENT_STATUS_TONE: Record<StudentAssignmentData["status"], "quiet" | "default" | "mint"> = {
+  not_started: "quiet",
+  in_progress: "default",
+  submitted: "mint",
+  returned: "mint",
+};
+const STUDENT_STATUS_LABEL: Record<StudentAssignmentData["status"], string> = {
+  not_started: "Not started",
+  in_progress: "In progress",
+  submitted: "Submitted",
+  returned: "Returned",
+};
+
+/** A compact, student-facing sibling of `AssignmentCard` — thumbnail stack and
+ * status, but none of the teacher-only scorecard or roster. The whole card is
+ * the action: it opens straight into the student's workspace. */
+export function StudentAssignmentCard({ a }: { a: StudentAssignmentData }) {
+  const notebookQ = useQuery({
+    queryKey: ["notebook", a.notebookId],
+    queryFn: () => api.get<{ pages: PageRec[] }>(`/api/notebooks/${a.notebookId}`),
+  });
+  const detailQ = useQuery({
+    queryKey: ["assignment", a.id],
+    queryFn: () => api.get<{ assignment: { pageIds: string[]; pageNumbers: number[] } }>(`/api/assignments/${a.id}`),
+  });
+
+  const assignedPages = useMemo(() => {
+    const pageIds = detailQ.data?.assignment.pageIds;
+    const pages = notebookQ.data?.pages;
+    if (!pageIds || !pages) return [];
+    const set = new Set(pageIds);
+    return pages.filter((p) => set.has(p.id));
+  }, [detailQ.data, notebookQ.data]);
+
+  const pageNumbersLabel = useMemo(() => {
+    const nums = detailQ.data?.assignment.pageNumbers;
+    if (!nums || nums.length === 0) return `${a.pageCount} page${a.pageCount === 1 ? "" : "s"}`;
+    return `Page${nums.length === 1 ? "" : "s"} ${formatPageNumbers(nums)}`;
+  }, [detailQ.data, a.pageCount]);
+
+  const submitted = a.status === "submitted" || a.status === "returned";
+  const overdue = isOverdue(a.dueAt) && !submitted;
+  const accent = a.notebookColor || DEFAULT_ACCENT;
+  const stackPages = assignedPages.slice(0, 4);
+  const extra = Math.max(0, assignedPages.length - stackPages.length);
+  const grade = a.status === "returned" ? studentGradeLabel(a.grading, a.pointsMax, a.grade) : null;
+
+  return (
+    <CardLink to={`/notebooks/${a.notebookId}?assignment=${a.id}`} accent={accent}>
+      <div className="flex gap-4 p-4">
+        <div
+          className="relative hidden h-[92px] w-[76px] shrink-0 rounded-lg sm:block"
+          style={{ backgroundColor: `${accent}14` }}
+        >
+          {stackPages.length === 0 && <div className="h-full w-full animate-pulse rounded-lg bg-oat" />}
+          {stackPages.map((p, i) => (
+            <div
+              key={p.id}
+              className="absolute rounded shadow"
+              style={{
+                top: i * 7,
+                left: i * 9,
+                transform: `rotate(${(i - (stackPages.length - 1) / 2) * 7}deg)`,
+                zIndex: stackPages.length - i,
+              }}
+            >
+              <PageThumb
+                pdfUrl={assetUrl(a.notebookId, p.asset_key)}
+                sourceIndex={p.source_index}
+                pageWidth={p.width}
+                pageHeight={p.height}
+                width={56}
+              />
+            </div>
+          ))}
+          {extra > 0 && (
+            <span className="absolute -bottom-1 -right-1 z-20 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-pine px-1 font-display text-[16px] text-oat">
+              +{extra}
+            </span>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-display text-[17px] text-pine">{a.title}</div>
+          <div className="mt-0.5 truncate text-[16px] text-pine/70">
+            {a.notebookTitle} &middot; {pageNumbersLabel}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Chip
+              tone={STUDENT_STATUS_TONE[a.status]}
+              icon={submitted ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}
+            >
+              {STUDENT_STATUS_LABEL[a.status]}
+            </Chip>
+            <span className={cn("text-[16px]", overdue ? "font-display text-[#a3341f]" : "text-pine/70")}>
+              Due {formatDue(a.dueAt)}
+            </span>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-[16px] text-pine/70">
+            <span>{a.complete}/{a.pageCount} pages</span>
+            {grade && (
+              <Chip tone="mint" icon={<Check className="h-3 w-3" strokeWidth={2.5} />}>
+                {grade}
+              </Chip>
+            )}
+          </div>
+        </div>
+      </div>
+    </CardLink>
+  );
+}
+
 export default function ClassView() {
   const { classId } = useParams<{ classId: string }>();
   const id = classId ?? "";
@@ -771,30 +938,27 @@ export default function ClassView() {
             </div>
           )}
           {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length > 0 && !isTeacher && (
-            <ul className="divide-y divide-pine/15 rounded-[22px] border-[3px] border-pine bg-white">
+            <div className="space-y-3">
               {assignmentsQ.data.assignments.map((a) => (
-                <li key={a.id}>
-                  <Link to={`/assignments/${a.id}`} className="flex flex-wrap items-center gap-3 px-5 py-3.5 hover:bg-oat">
-                    <span className="min-w-0 flex-1 truncate font-display text-pine">{a.title}</span>
-                    <span className="shrink-0 text-[16px] text-pine/70">{a.pageCount} pages</span>
-                    <span
-                      className={cn(
-                        "shrink-0 text-[16px]",
-                        isOverdue(a.dueAt) ? "font-display text-[#a3341f]" : "text-pine/70",
-                      )}
-                    >
-                      {formatDue(a.dueAt)}
-                    </span>
-                    <Chip tone={a.status === "active" ? "mint" : "quiet"} className="capitalize">
-                      {a.status}
-                    </Chip>
-                    <span className="shrink-0 text-[16px] text-pine/70">
-                      {a.complete ?? 0}/{a.pageCount} pages
-                    </span>
-                  </Link>
-                </li>
+                <StudentAssignmentCard
+                  key={a.id}
+                  a={{
+                    id: a.id,
+                    title: a.title,
+                    notebookId: a.notebookId,
+                    notebookTitle: a.notebookTitle,
+                    notebookColor: a.notebookColor,
+                    pageCount: a.pageCount,
+                    dueAt: a.dueAt,
+                    grading: a.grading,
+                    pointsMax: a.pointsMax,
+                    complete: a.complete ?? 0,
+                    status: (a.myStatus as StudentAssignmentData["status"]) ?? "not_started",
+                    grade: a.grade ?? null,
+                  }}
+                />
               ))}
-            </ul>
+            </div>
           )}
         </div>
       )}

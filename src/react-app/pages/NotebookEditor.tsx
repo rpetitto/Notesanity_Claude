@@ -829,6 +829,28 @@ function AppearancePopover({
     return () => document.removeEventListener("mousedown", onDown);
   }, [onClose]);
 
+  // Local colour for instant preview while dragging the OS picker; committed
+  // to the server debounced so a drag doesn't fire a burst of racing PATCHes.
+  const [localColor, setLocalColor] = useState(accentColor);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setLocalColor(accentColor);
+  }, [accentColor]);
+
+  useEffect(() => () => { if (commitTimer.current) clearTimeout(commitTimer.current); }, []);
+
+  const commitColor = (color: string) => {
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => onSetAccent(color), 500);
+  };
+
+  const pickPreset = (color: string) => {
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    setLocalColor(color);
+    onSetAccent(color);
+  };
+
   return (
     <div
       ref={popRef}
@@ -847,10 +869,10 @@ function AppearancePopover({
               key={c}
               type="button"
               aria-label={`Colour ${c}`}
-              onClick={() => onSetAccent(c)}
+              onClick={() => pickPreset(c)}
               className={cn(
                 "h-8 w-8 rounded-full border-2 transition-transform",
-                accentColor.toLowerCase() === c.toLowerCase()
+                localColor.toLowerCase() === c.toLowerCase()
                   ? "border-pine scale-110"
                   : "border-white shadow-sm hover:scale-105",
               )}
@@ -864,8 +886,12 @@ function AppearancePopover({
             <Palette className="h-3.5 w-3.5" strokeWidth={2.5} />
             <input
               type="color"
-              value={accentColor}
-              onChange={(e) => onSetAccent(e.target.value)}
+              value={localColor}
+              onInput={(e) => {
+                const color = (e.target as HTMLInputElement).value;
+                setLocalColor(color);
+                commitColor(color);
+              }}
               className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
               aria-label="Custom colour"
             />
