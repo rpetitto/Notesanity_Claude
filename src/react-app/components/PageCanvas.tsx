@@ -8,12 +8,17 @@
  * Everything above Layer 1 is positioned in page units and scaled at paint time,
  * so the same annotation data renders identically at any zoom or pixel density.
  *
- * Hit-testing rule: the pointer surface sits *below* the interactive overlay, so
- * form fields, text boxes and comment pins stay clickable without switching
- * tools. Only while a tool that places something on the page itself is selected
- * (pen/highlighter/eraser/stamp/text/comment) does the overlay go
- * pointer-transparent, so the tap reaches the page instead of the field on top
- * of it.
+ * Hit-testing rule: the pointer surface sits *below* the overlays, so form
+ * fields, text boxes and comment pins stay clickable without switching tools.
+ * Two different things stand aside, and they are not the same set:
+ *
+ *  - The form-field overlay goes transparent for any tool that *places*
+ *    something (pen/highlighter/eraser/stamp/text/comment), so the gesture
+ *    reaches the page rather than the field sitting over it.
+ *  - The page's own objects go transparent only for the freehand tools
+ *    (pen/highlighter/eraser), so a stroke can cross them — but a text box
+ *    stays typeable and a comment pin stays openable while their own tool is
+ *    selected, which is the whole point of picking that tool.
  *
  * iOS Safari / Apple Pencil notes:
  *  - Apple Pencil arrives as `pointerType === 'pen'` and carries real `pressure`.
@@ -104,13 +109,21 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
 
 /**
- * Tools that place something directly on the page — as opposed to `select`,
- * which just reads it — and therefore need the whole pointer surface. Stamp,
- * text and comment don't paint a stroke, but a tap with one of them selected
- * still has to land on the page underneath the fields overlay, not get
- * swallowed by it.
+ * Tools that put something on the page — as opposed to `select`, which just
+ * reads it. A tap with one of these has to reach the page underneath the form
+ * fields overlay rather than being swallowed by it.
  */
-const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "text", "comment"];
+const PLACEMENT_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "text", "comment"];
+
+/**
+ * The subset that paints freehand. These also make the page's own objects —
+ * text boxes, comment pins — pointer-transparent, so a stroke can cross one
+ * instead of being caught by it.
+ *
+ * The others must NOT do that: a text box you just placed has to be typeable,
+ * and a comment pin has to be openable, while its own tool is still selected.
+ */
+const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser"];
 
 export default function PageCanvas({
   pdfUrl, sourceIndex, pageWidth, pageHeight, pattern, patternColor, scale,
@@ -198,6 +211,7 @@ export default function PageCanvas({
 
   const activeLayer = writeTarget === "teacher" ? teacherLayer : studentLayer;
   const isMarking = MARKING_TOOLS.includes(tool.kind);
+  const isPlacing = PLACEMENT_TOOLS.includes(tool.kind);
   const isDrawTool = tool.kind === "pen" || tool.kind === "highlighter";
   const canWrite = writeTarget !== null && !!onLayerChange;
 
@@ -280,6 +294,10 @@ export default function PageCanvas({
     }
 
     if (tool.kind === "text") {
+      // Without this the browser's own mousedown focus lands on the page and
+      // clobbers the new box's autoFocus, leaving the student typing into
+      // nothing.
+      e.preventDefault();
       const id = uid();
       onLayerChange?.({
         ...activeLayer,
@@ -290,6 +308,7 @@ export default function PageCanvas({
     }
 
     if (tool.kind === "stamp") {
+      e.preventDefault();
       onLayerChange?.({
         ...activeLayer,
         e: [...activeLayer.e, { id: uid(), x, y, s: tool.fontSize * 1.8, e: tool.stamp }],
@@ -298,6 +317,8 @@ export default function PageCanvas({
     }
 
     if (tool.kind === "comment") {
+      // Same reason as text: the pin opens straight into an editable note.
+      e.preventDefault();
       const id = uid();
       onLayerChange?.({
         ...activeLayer,
@@ -441,8 +462,12 @@ export default function PageCanvas({
   const interactive = canWrite && tool.kind !== "select";
   const blockTouchScroll = interactive && fingerDraw && isMarking;
 
-  // While marking, the overlay must not intercept — ink needs the whole page.
-  const overlayPointerEvents = isMarking && canWrite ? "none" : "auto";
+  // Placing anything needs the gesture to reach the page, so the form-field
+  // overlay stands aside for every placement tool.
+  const fieldPointerEvents = isPlacing && canWrite ? "none" : "auto";
+  // The page's own objects only stand aside for freehand marks, so that the
+  // text box or comment a tool just created stays usable.
+  const objectPointerEvents = isMarking && canWrite ? "none" : "auto";
 
   const textOwners = [
     ...studentLayer.x.map((t) => ({ t, own: writeTarget === "student" })),
@@ -493,7 +518,7 @@ export default function PageCanvas({
       )}
 
       {/* Layer 2 — form fields */}
-      <div className="absolute inset-0" style={{ pointerEvents: fieldsEditable ? overlayPointerEvents : "none" }}>
+      <div className="absolute inset-0" style={{ pointerEvents: fieldsEditable ? fieldPointerEvents : "none" }}>
         {fields.map((f) => (
           <FieldControl
             key={f.id}
@@ -521,7 +546,7 @@ export default function PageCanvas({
               left: t.x * scale,
               top: t.y * scale,
               width: t.w * scale,
-              pointerEvents: own ? overlayPointerEvents : "none",
+              pointerEvents: own ? objectPointerEvents : "none",
             }}
           >
             {own && editingText === t.id ? (
@@ -565,7 +590,7 @@ export default function PageCanvas({
             teacher={teacher}
             editable={own}
             open={openComment === k.id}
-            pointerEvents={overlayPointerEvents}
+            pointerEvents={objectPointerEvents}
             onOpen={() => setOpenComment(openComment === k.id ? null : k.id)}
             onChange={(v) => updateComment(k.id, v)}
             onDelete={() => removeComment(k.id)}
