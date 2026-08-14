@@ -683,10 +683,12 @@ export default function ClassView() {
 
   const isTeacher = classQ.data?.myRole === "teacher";
 
+  // Fetched unconditionally (not gated on `tab === "assignments"`) — the nav's
+  // to-do badge needs a count before the tab is ever opened.
   const assignmentsQ = useQuery({
     queryKey: ["assignments", id],
     queryFn: () => api.get<{ assignments: ClassAssignmentRow[]; isTeacher: boolean }>(`/api/classes/${id}/assignments`),
-    enabled: !!id && tab === "assignments",
+    enabled: !!id,
   });
 
   // Students see this class's assignments split into the same buckets as
