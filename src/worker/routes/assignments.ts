@@ -41,7 +41,9 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
   const { user, isTeacher } = await requireClassMember(c, classId);
   const rows = await db
     .prepare(
-      `SELECT a.*, n.title AS notebook_title FROM assignments a
+      `SELECT a.*, n.title AS notebook_title, n.accent_color AS notebook_color,
+              n.cover_key IS NOT NULL AS notebook_has_cover
+         FROM assignments a
          JOIN notebooks n ON n.id = a.notebook_id
         WHERE a.class_id = ? ${isTeacher ? "" : "AND a.status = 'active' AND (a.release_at IS NULL OR a.release_at <= datetime('now'))"}
         ORDER BY COALESCE(a.due_at, a.created_at) DESC`,
@@ -54,6 +56,7 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
     const pageIds: string[] = JSON.parse(a.page_ids || "[]");
     const base = {
       id: a.id, title: a.title, notebookId: a.notebook_id, notebookTitle: a.notebook_title,
+      notebookColor: a.notebook_color ?? "#1A73E8", notebookHasCover: !!a.notebook_has_cover,
       pageCount: pageIds.length, releaseAt: a.release_at, dueAt: a.due_at,
       grading: a.grading, pointsMax: a.points_max, status: a.status,
     };
@@ -559,7 +562,9 @@ app.get("/api/my/teaching", handler(async (c) => {
   const user = await requireUser(c);
   const rows = await db
     .prepare(
-      `SELECT a.*, c.name AS class_name, c.accent_color, n.title AS notebook_title
+      `SELECT a.*, c.name AS class_name, c.accent_color, c.emoji AS class_emoji,
+              n.title AS notebook_title, n.accent_color AS notebook_color,
+              n.cover_key IS NOT NULL AS notebook_has_cover
          FROM assignments a
          JOIN classes c ON c.id = a.class_id
          JOIN notebooks n ON n.id = a.notebook_id
@@ -584,7 +589,9 @@ app.get("/api/my/teaching", handler(async (c) => {
       .first<any>();
     assignments.push({
       id: a.id, title: a.title, classId: a.class_id, className: a.class_name,
-      accentColor: a.accent_color, notebookId: a.notebook_id, notebookTitle: a.notebook_title,
+      accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
+      notebookId: a.notebook_id, notebookTitle: a.notebook_title,
+      notebookColor: a.notebook_color ?? "#1A73E8", notebookHasCover: !!a.notebook_has_cover,
       pageCount: JSON.parse(a.page_ids || "[]").length,
       dueAt: a.due_at, releaseAt: a.release_at, grading: a.grading, pointsMax: a.points_max,
       status: a.status,
@@ -600,7 +607,8 @@ app.get("/api/my/assignments", handler(async (c) => {
   const user = await requireUser(c);
   const rows = await db
     .prepare(
-      `SELECT a.*, c.name AS class_name, c.accent_color, n.title AS notebook_title
+      `SELECT a.*, c.name AS class_name, c.accent_color, c.emoji AS class_emoji,
+              n.title AS notebook_title, n.accent_color AS notebook_color
          FROM assignments a
          JOIN classes c ON c.id = a.class_id
          JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active' AND e.role = 'student'
@@ -624,7 +632,9 @@ app.get("/api/my/assignments", handler(async (c) => {
       .first<{ id: string }>();
     out.push({
       id: a.id, title: a.title, classId: a.class_id, className: a.class_name,
-      accentColor: a.accent_color, notebookId: a.notebook_id, notebookTitle: a.notebook_title,
+      accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
+      notebookId: a.notebook_id, notebookTitle: a.notebook_title,
+      notebookColor: a.notebook_color ?? "#1A73E8",
       dueAt: a.due_at, grading: a.grading, pointsMax: a.points_max,
       total: pageIds.length,
       complete: await completionFor(inst?.id ?? null, pageIds),

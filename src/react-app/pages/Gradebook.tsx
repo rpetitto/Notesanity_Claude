@@ -149,16 +149,18 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
                   to={`/notebooks/${a.notebookId}?assignment=${a.id}`}
                   className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-slate-300"
                 >
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium text-slate-900">{a.title}</div>
                       <div className="text-xs text-slate-500">Due {formatDue(a.dueAt)}</div>
                     </div>
-                    <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", STATUS_CLASS[a.status])}>
-                      {STATUS_LABEL[a.status]}
-                    </span>
-                    <div className={cn("text-sm font-medium", a.grade ? "text-slate-900" : "text-slate-400")}>
-                      {gradeText(a)}
+                    <div className="flex items-center gap-3">
+                      <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", STATUS_CLASS[a.status])}>
+                        {STATUS_LABEL[a.status]}
+                      </span>
+                      <div className={cn("text-sm font-medium", a.grade ? "text-slate-900" : "text-slate-400")}>
+                        {gradeText(a)}
+                      </div>
                     </div>
                   </div>
                   {a.grade?.feedback && (

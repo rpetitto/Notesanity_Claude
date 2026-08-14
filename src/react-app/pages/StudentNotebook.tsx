@@ -181,9 +181,18 @@ export default function StudentNotebook() {
     if (!visiblePage && pages[0]) setVisiblePage(pages[0].id);
   }, [pages, visiblePage]);
 
+  const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  useEffect(() => {
+    if (!mobileRailOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileRailOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileRailOpen]);
+
   const goToPage = (id: string) => {
     setVisiblePage(id);
     scrollRef.current?.querySelector(`[data-page-id="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setMobileRailOpen(false);
   };
 
   if (work.isLoading) return <Spinner label="Loading notebook…" />;
@@ -202,7 +211,7 @@ export default function StudentNotebook() {
 
   return (
     <div className="flex h-dvh flex-col">
-      <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
+      <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
         <button type="button" onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -215,8 +224,16 @@ export default function StudentNotebook() {
         >
           <PanelLeft className="h-4 w-4" />
         </button>
+        <button
+          type="button"
+          onClick={() => setMobileRailOpen(true)}
+          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 sm:hidden"
+          aria-label="Show pages"
+        >
+          <PanelLeft className="h-4 w-4" /> Pages
+        </button>
         <Avatar name={student.name} picture={student.picture} size={30} />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate text-sm font-semibold">{student.name}</div>
           <div className="truncate text-xs text-slate-500">
             {work.data.notebook.title}
@@ -225,21 +242,66 @@ export default function StudentNotebook() {
         </div>
       </header>
 
-      <InkToolbar
-        tool={tool}
-        onToolChange={setTool}
-        fingerDraw={fingerDraw}
-        onFingerDrawChange={setFingerDraw}
-        onUndo={() => visiblePage && notebookWork.undo(visiblePage)}
-        onRedo={() => visiblePage && notebookWork.redo(visiblePage)}
-        canUndo={!!visiblePage && notebookWork.canUndo(visiblePage)}
-        canRedo={!!visiblePage && notebookWork.canRedo(visiblePage)}
-        status={notebookWork.status}
-        teacherPalette
-        allowComments
-        zoom={zoom}
-        onZoomChange={setZoom}
-      />
+      <div className="overflow-x-auto">
+        <InkToolbar
+          tool={tool}
+          onToolChange={setTool}
+          fingerDraw={fingerDraw}
+          onFingerDrawChange={setFingerDraw}
+          onUndo={() => visiblePage && notebookWork.undo(visiblePage)}
+          onRedo={() => visiblePage && notebookWork.redo(visiblePage)}
+          canUndo={!!visiblePage && notebookWork.canUndo(visiblePage)}
+          canRedo={!!visiblePage && notebookWork.canRedo(visiblePage)}
+          status={notebookWork.status}
+          teacherPalette
+          allowComments
+          zoom={zoom}
+          onZoomChange={setZoom}
+        />
+      </div>
+
+      {mobileRailOpen && (
+        <div className="fixed inset-0 z-40 flex sm:hidden">
+          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setMobileRailOpen(false)} aria-hidden />
+          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r border-slate-200 bg-white px-2 py-3 shadow-xl">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <span className="text-xs font-semibold text-slate-500">Pages</span>
+              <button
+                type="button"
+                onClick={() => setMobileRailOpen(false)}
+                className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100"
+                aria-label="Close pages"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex flex-col gap-3">
+              {pages.map((page, i) => (
+                <button
+                  key={page.id}
+                  type="button"
+                  onClick={() => goToPage(page.id)}
+                  className={cn(
+                    "flex flex-col items-center gap-1 rounded-lg p-1.5 text-left transition-colors",
+                    visiblePage === page.id ? "bg-blue-50 ring-2 ring-blue-500" : "hover:bg-slate-100",
+                  )}
+                >
+                  <PageThumb
+                    pdfUrl={assetUrl(notebookId, page.asset_key)}
+                    sourceIndex={page.source_index}
+                    pageWidth={page.width}
+                    pageHeight={page.height}
+                    width={64}
+                  />
+                  <span className="w-full truncate text-center text-[11px] text-slate-600">
+                    {i + 1}{page.label ? ` · ${page.label}` : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </aside>
+        </div>
+      )}
 
       <div className="relative flex min-h-0 flex-1">
         {railOpen && (

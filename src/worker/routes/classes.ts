@@ -1,4 +1,4 @@
-import { app, db } from "flingit";
+import { app, db, storage } from "flingit";
 import {
   handler, now, uid, requireUser, requireTeacher, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 
@@ -198,7 +198,7 @@ app.get("/api/classes/:id", handler(async (c) => {
     .bind(cls.owner_id, cls.owner_id, classId)
     .all();
   return c.json({
-    class: { ...cls, joinCode: isTeacher ? cls.join_code : undefined },
+    class: { ...cls, hasCover: !!cls.cover_key, joinCode: isTeacher ? cls.join_code : undefined },
     myRole: isTeacher ? "teacher" : "student",
     roster: isTeacher ? roster.results ?? [] : [],
     teachers: teachers.results ?? [],
@@ -210,16 +210,63 @@ app.get("/api/classes/:id", handler(async (c) => {
 app.patch("/api/classes/:id", handler(async (c) => {
   const classId = param(c, "id");
   await requireClassTeacher(c, classId);
-  const body = await c.req.json<{ name?: string; section?: string; accentColor?: string; archived?: boolean }>();
+  const body = await c.req.json<{
+    name?: string; section?: string; accentColor?: string; archived?: boolean;
+    emoji?: string; clearCover?: boolean;
+  }>();
   const cls = await db.prepare(`SELECT * FROM classes WHERE id = ?`).bind(classId).first<any>();
+  if (body.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(body.accentColor)) throw new HttpError(400, "Invalid colour");
+  // One or two glyphs: enough for any emoji (including ZWJ sequences) without
+  // letting the badge become a text field.
+  const emoji = body.emoji === undefined ? cls.emoji : Array.from(body.emoji).slice(0, 3).join("");
+
   await db
-    .prepare(`UPDATE classes SET name = ?, section = ?, accent_color = ?, archived = ?, updated_at = ? WHERE id = ?`)
+    .prepare(
+      `UPDATE classes SET name = ?, section = ?, accent_color = ?, archived = ?, emoji = ?, cover_key = ?, updated_at = ?
+        WHERE id = ?`,
+    )
     .bind(
       body.name ?? cls.name, body.section ?? cls.section, body.accentColor ?? cls.accent_color,
-      body.archived === undefined ? cls.archived : body.archived ? 1 : 0, now(), classId,
+      body.archived === undefined ? cls.archived : body.archived ? 1 : 0,
+      emoji ?? "", body.clearCover ? null : cls.cover_key, now(), classId,
     )
     .run();
   return c.json({ ok: true });
+}));
+
+const MAX_CLASS_COVER_BYTES = 4 * 1024 * 1024;
+
+/** Featured image for the class tile and header. */
+app.post("/api/classes/:id/cover", handler(async (c) => {
+  const classId = param(c, "id");
+  await requireClassTeacher(c, classId);
+  const form = await c.req.parseBody();
+  const file = form["file"] as File | undefined;
+  if (!file) throw new HttpError(400, "No image uploaded");
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+    throw new HttpError(400, "Featured image must be a PNG, JPEG, WebP or GIF");
+  }
+  if (file.size > MAX_CLASS_COVER_BYTES) throw new HttpError(413, "Images are limited to 4MB");
+
+  const key = `classes/${classId}/cover-${uid()}`;
+  await storage.put(key, await file.arrayBuffer(), { contentType: file.type });
+  await db
+    .prepare(`UPDATE classes SET cover_key = ?, updated_at = ? WHERE id = ?`)
+    .bind(key, now(), classId)
+    .run();
+  return c.json({ ok: true, coverKey: key });
+}));
+
+app.get("/api/classes/:id/cover", handler(async (c) => {
+  const classId = param(c, "id");
+  await requireClassMember(c, classId);
+  const cls = await db.prepare(`SELECT cover_key FROM classes WHERE id = ?`).bind(classId).first<any>();
+  if (!cls?.cover_key) throw new HttpError(404, "No featured image set");
+  const obj = await storage.get(cls.cover_key);
+  if (!obj) throw new HttpError(404, "Image not found");
+  return new Response(await obj.arrayBuffer(), {
+    headers: { "Content-Type": obj.contentType ?? "image/png", "Cache-Control": "private, max-age=3600" },
+  });
 }));
 
 /** Rotate the join code, e.g. after a code leaks outside the class. */

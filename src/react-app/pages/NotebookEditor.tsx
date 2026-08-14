@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   FolderPlus, ImageOff, ListChecks, Loader2, Palette, Plus, RotateCcw, Send, Trash2,
-  Type as TypeIcon, Upload, X,
+  Type as TypeIcon, Upload, X, PanelLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, type FieldRec, type PageRec } from "../lib/api";
@@ -94,6 +94,13 @@ export default function NotebookEditor() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [coverBump, setCoverBump] = useState(0);
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const [pagesDrawerOpen, setPagesDrawerOpen] = useState(false);
+  useEffect(() => {
+    if (!pagesDrawerOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPagesDrawerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pagesDrawerOpen]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -288,6 +295,92 @@ export default function NotebookEditor() {
   const archivedCount = allPages.filter((p) => p.archived).length;
   const assignments = assignmentsQuery.data?.assignments ?? [];
 
+  /** Shared Pages/Assignments panel content — rendered both in the desktop
+   * aside and the mobile drawer, so the two never drift out of sync. */
+  const sidePanelBody = (isMobile: boolean) => (
+    <>
+      <div className="flex border-b border-slate-200">
+        {(["pages", "assignments"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setSidePanel(tab)}
+            className={cn(
+              "flex-1 px-3 py-2 text-xs font-medium capitalize transition-colors",
+              sidePanel === tab ? "border-b-2 border-blue-600 text-blue-700" : "text-slate-500 hover:bg-slate-50",
+            )}
+          >
+            {tab}
+            {tab === "assignments" && assignments.length > 0 && (
+              <span className="ml-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                {assignments.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {sidePanel === "pages" ? (
+        <NotebookPageList
+          notebookId={notebookId}
+          pages={allPages}
+          assignmentCounts={assignmentCounts}
+          currentPageId={page?.id}
+          selection={selection}
+          onSelectionChange={setSelection}
+          onOpenPage={(id) => {
+            const i = livePages.findIndex((lp) => lp.id === id);
+            if (i >= 0) setPageIdx(i);
+            if (isMobile) setPagesDrawerOpen(false);
+          }}
+          onRename={(id, label) => patchPage.mutate({ id, label })}
+          onArchiveToggle={(id, archived) => patchPage.mutate({ id, archived })}
+          onDelete={(id) => confirmDelete([id])}
+          onArrange={(entries) => arrangePages.mutate(entries)}
+          onRenameGroup={(from, to) => {
+            const ids = allPages.filter((p) => (p.group_name ?? "") === from).map((p) => p.id);
+            if (ids.length) bulkPages.mutate({ pageIds: ids, action: "group", groupName: to });
+          }}
+        />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {assignments.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-slate-500">
+              No assignments use this notebook yet. Select pages, then choose “Create assignment”.
+            </p>
+          ) : (
+            assignments.map((a) => (
+              <Link
+                key={a.id}
+                to={`/assignments/${a.id}`}
+                onClick={() => { if (isMobile) setPagesDrawerOpen(false); }}
+                className="mb-1.5 block rounded-lg border border-slate-200 p-2 hover:border-blue-300 hover:bg-blue-50/40"
+              >
+                <div className="flex items-start gap-1.5">
+                  <ClipboardList className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-medium text-slate-800">{a.title}</div>
+                    <div className="mt-0.5 text-[10px] text-slate-500">
+                      {a.pageCount} page{a.pageCount === 1 ? "" : "s"} · {formatDue(a.dueAt)}
+                    </div>
+                    <div className="mt-1 flex items-center gap-1">
+                      <span className={cn(
+                        "rounded-full px-1.5 py-0.5 text-[10px]",
+                        a.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600",
+                      )}>
+                        {a.status === "active" ? "Active" : "Draft"}
+                      </span>
+                      <span className="text-[10px] text-slate-500">{a.submitted}/{a.total} in</span>
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="flex h-dvh flex-col">
       <div className="h-1 shrink-0" style={{ backgroundColor: notebook.accentColor || "#1A73E8" }} />
@@ -295,7 +388,14 @@ export default function NotebookEditor() {
         <button type="button" onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <div className="min-w-0">
+        <button
+          type="button"
+          onClick={() => setPagesDrawerOpen(true)}
+          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 sm:hidden"
+        >
+          <PanelLeft className="h-4 w-4" /> Pages
+        </button>
+        <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate text-sm font-semibold">{notebook.title}</div>
           <div className="text-xs text-slate-500">
             {livePages.length} page{livePages.length === 1 ? "" : "s"}
@@ -366,7 +466,7 @@ export default function NotebookEditor() {
         )}
       </header>
 
-      <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
         <span className="text-xs font-medium text-slate-500">Add field:</span>
         {([
           { k: "text", label: "Text box", icon: TypeIcon },
@@ -399,84 +499,28 @@ export default function NotebookEditor() {
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white sm:flex">
-          <div className="flex border-b border-slate-200">
-            {(["pages", "assignments"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setSidePanel(tab)}
-                className={cn(
-                  "flex-1 px-3 py-2 text-xs font-medium capitalize transition-colors",
-                  sidePanel === tab ? "border-b-2 border-blue-600 text-blue-700" : "text-slate-500 hover:bg-slate-50",
-                )}
-              >
-                {tab}
-                {tab === "assignments" && assignments.length > 0 && (
-                  <span className="ml-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-                    {assignments.length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {sidePanel === "pages" ? (
-            <NotebookPageList
-              notebookId={notebookId}
-              pages={allPages}
-              assignmentCounts={assignmentCounts}
-              currentPageId={page?.id}
-              selection={selection}
-              onSelectionChange={setSelection}
-              onOpenPage={(id) => {
-                const i = livePages.findIndex((lp) => lp.id === id);
-                if (i >= 0) setPageIdx(i);
-              }}
-              onRename={(id, label) => patchPage.mutate({ id, label })}
-              onArchiveToggle={(id, archived) => patchPage.mutate({ id, archived })}
-              onDelete={(id) => confirmDelete([id])}
-              onArrange={(entries) => arrangePages.mutate(entries)}
-              onRenameGroup={(from, to) => {
-                const ids = allPages.filter((p) => (p.group_name ?? "") === from).map((p) => p.id);
-                if (ids.length) bulkPages.mutate({ pageIds: ids, action: "group", groupName: to });
-              }}
-            />
-          ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {assignments.length === 0 ? (
-                <p className="px-2 py-6 text-center text-xs text-slate-500">
-                  No assignments use this notebook yet. Select pages, then choose “Create assignment”.
-                </p>
-              ) : (
-                assignments.map((a) => (
-                  <Link
-                    key={a.id}
-                    to={`/assignments/${a.id}`}
-                    className="mb-1.5 block rounded-lg border border-slate-200 p-2 hover:border-blue-300 hover:bg-blue-50/40"
-                  >
-                    <div className="flex items-start gap-1.5">
-                      <ClipboardList className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-medium text-slate-800">{a.title}</div>
-                        <div className="mt-0.5 text-[10px] text-slate-500">
-                          {a.pageCount} page{a.pageCount === 1 ? "" : "s"} · {formatDue(a.dueAt)}
-                        </div>
-                        <div className="mt-1 flex items-center gap-1">
-                          <span className={cn(
-                            "rounded-full px-1.5 py-0.5 text-[10px]",
-                            a.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600",
-                          )}>
-                            {a.status === "active" ? "Active" : "Draft"}
-                          </span>
-                          <span className="text-[10px] text-slate-500">{a.submitted}/{a.total} in</span>
-                        </div>
-                      </div>
-                    </div>
-                  </Link>
-                ))
-              )}
-            </div>
-          )}
+          {sidePanelBody(false)}
         </aside>
+
+        {pagesDrawerOpen && (
+          <div className="fixed inset-0 z-40 flex sm:hidden">
+            <div className="absolute inset-0 bg-slate-900/40" onClick={() => setPagesDrawerOpen(false)} aria-hidden />
+            <div className="relative flex h-full w-[85vw] max-w-xs flex-col border-r border-slate-200 bg-white shadow-xl">
+              <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                <span className="text-xs font-semibold text-slate-500">Notebook</span>
+                <button
+                  type="button"
+                  onClick={() => setPagesDrawerOpen(false)}
+                  className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {sidePanelBody(true)}
+            </div>
+          </div>
+        )}
 
         <div ref={containerRef} className="relative min-w-0 flex-1 overflow-auto bg-slate-100 p-4">
           {!page ? (
@@ -891,10 +935,16 @@ function FieldInspector({
     try { setOptions((JSON.parse(field?.options || "[]") as string[]).join("\n")); } catch { setOptions(""); }
   }, [field]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   if (!field) return null;
 
-  return (
-    <aside className="w-64 shrink-0 border-l border-slate-200 bg-white p-4">
+  const body = (
+    <>
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Field</h3>
         <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100">
@@ -931,10 +981,29 @@ function FieldInspector({
 
       <button
         onClick={onDelete}
-        className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-700 hover:bg-rose-50"
+        className="mt-4 inline-flex w-full min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-700 hover:bg-rose-50"
       >
         <Trash2 className="h-4 w-4" /> Delete field
       </button>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="hidden w-64 shrink-0 border-l border-slate-200 bg-white p-4 sm:block">
+        {body}
+      </aside>
+
+      {/* Bottom sheet on phones — there's no room for a fixed right rail. */}
+      <div className="fixed inset-0 z-40 flex items-end sm:hidden">
+        <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} aria-hidden />
+        <div
+          className="relative flex max-h-[80vh] w-full flex-col overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl"
+          style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
+        >
+          {body}
+        </div>
+      </div>
+    </>
   );
 }

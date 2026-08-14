@@ -2,21 +2,33 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  BookOpen, ClipboardList, Copy, Eye, GraduationCap, Plus, RefreshCw, Upload, UserPlus, UserX, Users, X,
+  BookOpen, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus, RefreshCw, Upload, UserPlus, UserX, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import Gradebook from "./Gradebook";
 import PageThumb from "../components/PageThumb";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
-import { AssignmentCard } from "./TeacherAssignments";
+import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { api, assetUrl, type AssignmentSummary } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime } from "../lib/utils";
+
+const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
+const SWATCHES = [
+  "#1A73E8", "#34A853", "#EA4335", "#F9AB00", "#9334E6",
+  "#1E8E9C", "#D93025", "#E37400", "#202124", "#5F6368",
+];
+
+/** Local view of an assignment row that also carries the notebook's colour, since
+ * `AssignmentSummary` (shared with other owners' code) doesn't declare it. */
+type ClassAssignmentRow = AssignmentSummary & Partial<AssignmentCardData>;
 
 interface ClassDetail {
   id: string;
   name: string;
   section: string;
   accent_color: string;
+  emoji?: string;
+  hasCover?: boolean;
   source: "manual" | "classroom";
   join_code: string;
   joinCode?: string;
@@ -147,7 +159,7 @@ function BackfillModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
-      <div className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">Backfill assignments</h2>
           <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100">
@@ -184,7 +196,7 @@ function BackfillModal({
           type="button"
           disabled={mutation.isPending}
           onClick={() => mutation.mutate()}
-          className="mt-5 h-10 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          className="mt-5 h-11 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
         >
           {mutation.isPending ? "Saving…" : "Confirm"}
         </button>
@@ -233,7 +245,7 @@ function InviteModal({ classId, onClose }: { classId: string; onClose: () => voi
           type="button"
           disabled={!text.trim() || mutation.isPending}
           onClick={() => mutation.mutate()}
-          className="mt-4 h-10 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          className="mt-4 h-11 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
         >
           {mutation.isPending ? "Inviting…" : "Send invites"}
         </button>
@@ -286,14 +298,214 @@ function CoTeacherModal({ classId, onClose }: { classId: string; onClose: () => 
           className="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
         />
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="h-10 rounded-full px-4 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button onClick={onClose} className="h-11 rounded-full px-4 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
           <button
             onClick={() => add.mutate()}
             disabled={!text.trim() || add.isPending}
-            className="h-10 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="h-11 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {add.isPending ? "Adding…" : "Add"}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Emoji, accent colour and a featured banner image for the class header and tiles everywhere. */
+function CustomizeModal({
+  classId,
+  cls,
+  coverVersion,
+  bumpCover,
+  onClose,
+}: {
+  classId: string;
+  cls: ClassDetail;
+  coverVersion: number;
+  bumpCover: () => void;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [emoji, setEmoji] = useState(cls.emoji ?? "");
+  const [color, setColor] = useState(cls.accent_color || "#1A73E8");
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  useEscapeClose(onClose);
+
+  const invalidate = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ["class", classId] }),
+      qc.invalidateQueries({ queryKey: ["classes"] }),
+    ]);
+
+  const saveEmoji = useMutation({
+    mutationFn: (value: string) => api.patch(`/api/classes/${classId}`, { emoji: value }),
+    onSuccess: () => invalidate(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const saveColor = useMutation({
+    mutationFn: (value: string) => api.patch(`/api/classes/${classId}`, { accentColor: value }),
+    onSuccess: () => invalidate(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const uploadCover = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return api.upload(`/api/classes/${classId}/cover`, form);
+    },
+    onSuccess: async () => {
+      await invalidate();
+      bumpCover();
+      toast.success("Featured image updated");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const clearCover = useMutation({
+    mutationFn: () => api.patch(`/api/classes/${classId}`, { clearCover: true }),
+    onSuccess: async () => {
+      await invalidate();
+      bumpCover();
+      toast.success("Featured image removed");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const pickEmoji = (value: string) => {
+    setEmoji(value);
+    saveEmoji.mutate(value);
+  };
+  const pickColor = (value: string) => {
+    setColor(value);
+    saveColor.mutate(value);
+  };
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) uploadCover.mutate(file);
+    e.target.value = "";
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
+      <div
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Customize class</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mb-5">
+          <label className="mb-1.5 block text-xs font-medium text-slate-600">Emoji</label>
+          <input
+            value={emoji}
+            onChange={(e) => setEmoji(Array.from(e.target.value).slice(0, 2).join(""))}
+            onBlur={() => saveEmoji.mutate(emoji)}
+            placeholder="📚"
+            className="h-11 w-20 rounded-lg border border-slate-300 px-3 text-center text-xl focus:border-blue-500 focus:outline-none"
+          />
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {QUICK_EMOJI.map((e) => (
+              <button
+                key={e}
+                type="button"
+                onClick={() => pickEmoji(e)}
+                className={cn(
+                  "flex h-11 w-11 items-center justify-center rounded-xl border text-xl hover:bg-slate-50",
+                  emoji === e ? "border-blue-500 bg-blue-50" : "border-slate-200",
+                )}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-5">
+          <label className="mb-1.5 block text-xs font-medium text-slate-600">Colour</label>
+          <div className="flex flex-wrap items-center gap-2">
+            {SWATCHES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                title={c}
+                onClick={() => pickColor(c)}
+                className={cn(
+                  "h-9 w-9 shrink-0 rounded-full",
+                  color.toLowerCase() === c.toLowerCase() ? "ring-2 ring-slate-900 ring-offset-2" : "",
+                )}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+            <label
+              title="Custom colour"
+              className="relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-dashed border-slate-300 text-slate-400 hover:bg-slate-50"
+            >
+              <Palette className="h-4 w-4" />
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => pickColor(e.target.value)}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-slate-600">Featured image</label>
+          {cls.hasCover ? (
+            <div className="space-y-2">
+              <img
+                src={`/api/classes/${classId}/cover?v=${coverVersion}`}
+                alt=""
+                className="h-28 w-full rounded-xl border border-slate-200 object-cover"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploadCover.isPending}
+                  className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <Upload className="h-4 w-4" />
+                  {uploadCover.isPending ? "Uploading…" : "Replace"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => clearCover.mutate()}
+                  disabled={clearCover.isPending}
+                  className="flex h-11 flex-1 items-center justify-center rounded-full border border-slate-300 text-sm font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-60"
+                >
+                  Remove image
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploadCover.isPending}
+              className="flex h-24 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 text-sm text-slate-500 hover:bg-slate-50 disabled:opacity-60"
+            >
+              <Upload className="h-4 w-4" />
+              {uploadCover.isPending ? "Uploading…" : "Upload an image"}
+            </button>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={onFile}
+          />
         </div>
       </div>
     </div>
@@ -325,6 +537,8 @@ export default function ClassView() {
   };
   const [inviteOpen, setInviteOpen] = useState(false);
   const [coTeacherOpen, setCoTeacherOpen] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [coverVersion, setCoverVersion] = useState(0);
   const [reviewingStudent, setReviewingStudent] = useState<BackfillStudent | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -347,7 +561,7 @@ export default function ClassView() {
 
   const assignmentsQ = useQuery({
     queryKey: ["assignments", id],
-    queryFn: () => api.get<{ assignments: AssignmentSummary[]; isTeacher: boolean }>(`/api/classes/${id}/assignments`),
+    queryFn: () => api.get<{ assignments: ClassAssignmentRow[]; isTeacher: boolean }>(`/api/classes/${id}/assignments`),
     enabled: !!id && tab === "assignments",
   });
 
@@ -432,36 +646,74 @@ export default function ClassView() {
       )}
 
       <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="h-2.5 w-full" style={{ backgroundColor: cls.accent_color || "#1A73E8" }} />
-        <div className="flex flex-wrap items-center justify-between gap-3 p-5">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{cls.name}</h1>
-            {cls.section && <p className="text-sm text-slate-500">{cls.section}</p>}
-          </div>
-          {isTeacher && joinCode && (
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 font-mono text-lg tracking-[0.3em] text-slate-800">
-                {joinCode}
-              </span>
-              <button
-                type="button"
-                onClick={() => copyCode(joinCode)}
-                title="Copy code"
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50"
-              >
-                <Copy className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => rotateCodeMutation.mutate()}
-                disabled={rotateCodeMutation.isPending}
-                title="Generate new code"
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-60"
-              >
-                <RefreshCw className={cn("h-4 w-4", rotateCodeMutation.isPending && "animate-spin")} />
-              </button>
-            </div>
+        <div className="relative h-28 sm:h-36">
+          {cls.hasCover ? (
+            <img
+              src={`/api/classes/${id}/cover?v=${coverVersion}`}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          ) : (
+            <div
+              className="absolute inset-0"
+              style={{ background: `linear-gradient(135deg, ${cls.accent_color || "#1A73E8"}, ${cls.accent_color || "#1A73E8"}99)` }}
+            />
           )}
+          {cls.hasCover && (
+            <div
+              className="absolute inset-0"
+              style={{ background: "linear-gradient(to top, rgba(15,23,42,.7), rgba(15,23,42,0) 65%)" }}
+            />
+          )}
+          <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 p-4">
+            {cls.emoji && (
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/90 text-2xl shadow-sm">
+                {cls.emoji}
+              </span>
+            )}
+            <h1 className="truncate text-2xl font-semibold tracking-tight text-white drop-shadow-sm">{cls.name}</h1>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 p-5">
+          <div className="min-w-0">
+            {cls.section && <p className="truncate text-sm text-slate-500">{cls.section}</p>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {isTeacher && (
+              <button
+                type="button"
+                onClick={() => setCustomizeOpen(true)}
+                className="flex h-11 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Palette className="h-4 w-4" />
+                Customize
+              </button>
+            )}
+            {isTeacher && joinCode && (
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 font-mono text-lg tracking-[0.3em] text-slate-800">
+                  {joinCode}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => copyCode(joinCode)}
+                  title="Copy code"
+                  className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => rotateCodeMutation.mutate()}
+                  disabled={rotateCodeMutation.isPending}
+                  title="Generate new code"
+                  className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={cn("h-4 w-4", rotateCodeMutation.isPending && "animate-spin")} />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -498,7 +750,7 @@ export default function ClassView() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex h-10 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+                className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
               >
                 <Upload className="h-4 w-4" />
                 Upload notebook
@@ -574,7 +826,7 @@ export default function ClassView() {
             <div className="mb-4 flex justify-end">
               <Link
                 to={`/classes/${id}/assignments/new`}
-                className="flex h-10 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+                className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
               >
                 <Plus className="h-4 w-4" />
                 New assignment
@@ -610,7 +862,7 @@ export default function ClassView() {
                     </span>
                     <span
                       className={cn(
-                        "shrink-0 rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+                        "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium capitalize",
                         a.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600",
                       )}
                     >
@@ -635,7 +887,7 @@ export default function ClassView() {
             <button
               type="button"
               onClick={() => setCoTeacherOpen(true)}
-              className="flex h-10 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="flex h-11 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               <UserPlus className="h-4 w-4" />
               Add co-teacher
@@ -643,7 +895,7 @@ export default function ClassView() {
             <button
               type="button"
               onClick={() => setInviteOpen(true)}
-              className="flex h-10 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+              className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
             >
               <Plus className="h-4 w-4" />
               Invite students
@@ -725,6 +977,15 @@ export default function ClassView() {
 
       {inviteOpen && <InviteModal classId={id} onClose={() => setInviteOpen(false)} />}
       {coTeacherOpen && <CoTeacherModal classId={id} onClose={() => setCoTeacherOpen(false)} />}
+      {customizeOpen && (
+        <CustomizeModal
+          classId={id}
+          cls={cls}
+          coverVersion={coverVersion}
+          bumpCover={() => setCoverVersion((v) => v + 1)}
+          onClose={() => setCustomizeOpen(false)}
+        />
+      )}
       {reviewingStudent && (
         <BackfillModal
           classId={id}

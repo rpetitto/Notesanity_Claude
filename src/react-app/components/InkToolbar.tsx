@@ -61,10 +61,10 @@ export default function InkToolbar({
 
   return (
     <div
-      className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur"
-      style={{ touchAction: "manipulation" }}
+      className="flex snap-x items-center gap-2 overflow-x-auto border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur sm:flex-wrap sm:overflow-visible"
+      style={{ touchAction: "manipulation", scrollbarWidth: "thin" }}
     >
-      <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+      <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-100 p-1">
         {TOOLS.map(({ kind, icon: Icon, label }) => (
           <button
             key={kind}
@@ -84,7 +84,7 @@ export default function InkToolbar({
       </div>
 
       {(tool.kind === "pen" || tool.kind === "highlighter" || tool.kind === "text") && (
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {colors.map((c) => (
             <button
               key={c}
@@ -102,7 +102,7 @@ export default function InkToolbar({
       )}
 
       {(tool.kind === "pen" || tool.kind === "highlighter" || tool.kind === "eraser") && (
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {widths.map((w) => (
             <button
               key={w}
@@ -124,7 +124,7 @@ export default function InkToolbar({
       )}
 
       {tool.kind === "stamp" && (
-        <div className="flex flex-wrap items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           {STAMPS.map((s) => (
             <button
               key={s}
@@ -138,7 +138,7 @@ export default function InkToolbar({
         </div>
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={() => onFingerDrawChange(!fingerDraw)}

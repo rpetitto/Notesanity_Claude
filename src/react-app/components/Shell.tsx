@@ -46,7 +46,7 @@ export function FlingBadge() {
       href="https://flingit.io"
       target="_blank"
       rel="noopener noreferrer"
-      className="fixed bottom-3 left-3 z-40 flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-500 shadow-sm hover:text-slate-800"
+      className="fixed bottom-16 left-3 z-40 hidden items-center gap-1.5 sm:bottom-3 sm:flex rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-500 shadow-sm hover:text-slate-800"
     >
       <span className="inline-block h-3 w-3 rounded-sm bg-blue-600" />
       Made with Fling
@@ -108,7 +108,32 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
           </div>
         </div>
       </header>
-      <main className={cn("mx-auto px-4 py-6", wide ? "max-w-none" : "max-w-6xl")}>{children}</main>
+      <main className={cn("mx-auto px-4 py-6 pb-24 sm:pb-6", wide ? "max-w-none" : "max-w-6xl")}>{children}</main>
+
+      {/* Phone navigation. The header row collapses below sm:, so without this
+          there is no way to move between sections on a handset. */}
+      <nav
+        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-slate-200 bg-white/95 backdrop-blur sm:hidden"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        {nav.map(({ to, label, icon: Icon }) => {
+          const active = pathname.startsWith(to);
+          return (
+            <Link
+              key={to}
+              to={to}
+              className={cn(
+                "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium",
+                active ? "text-blue-700" : "text-slate-500",
+              )}
+            >
+              <Icon className={cn("h-5 w-5", active && "text-blue-600")} />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+
       <FlingBadge />
     </div>
   );

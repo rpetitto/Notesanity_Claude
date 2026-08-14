@@ -7,6 +7,13 @@ import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
 
+/** `GET /api/classes` rows also carry `emoji` — declared locally since `ClassSummary`
+ * (shared with other owners' code) doesn't yet. There's no `hasCover` flag on this
+ * endpoint, so cards probe the cover image directly and fall back on error. */
+interface ClassRow extends ClassSummary {
+  emoji?: string;
+}
+
 /** Close a modal on Escape while it's open. */
 function useEscapeClose(active: boolean, onClose: () => void) {
   useEffect(() => {
@@ -19,16 +26,37 @@ function useEscapeClose(active: boolean, onClose: () => void) {
   }, [active, onClose]);
 }
 
-function ClassCard({ cls }: { cls: ClassSummary }) {
+function ClassCard({ cls }: { cls: ClassRow }) {
+  const [coverFailed, setCoverFailed] = useState(false);
+  const accent = cls.accent_color || "#1A73E8";
   return (
     <Link
       to={`/classes/${cls.id}`}
       className="block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
     >
-      <div className="h-2.5 w-full" style={{ backgroundColor: cls.accent_color || "#1A73E8" }} />
+      <div className="relative h-20 w-full overflow-hidden">
+        <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}, ${accent}99)` }} />
+        {!coverFailed && (
+          <img
+            src={`/api/classes/${cls.id}/cover`}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+            onError={() => setCoverFailed(true)}
+          />
+        )}
+      </div>
       <div className="p-4">
-        <div className="truncate text-base font-semibold text-slate-900">{cls.name}</div>
-        <div className="truncate text-sm text-slate-500">{cls.section || " "}</div>
+        <div className="flex items-center gap-2.5">
+          {cls.emoji && (
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base">
+              {cls.emoji}
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold text-slate-900">{cls.name}</div>
+            <div className="truncate text-xs text-slate-500">{cls.section || " "}</div>
+          </div>
+        </div>
         <div className="mt-4 flex items-center gap-4 text-xs text-slate-500">
           <span className="flex items-center gap-1.5">
             <Users className="h-3.5 w-3.5" />
@@ -105,7 +133,7 @@ function NewClassModal({ onClose }: { onClose: () => void }) {
           <button
             type="submit"
             disabled={!name.trim() || mutation.isPending}
-            className="mt-2 h-10 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+            className="mt-2 h-11 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
           >
             {mutation.isPending ? "Creating…" : "Create class"}
           </button>
@@ -166,7 +194,7 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg"
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -211,7 +239,7 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
 export default function TeacherHome() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["classes"],
-    queryFn: () => api.get<{ classes: ClassSummary[] }>("/api/classes"),
+    queryFn: () => api.get<{ classes: ClassRow[] }>("/api/classes"),
   });
   const [newClassOpen, setNewClassOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -225,7 +253,7 @@ export default function TeacherHome() {
             <button
               type="button"
               onClick={() => setImportOpen(true)}
-              className="flex h-10 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="flex h-11 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               <Import className="h-4 w-4" />
               Import from Classroom
@@ -234,7 +262,7 @@ export default function TeacherHome() {
           <button
             type="button"
             onClick={() => setNewClassOpen(true)}
-            className="flex h-10 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+            className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
           >
             <Plus className="h-4 w-4" />
             New class
@@ -252,7 +280,7 @@ export default function TeacherHome() {
             <button
               type="button"
               onClick={() => setNewClassOpen(true)}
-              className="flex h-10 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+              className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
             >
               <Plus className="h-4 w-4" />
               New class

@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Lock, MoreVertical, PanelLeft,
+  ArrowLeft, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck, Lock, MoreVertical, PanelLeft,
   Pencil, Pin, PinOff, Send, Trash2, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -218,6 +218,17 @@ export default function Grading() {
     try { localStorage.setItem(RAIL_KEY, railOpen ? "1" : "0"); } catch { /* ignore */ }
   }, [railOpen]);
 
+  const [railMobileOpen, setRailMobileOpen] = useState(false);
+  const [gradeSheetOpen, setGradeSheetOpen] = useState(false);
+  useEffect(() => {
+    if (!railMobileOpen && !gradeSheetOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setRailMobileOpen(false); setGradeSheetOpen(false); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [railMobileOpen, gradeSheetOpen]);
+
   const [visiblePage, setVisiblePage] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -330,6 +341,7 @@ export default function Grading() {
       setVisiblePage(pageId);
       scrollRef.current?.querySelector(`[data-page-id="${pageId}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+    setRailMobileOpen(false);
   };
 
   useEffect(() => {
@@ -392,7 +404,15 @@ export default function Grading() {
         >
           <PanelLeft className="h-4 w-4" />
         </button>
-        <div className="min-w-0">
+        <button
+          type="button"
+          onClick={() => setRailMobileOpen(true)}
+          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 sm:hidden"
+          aria-label="Show pages"
+        >
+          <PanelLeft className="h-4 w-4" /> Pages
+        </button>
+        <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate text-sm font-semibold">{assignment.title}</div>
           <div className="truncate text-xs text-slate-500">
             {formatPageNumbers(assignment.pageNumbers)} · Due {formatDue(assignment.dueAt)}
@@ -408,7 +428,7 @@ export default function Grading() {
           </button>
           <button
             onClick={() => returnWork.mutate({ all: true })}
-            className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
             <Send className="h-4 w-4" /> Return all graded
           </button>
@@ -449,40 +469,40 @@ export default function Grading() {
       </header>
 
       {/* Navigation bar — the two axes */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-        <div className="flex items-center gap-1">
+      <div className="flex items-center gap-3 overflow-x-auto border-b border-slate-200 bg-slate-50 px-3 py-2">
+        <div className="flex shrink-0 items-center gap-1">
           <button onClick={() => setStudentIdx(0)} disabled={studentIdx === 0}
-            className="rounded-full p-1.5 text-slate-500 hover:bg-white disabled:opacity-30" title="First student">
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="First student">
             <ChevronsLeft className="h-4 w-4" />
           </button>
           <button onClick={() => goStudent(-1)} disabled={studentIdx === 0}
-            className="rounded-full p-1.5 text-slate-500 hover:bg-white disabled:opacity-30" title="Previous student (←)">
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Previous student (←)">
             <ChevronLeft className="h-4 w-4" />
           </button>
 
-          <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5">
+          <div className="flex shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5">
             <Avatar name={current?.student.name ?? ""} picture={current?.student.picture} size={24} />
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{current?.student.name}</div>
+              <div className="max-w-[120px] truncate text-sm font-medium">{current?.student.name}</div>
             </div>
             <span className="ml-1 text-xs tabular-nums text-slate-400">{studentIdx + 1}/{rows.length}</span>
           </div>
 
           <button onClick={() => goStudent(1)} disabled={studentIdx >= rows.length - 1}
-            className="rounded-full p-1.5 text-slate-500 hover:bg-white disabled:opacity-30" title="Next student (→)">
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Next student (→)">
             <ChevronRight className="h-4 w-4" />
           </button>
           <button onClick={() => setStudentIdx(rows.length - 1)} disabled={studentIdx >= rows.length - 1}
-            className="rounded-full p-1.5 text-slate-500 hover:bg-white disabled:opacity-30" title="Last student">
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Last student">
             <ChevronsRight className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <button
             onClick={() => setPageLocked((v) => !v)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors",
+              "inline-flex min-h-[44px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-colors",
               pageLocked ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600",
             )}
             title={pageLocked ? "Page is pinned while you move across students" : "Scroll through every assigned page"}
@@ -494,40 +514,71 @@ export default function Grading() {
           {pageLocked && (
             <>
               <button onClick={() => goPage(-1)} disabled={pageIdx === 0}
-                className="rounded-full p-1.5 text-slate-500 hover:bg-white disabled:opacity-30" title="Previous page (↑)">
+                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Previous page (↑)">
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="text-xs tabular-nums text-slate-600">
+              <span className="whitespace-nowrap text-xs tabular-nums text-slate-600">
                 Page {Math.min(pageIdx + 1, assignedPages.length || 1)} of {assignedPages.length || 1}
               </span>
               <button onClick={() => goPage(1)} disabled={pageIdx >= assignedPages.length - 1}
-                className="rounded-full p-1.5 text-slate-500 hover:bg-white disabled:opacity-30" title="Next page (↓)">
+                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Next page (↓)">
                 <ChevronRight className="h-4 w-4" />
               </button>
             </>
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-2 text-xs">
+        <div className="ml-auto flex shrink-0 items-center gap-2 text-xs">
           <StatusPill row={current} />
         </div>
       </div>
 
-      <InkToolbar
-        tool={tool}
-        onToolChange={setTool}
-        fingerDraw={fingerDraw}
-        onFingerDrawChange={setFingerDraw}
-        onUndo={() => visiblePages[0] && notebookWork.undo(visiblePages[0].id)}
-        onRedo={() => visiblePages[0] && notebookWork.redo(visiblePages[0].id)}
-        canUndo={!!visiblePages[0] && notebookWork.canUndo(visiblePages[0].id)}
-        canRedo={!!visiblePages[0] && notebookWork.canRedo(visiblePages[0].id)}
-        status={notebookWork.status}
-        teacherPalette
-        allowComments
-        zoom={zoom}
-        onZoomChange={setZoom}
-      />
+      <div className="overflow-x-auto">
+        <InkToolbar
+          tool={tool}
+          onToolChange={setTool}
+          fingerDraw={fingerDraw}
+          onFingerDrawChange={setFingerDraw}
+          onUndo={() => visiblePages[0] && notebookWork.undo(visiblePages[0].id)}
+          onRedo={() => visiblePages[0] && notebookWork.redo(visiblePages[0].id)}
+          canUndo={!!visiblePages[0] && notebookWork.canUndo(visiblePages[0].id)}
+          canRedo={!!visiblePages[0] && notebookWork.canRedo(visiblePages[0].id)}
+          status={notebookWork.status}
+          teacherPalette
+          allowComments
+          zoom={zoom}
+          onZoomChange={setZoom}
+        />
+      </div>
+
+      {/* Mobile page rail drawer */}
+      {railMobileOpen && (
+        <div className="fixed inset-0 z-40 flex sm:hidden">
+          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setRailMobileOpen(false)} aria-hidden />
+          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r border-slate-200 bg-white px-2 py-3 shadow-xl">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <span className="text-xs font-semibold text-slate-500">Pages</span>
+              <button
+                type="button"
+                onClick={() => setRailMobileOpen(false)}
+                className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100"
+                aria-label="Close pages"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            </div>
+            <PageRail
+              pages={assignedPages}
+              pageNumbers={assignment.pageNumbers}
+              notebookId={assignment.notebookId}
+              pageLocked={pageLocked}
+              activeIndex={pageIdx}
+              activePageId={visiblePage}
+              onSelect={goToRailPage}
+            />
+          </aside>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {railOpen && (
@@ -544,7 +595,7 @@ export default function Grading() {
           </aside>
         )}
         {rosterOpen && (
-          <aside className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
+          <aside className="w-64 max-w-[85vw] shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
             {rows.map((r, i) => (
               <button
                 key={r.student.id}
@@ -599,8 +650,22 @@ export default function Grading() {
           onSave={(body) => grade.mutate(body)}
           onReturn={() => returnWork.mutate({ studentId })}
           saving={grade.isPending}
+          mobileOpen={gradeSheetOpen}
+          onMobileClose={() => setGradeSheetOpen(false)}
         />
       </div>
+
+      {/* Sticky grade trigger for phones — the grade panel only lives in a
+          bottom sheet below lg:, so grading needs an always-reachable entry point. */}
+      <button
+        type="button"
+        onClick={() => setGradeSheetOpen(true)}
+        className="fixed bottom-4 right-4 z-30 inline-flex min-h-[52px] items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-medium text-white shadow-lg lg:hidden"
+        style={{ marginBottom: "env(safe-area-inset-bottom)" }}
+      >
+        <ClipboardCheck className="h-4 w-4" /> Grade
+        {current?.graded && <span className="h-2 w-2 rounded-full bg-emerald-400" />}
+      </button>
 
       {showDeleteModal && (
         <DeleteAssignmentModal
@@ -634,13 +699,15 @@ function StatusPill({ row }: { row?: GradeRow }) {
 }
 
 function GradePanel({
-  assignment, row, onSave, onReturn, saving,
+  assignment, row, onSave, onReturn, saving, mobileOpen, onMobileClose,
 }: {
   assignment: any;
   row?: GradeRow;
   onSave: (body: any) => void;
   onReturn: () => void;
   saving: boolean;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }) {
   const [points, setPoints] = useState<string>("");
   const [letter, setLetter] = useState<string>("");
@@ -664,11 +731,8 @@ function GradePanel({
       feedback,
     });
 
-  return (
-    <aside className="hidden w-64 shrink-0 flex-col border-l border-slate-200 bg-white p-4 lg:flex">
-      <h3 className="text-sm font-semibold">Grade</h3>
-      <p className="mt-0.5 text-xs text-slate-500">Saved privately until you return it.</p>
-
+  const fields = (
+    <>
       {assignment.grading === "points" && (
         <div className="mt-4">
           <label className="block text-xs font-medium text-slate-600">Points</label>
@@ -695,7 +759,7 @@ function GradePanel({
                 key={l}
                 onClick={() => setLetter(l)}
                 className={cn(
-                  "h-9 flex-1 rounded-lg border text-sm",
+                  "h-10 flex-1 rounded-lg border text-sm",
                   letter === l ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 hover:bg-slate-50",
                 )}
               >
@@ -710,14 +774,14 @@ function GradePanel({
         <div className="mt-4 flex gap-2">
           <button
             onClick={() => setComplete(true)}
-            className={cn("h-9 flex-1 rounded-lg border text-sm",
+            className={cn("h-10 flex-1 rounded-lg border text-sm",
               complete === true ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 hover:bg-slate-50")}
           >
             Complete
           </button>
           <button
             onClick={() => setComplete(false)}
-            className={cn("h-9 flex-1 rounded-lg border text-sm",
+            className={cn("h-10 flex-1 rounded-lg border text-sm",
               complete === false ? "border-rose-400 bg-rose-50 text-rose-700" : "border-slate-200 hover:bg-slate-50")}
           >
             Incomplete
@@ -737,13 +801,13 @@ function GradePanel({
       <button
         onClick={submit}
         disabled={saving}
-        className="mt-3 rounded-full bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+        className="mt-3 min-h-[44px] rounded-full bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
       >
         Save grade
       </button>
       <button
         onClick={() => { submit(); onReturn(); }}
-        className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-full border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100"
+        className="mt-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100"
       >
         <Send className="h-4 w-4" /> Save &amp; return
       </button>
@@ -753,6 +817,41 @@ function GradePanel({
           <Lock className="h-3 w-3" /> Returned {relativeTime(row.returnedAt)}
         </p>
       )}
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="hidden w-64 shrink-0 flex-col border-l border-slate-200 bg-white p-4 lg:flex">
+        <h3 className="text-sm font-semibold">Grade</h3>
+        <p className="mt-0.5 text-xs text-slate-500">Saved privately until you return it.</p>
+        {fields}
+      </aside>
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 flex items-end lg:hidden">
+          <div className="absolute inset-0 bg-slate-900/40" onClick={onMobileClose} aria-hidden />
+          <div
+            className="relative flex max-h-[80vh] w-full flex-col overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl"
+            style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">Grade — {row.student.name}</h3>
+                <p className="mt-0.5 text-xs text-slate-500">Saved privately until you return it.</p>
+              </div>
+              <button
+                onClick={onMobileClose}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                aria-label="Close grade panel"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {fields}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

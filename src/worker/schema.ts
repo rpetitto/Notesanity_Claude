@@ -236,6 +236,18 @@ migrate("002_page_groups", async () => {
   }
 });
 
+/** Class identity: an emoji badge and an optional featured image. */
+migrate("004_class_identity", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(classes)`).all<{ name: string }>();
+  const has = (name: string) => (cols.results ?? []).some((c) => c.name === name);
+  if (!has("emoji")) {
+    await db.prepare(`ALTER TABLE classes ADD COLUMN emoji TEXT NOT NULL DEFAULT ''`).run();
+  }
+  if (!has("cover_key")) {
+    await db.prepare(`ALTER TABLE classes ADD COLUMN cover_key TEXT`).run();
+  }
+});
+
 /** Per-notebook cover styling: an accent colour and an optional uploaded image. */
 migrate("003_notebook_cover", async () => {
   const cols = await db.prepare(`PRAGMA table_info(notebooks)`).all<{ name: string }>();

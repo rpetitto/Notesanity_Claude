@@ -13,8 +13,11 @@ interface TeachingAssignment {
   classId: string;
   className: string;
   accentColor: string;
+  classEmoji?: string;
   notebookId: string;
   notebookTitle: string;
+  notebookColor?: string;
+  notebookHasCover?: boolean;
   pageCount: number;
   dueAt: string | null;
   releaseAt: string | null;
@@ -43,6 +46,9 @@ export interface AssignmentCardData {
   title: string;
   notebookId: string;
   notebookTitle: string;
+  /** The notebook's own accent colour — the assignment card's top strip and thumbnail tint borrow it. */
+  notebookColor?: string;
+  notebookHasCover?: boolean;
   pageCount: number;
   dueAt: string | null;
   status: "draft" | "active";
@@ -163,7 +169,7 @@ function StudentRows({
                 </div>
               </td>
               <td className="py-2 pr-3">
-                <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", STATUS_STYLES[r.status] ?? "bg-slate-100 text-slate-600")}>
+                <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_STYLES[r.status] ?? "bg-slate-100 text-slate-600")}>
                   {STATUS_LABELS[r.status] ?? r.status}
                 </span>
               </td>
@@ -220,100 +226,107 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
 
   const stackPages = assignedPages.slice(0, 4);
   const extra = Math.max(0, assignedPages.length - stackPages.length);
+  const accent = a.notebookColor || "#1A73E8";
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-      <div className="flex gap-4">
-        <div className="relative hidden h-[92px] w-[76px] shrink-0 sm:block">
-          {stackPages.length === 0 && <div className="h-full w-full animate-pulse rounded-lg bg-slate-100" />}
-          {stackPages.map((p, i) => (
-            <div
-              key={p.id}
-              className="absolute rounded shadow"
-              style={{
-                top: i * 7,
-                left: i * 9,
-                transform: `rotate(${(i - (stackPages.length - 1) / 2) * 7}deg)`,
-                zIndex: stackPages.length - i,
-              }}
-            >
-              <PageThumb
-                pdfUrl={assetUrl(a.notebookId, p.asset_key)}
-                sourceIndex={p.source_index}
-                pageWidth={p.width}
-                pageHeight={p.height}
-                width={56}
-              />
-            </div>
-          ))}
-          {extra > 0 && (
-            <span className="absolute -bottom-1 -right-1 z-20 flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-800 px-1 text-[10px] font-semibold text-white ring-2 ring-white">
-              +{extra}
-            </span>
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <Link to={`/assignments/${a.id}`} className="block truncate text-base font-semibold text-slate-900 hover:text-blue-700">
-                {a.title}
-              </Link>
-              <div className="mt-0.5 truncate text-xs text-slate-500">
-                {a.notebookTitle} &middot; {pageNumbersLabel}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-xs font-medium",
-                    a.status === "draft" ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700",
-                  )}
-                >
-                  {a.status === "draft" ? "Draft" : "Active"}
-                </span>
-                <span className={cn("text-xs", overdue ? "font-medium text-rose-600" : "text-slate-500")}>
-                  Due {formatDue(a.dueAt)}
-                </span>
-              </div>
-            </div>
-
-            <Link
-              to={`/assignments/${a.id}`}
-              className="flex h-10 shrink-0 items-center rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Grade
-            </Link>
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-end gap-6 sm:mt-4">
-            <Stat label="Turned in" value={`${submitted}/${total}`} />
-            {graded !== undefined && <Stat label="Graded" value={String(graded)} />}
-            <Stat label="Returned" value={String(returned)} />
-          </div>
-          <div className="mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="mt-3 flex h-9 items-center gap-1 rounded-full px-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="h-1.5" style={{ backgroundColor: accent }} />
+      <div className="p-4">
+        <div className="flex gap-4">
+          <div
+            className="relative hidden h-[92px] w-[76px] shrink-0 rounded-lg sm:block"
+            style={{ backgroundColor: `${accent}14` }}
           >
-            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
-            {expanded ? "Hide students" : "Show students"}
-          </button>
-        </div>
-      </div>
+            {stackPages.length === 0 && <div className="h-full w-full animate-pulse rounded-lg bg-slate-100" />}
+            {stackPages.map((p, i) => (
+              <div
+                key={p.id}
+                className="absolute rounded shadow"
+                style={{
+                  top: i * 7,
+                  left: i * 9,
+                  transform: `rotate(${(i - (stackPages.length - 1) / 2) * 7}deg)`,
+                  zIndex: stackPages.length - i,
+                }}
+              >
+                <PageThumb
+                  pdfUrl={assetUrl(a.notebookId, p.asset_key)}
+                  sourceIndex={p.source_index}
+                  pageWidth={p.width}
+                  pageHeight={p.height}
+                  width={56}
+                />
+              </div>
+            ))}
+            {extra > 0 && (
+              <span className="absolute -bottom-1 -right-1 z-20 flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-800 px-1 text-[10px] font-semibold text-white ring-2 ring-white">
+                +{extra}
+              </span>
+            )}
+          </div>
 
-      {expanded && (
-        <div className="mt-3 border-t border-slate-100 pt-3">
-          {detailQ.isLoading && <Spinner label="Loading students…" />}
-          {detailQ.error && <ErrorNote error={detailQ.error as Error} />}
-          {detailQ.data?.rows && (
-            <StudentRows rows={detailQ.data.rows} grading={detailQ.data.assignment.grading} pointsMax={detailQ.data.assignment.pointsMax} />
-          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <Link to={`/assignments/${a.id}`} className="block truncate text-sm font-semibold text-slate-900 hover:text-blue-700">
+                  {a.title}
+                </Link>
+                <div className="mt-0.5 truncate text-xs text-slate-500">
+                  {a.notebookTitle} &middot; {pageNumbersLabel}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                      a.status === "draft" ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700",
+                    )}
+                  >
+                    {a.status === "draft" ? "Draft" : "Active"}
+                  </span>
+                  <span className={cn("text-xs", overdue ? "font-medium text-rose-600" : "text-slate-500")}>
+                    Due {formatDue(a.dueAt)}
+                  </span>
+                </div>
+              </div>
+
+              <Link
+                to={`/assignments/${a.id}`}
+                className="flex h-11 shrink-0 items-center rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Grade
+              </Link>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-end gap-6 sm:mt-4">
+              <Stat label="Turned in" value={`${submitted}/${total}`} />
+              {graded !== undefined && <Stat label="Graded" value={String(graded)} />}
+              <Stat label="Returned" value={String(returned)} />
+            </div>
+            <div className="mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent }} />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-3 flex h-9 items-center gap-1 rounded-full px-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+            >
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
+              {expanded ? "Hide students" : "Show students"}
+            </button>
+          </div>
         </div>
-      )}
+
+        {expanded && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            {detailQ.isLoading && <Spinner label="Loading students…" />}
+            {detailQ.error && <ErrorNote error={detailQ.error as Error} />}
+            {detailQ.data?.rows && (
+              <StudentRows rows={detailQ.data.rows} grading={detailQ.data.assignment.grading} pointsMax={detailQ.data.assignment.pointsMax} />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -376,7 +389,7 @@ export default function TeacherAssignments() {
           action={
             <Link
               to="/classes"
-              className="flex h-10 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+              className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
             >
               Go to classes
             </Link>
