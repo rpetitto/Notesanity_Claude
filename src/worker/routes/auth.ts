@@ -14,6 +14,7 @@
 
 import { app, db } from "flingit";
 import { email as mailer } from "flingit/plugin/email-send";
+import { renderEmail } from "../lib/email";
 import type { Context } from "hono";
 import { HttpError, handler, now, setLocalSessionResolver, uid } from "../lib/session";
 
@@ -298,23 +299,26 @@ app.post("/api/auth/magic/request", handler(async (c) => {
   if (allowed) {
     const token = await issueToken(address, kind);
     const link = `${appOrigin(c)}/api/auth/magic/callback?token=${token}`;
-    const subject = kind === "reset" ? "Reset your Notesanity password" : "Your Notesanity sign-in link";
-    const line =
-      kind === "reset"
-        ? "Use the link below to set a new password."
-        : "Use the link below to sign in. It works once and expires in 20 minutes.";
+    const reset = kind === "reset";
+    const { html, text } = renderEmail({
+      preheader: reset
+        ? "Set a new password — the link works once and expires in 20 minutes."
+        : "Sign in — the link works once and expires in 20 minutes.",
+      heading: reset ? "Set a new password" : "Sign in to Notesanity",
+      body: [
+        reset
+          ? "Someone asked to reset the password for this address. Use the button below to choose a new one."
+          : "Use the button below to sign in. It works once, and only for the next 20 minutes.",
+      ],
+      action: { label: reset ? "Set a new password" : "Sign in to Notesanity", url: link },
+      note: "If you didn't ask for this, you can ignore this email — nothing will change.",
+    });
     try {
       await mailer.send({
         to: address,
-        subject,
-        text: `${line}\n\n${link}\n\nIf you didn't ask for this, you can ignore it.`,
-        html:
-          `<p style="font-family:system-ui,sans-serif;font-size:16px;color:#20302C">${line}</p>` +
-          `<p><a href="${link}" style="display:inline-block;background:#7FD1AE;color:#20302C;` +
-          `font-family:system-ui,sans-serif;font-weight:700;padding:12px 20px;border-radius:999px;` +
-          `text-decoration:none">${kind === "reset" ? "Set a new password" : "Sign in to Notesanity"}</a></p>` +
-          `<p style="font-family:system-ui,sans-serif;font-size:14px;color:#5b6b66">` +
-          `The link expires in 20 minutes. If you didn't ask for this, you can ignore it.</p>`,
+        subject: reset ? "Reset your Notesanity password" : "Your Notesanity sign-in link",
+        text,
+        html,
       });
     } catch (err) {
       console.error("magic link send failed", err);
