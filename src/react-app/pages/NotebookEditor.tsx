@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
-  PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
+  MoreHorizontal, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type FieldRec, type PageRec } from "../lib/api";
@@ -512,7 +512,7 @@ export default function NotebookEditor() {
   return (
     <div className="flex h-dvh flex-col bg-oat">
       <div className="h-1 shrink-0" style={{ backgroundColor: notebook.accentColor || "#20302C" }} />
-      <header className="relative flex flex-wrap items-center gap-3 border-b-2 border-pine/12 bg-white px-3 py-2">
+      <header className="relative flex items-center gap-3 border-b-2 border-pine/12 bg-white px-3 py-2">
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
@@ -525,14 +525,14 @@ export default function NotebookEditor() {
         </button>
         <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate font-display text-[16px] font-bold text-pine">{notebook.title}</div>
-          <div className="text-[16px] text-pine/70">
+          <div className="truncate text-[16px] text-pine/70">
             {livePages.length} page{livePages.length === 1 ? "" : "s"}
             {archivedCount > 0 && ` · ${archivedCount} archived`}
             {assignments.length > 0 && ` · ${assignments.length} assignment${assignments.length === 1 ? "" : "s"}`}
           </div>
         </div>
 
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <Chip
             tone={notebook.status === "published" ? "mint" : "quiet"}
             icon={notebook.status === "published" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}
@@ -543,20 +543,37 @@ export default function NotebookEditor() {
             variant="secondary"
             onClick={() => setAppearanceOpen((v) => !v)}
             aria-expanded={appearanceOpen}
-            className={cn(appearanceOpen && "bg-oat")}
+            className={cn("hidden xl:inline-flex", appearanceOpen && "bg-oat")}
           >
             <Palette className="h-5 w-5" strokeWidth={2.5} /> Appearance
           </Button>
-          <Button variant="secondary" onClick={() => addPagesRef.current?.click()} disabled={!!busyMessage}>
+          <Button variant="secondary" onClick={() => addPagesRef.current?.click()} disabled={!!busyMessage} className="hidden xl:inline-flex">
             <Plus className="h-5 w-5" strokeWidth={2.5} /> {busyMessage || "Add pages"}
           </Button>
-          <Button variant="secondary" onClick={() => setBlankOpen(true)} disabled={!!busyMessage}>
+          <Button variant="secondary" onClick={() => setBlankOpen(true)} disabled={!!busyMessage} className="hidden xl:inline-flex">
             <Rows3 className="h-5 w-5" strokeWidth={2.5} /> Blank pages
           </Button>
+          <Button
+            variant="secondary"
+            onClick={() => { setTool("none"); setAnnotateMode((v) => !v); }}
+            aria-pressed={annotateMode}
+            className={cn(annotateMode && "border-pine bg-pine text-oat hover:bg-pine")}
+          >
+            <Pen className="h-5 w-5" strokeWidth={2.5} /> Annotate
+          </Button>
+          <MoreMenu
+            items={[
+              { label: "Appearance", icon: Palette, onClick: () => setAppearanceOpen(true) },
+              { label: busyMessage || "Add pages", icon: Plus, onClick: () => addPagesRef.current?.click(), disabled: !!busyMessage },
+              { label: "Blank pages", icon: Rows3, onClick: () => setBlankOpen(true), disabled: !!busyMessage },
+            ]}
+          />
           {hasUnpublishedAnnotations && (
-            <Chip tone="warn" icon={<Pen className="h-4 w-4" strokeWidth={2.5} />}>
-              Unpublished annotations
-            </Chip>
+            <span className="hidden xl:inline-flex">
+              <Chip tone="warn" icon={<Pen className="h-4 w-4" strokeWidth={2.5} />}>
+                Unpublished annotations
+              </Chip>
+            </span>
           )}
           <Button variant="primary" onClick={() => publish.mutate()} disabled={publish.isPending}>
             <Send className="h-5 w-5" strokeWidth={2.5} />
@@ -600,7 +617,10 @@ export default function NotebookEditor() {
         />
       )}
 
-      <div className="flex flex-wrap items-center gap-2 border-b-2 border-pine/12 bg-white px-3 py-2">
+      {/* Annotate is a mode: while it is on, the field palette has nothing to
+          do and only costs a row of an already short screen. */}
+      {!annotateMode && (
+      <div className="flex items-center gap-2 overflow-x-auto border-b-2 border-pine/12 bg-white px-3 py-2 [&>*]:shrink-0">
         <span className="label-caps text-pine/60">Student fills in:</span>
         {([
           { k: "text", label: "Text box", icon: TypeIcon },
@@ -640,17 +660,6 @@ export default function NotebookEditor() {
         ))}
         {tool !== "none" && <span className="text-[16px] text-pine/60">Drag on the page to place it</span>}
 
-        <span className="mx-1 h-5 w-px bg-pine/20" aria-hidden />
-        <button
-          onClick={() => { setTool("none"); setAnnotateMode((v) => !v); }}
-          aria-pressed={annotateMode}
-          className={cn(
-            "inline-flex h-11 items-center gap-2 rounded-full border-2 px-4 font-display text-[16px] font-bold transition-colors",
-            annotateMode ? "border-pine bg-pine text-oat" : "border-pine/20 text-pine/70 hover:bg-oat",
-          )}
-        >
-          <Pen className="h-3.5 w-3.5" strokeWidth={2.5} /> Annotate
-        </button>
 
         <div className="ml-auto">
           <select
@@ -663,6 +672,7 @@ export default function NotebookEditor() {
           </select>
         </div>
       </div>
+      )}
 
       {annotateMode && (
         <div className="overflow-x-auto">
@@ -705,7 +715,7 @@ export default function NotebookEditor() {
           </div>
         )}
 
-        <div ref={containerRef} className="relative min-w-0 flex-1 overflow-auto bg-oat p-4">
+        <div ref={containerRef} className="relative min-w-0 flex-1 overflow-auto bg-oat p-2 sm:p-4">
           {!page ? (
             <div className="py-20 text-center text-[16px] text-pine/70">
               Every page is archived. Restore one from the list to keep editing.
@@ -1343,6 +1353,54 @@ function RichTextEditor({
       <p className="mt-1 text-[14px] text-pine/55">
         Headings, emphasis and lists are kept. Anything else is stripped when it saves.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Secondary header actions, folded into one button.
+ *
+ * A tablet is the working surface here, not a wide desktop, and six competing
+ * buttons wrapped the header onto a second and third row — chrome that ate half
+ * the screen the page is supposed to occupy. The actions stay one tap away and
+ * spelled out; they just stop claiming permanent space.
+ */
+function MoreMenu({ items }: { items: { label: string; icon: typeof Plus; onClick: () => void; disabled?: boolean }[] }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [open]);
+  return (
+    <div className="relative shrink-0 xl:hidden">
+      <Button
+        variant="secondary"
+        aria-label="More actions"
+        aria-expanded={open}
+        onPointerDown={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >
+        <MoreHorizontal className="h-5 w-5" strokeWidth={2.5} />
+      </Button>
+      {open && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-[16px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)]"
+        >
+          {items.map(({ label, icon: Icon, onClick, disabled }) => (
+            <button
+              key={label}
+              type="button"
+              disabled={disabled}
+              onClick={() => { setOpen(false); onClick(); }}
+              className="flex h-12 w-full items-center gap-2.5 px-4 text-left font-display text-[17px] font-bold text-pine hover:bg-oat disabled:opacity-50"
+            >
+              <Icon className="h-5 w-5 shrink-0" strokeWidth={2.5} /> {label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

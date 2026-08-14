@@ -61,7 +61,9 @@ export default function InkToolbar({
 
   return (
     <div
-      className="flex snap-x items-center gap-2 overflow-x-auto border-b border-pine/20 bg-white/95 px-3 py-2 backdrop-blur sm:flex-wrap sm:overflow-visible"
+      // Wrapping is only allowed once the row genuinely fits. At `sm` it kicked in
+      // right where tablets live, turning one row of tools into two or three.
+      className="flex snap-x items-center gap-2 overflow-x-auto border-b border-pine/20 bg-white/95 px-3 py-2 backdrop-blur 2xl:flex-wrap 2xl:overflow-visible"
       style={{ touchAction: "manipulation", scrollbarWidth: "thin" }}
     >
       <div className="flex shrink-0 items-center gap-1 rounded-lg bg-oat p-1">
