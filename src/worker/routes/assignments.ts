@@ -276,6 +276,11 @@ app.get("/api/assignments/:id", handler(async (c) => {
       submission: {
         status: sub?.status ?? "not_started",
         submittedAt: sub?.submitted_at ?? null,
+        returnedAt: sub?.returned_at ?? null,
+        // The client mirrors the server's lock rather than inferring it, so the
+        // page can never offer an action the server would refuse.
+        locked: !!sub?.locked,
+        graded: !!sub?.graded_at,
         complete: await completionFor(inst?.id ?? null, pageIds),
         grade: sub?.returned_at
           ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete, feedback: sub.feedback }

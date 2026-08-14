@@ -7,6 +7,9 @@ import {
 import { toast } from "sonner";
 import Gradebook from "./Gradebook";
 import PageThumb from "../components/PageThumb";
+import StudentAssignmentNav, {
+  WORK_EMPTY, bucketAssignments, type WorkTab,
+} from "../components/StudentAssignmentNav";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
@@ -657,6 +660,7 @@ export default function ClassView() {
   };
   const [inviteOpen, setInviteOpen] = useState(false);
   const [coTeacherOpen, setCoTeacherOpen] = useState(false);
+  const [workTab, setWorkTab] = useState<WorkTab>("todo");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [coverVersion, setCoverVersion] = useState(0);
   const [reviewingStudent, setReviewingStudent] = useState<BackfillStudent | null>(null);
@@ -684,6 +688,13 @@ export default function ClassView() {
     queryFn: () => api.get<{ assignments: ClassAssignmentRow[]; isTeacher: boolean }>(`/api/classes/${id}/assignments`),
     enabled: !!id && tab === "assignments",
   });
+
+  // Students see this class's assignments split into the same buckets as
+  // "My work"; teachers see the full list unfiltered.
+  const studentBuckets = useMemo(
+    () => bucketAssignments(assignmentsQ.data?.assignments ?? []),
+    [assignmentsQ.data],
+  );
 
   const backfillQ = useQuery({
     queryKey: ["backfill", id],
@@ -938,26 +949,44 @@ export default function ClassView() {
             </div>
           )}
           {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length > 0 && !isTeacher && (
-            <div className="space-y-3">
-              {assignmentsQ.data.assignments.map((a) => (
-                <StudentAssignmentCard
-                  key={a.id}
-                  a={{
-                    id: a.id,
-                    title: a.title,
-                    notebookId: a.notebookId,
-                    notebookTitle: a.notebookTitle,
-                    notebookColor: a.notebookColor,
-                    pageCount: a.pageCount,
-                    dueAt: a.dueAt,
-                    grading: a.grading,
-                    pointsMax: a.pointsMax,
-                    complete: a.complete ?? 0,
-                    status: (a.myStatus as StudentAssignmentData["status"]) ?? "not_started",
-                    grade: a.grade ?? null,
-                  }}
-                />
-              ))}
+            <div>
+              {/* The same three buckets a student sees on "My work", so the idea
+                  looks identical whether they're in one class or across all. */}
+              <StudentAssignmentNav
+                className="mb-5"
+                value={workTab}
+                onChange={setWorkTab}
+                counts={{
+                  todo: studentBuckets.todo.length,
+                  "handed-in": studentBuckets["handed-in"].length,
+                  marked: studentBuckets.marked.length,
+                }}
+              />
+              {studentBuckets[workTab].length === 0 ? (
+                <EmptyState title={WORK_EMPTY[workTab]} />
+              ) : (
+                <div className="space-y-3">
+                  {studentBuckets[workTab].map((a) => (
+                    <StudentAssignmentCard
+                      key={a.id}
+                      a={{
+                        id: a.id,
+                        title: a.title,
+                        notebookId: a.notebookId,
+                        notebookTitle: a.notebookTitle,
+                        notebookColor: a.notebookColor,
+                        pageCount: a.pageCount,
+                        dueAt: a.dueAt,
+                        grading: a.grading,
+                        pointsMax: a.pointsMax,
+                        complete: a.complete ?? 0,
+                        status: (a.myStatus as StudentAssignmentData["status"]) ?? "not_started",
+                        grade: a.grade ?? null,
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

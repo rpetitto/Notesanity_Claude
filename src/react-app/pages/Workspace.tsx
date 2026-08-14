@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ChevronRight, Lock, PanelLeft, Send } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronRight, PanelLeft, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
@@ -57,7 +57,15 @@ export default function Workspace() {
   const data = workQuery.data;
   const assignment = assignmentQuery.data?.assignment;
   const submission = assignmentQuery.data?.submission;
-  const locked = submission?.status === "submitted";
+  /**
+   * Mirror the server's rule rather than guessing from status: work is frozen
+   * from the moment it is handed in and stays frozen after it comes back
+   * marked, until a teacher reopens it.
+   */
+  const locked = Boolean(submission?.locked);
+  const marked = Boolean(submission?.returnedAt);
+  // Taking work back is only honest while nobody has marked it yet.
+  const canUnsubmit = locked && !marked && !submission?.graded;
 
   const work = useNotebookWork({
     notebookId,
@@ -214,11 +222,17 @@ export default function Workspace() {
               </Chip>
             </span>
           )}
-          {assignment && !locked && (
+          {/* Marked work is finished: show that, don't offer to hand it in again. */}
+          {assignment && marked && (
+            <Chip tone="mint" icon={<CheckCheck className="h-4 w-4" strokeWidth={2.5} />}>
+              Marked and returned
+            </Chip>
+          )}
+          {assignment && !marked && !locked && (
             <Button
               variant="primary"
               onClick={() => {
-                if (confirm("Turn in this assignment? These pages will lock until your teacher returns them.")) {
+                if (confirm("Turn in this assignment? These pages lock once you do.")) {
                   submit.mutate();
                 }
               }}
@@ -227,18 +241,30 @@ export default function Workspace() {
               <Send className="h-4 w-4" strokeWidth={2.5} /> Turn in
             </Button>
           )}
-          {assignment && locked && (
-            <Button variant="secondary" onClick={() => unsubmit.mutate()} disabled={unsubmit.isPending}>
-              <Lock className="h-4 w-4" strokeWidth={2.5} /> Unsubmit
-            </Button>
+          {assignment && locked && !marked && (
+            <>
+              <Chip tone="mint" icon={<Check className="h-4 w-4" strokeWidth={2.5} />}>Handed in</Chip>
+              {canUnsubmit && (
+                <Button variant="secondary" onClick={() => unsubmit.mutate()} disabled={unsubmit.isPending}>
+                  <Undo2 className="h-4 w-4" strokeWidth={2.5} /> Take it back
+                </Button>
+              )}
+            </>
           )}
         </div>
       </header>
 
-      {locked && (
-        <div className="flex items-center gap-2 border-b-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-4 py-2 text-[16px] text-[#5c4611]">
+      {locked && !marked && (
+        <div className="flex items-center gap-2 border-b-2 border-[#8a6a1f]/40 bg-[#f7e6bf] px-4 py-2 text-[16px] text-[#5c4611]">
           <Check className="h-4 w-4" strokeWidth={2.5} />
-          Turned in{submission?.submittedAt ? ` ${formatDue(submission.submittedAt)}` : ""} — locked until your teacher returns it.
+          Handed in{submission?.submittedAt ? ` ${formatDue(submission.submittedAt)}` : ""}
+          {canUnsubmit ? " — you can still take it back until it's marked." : " — your teacher is marking it."}
+        </div>
+      )}
+      {marked && (
+        <div className="flex items-center gap-2 border-b-2 border-pine/15 bg-mint/25 px-4 py-2 text-[16px] text-pine">
+          <CheckCheck className="h-4 w-4" strokeWidth={2.5} />
+          This work is marked and back with you. Ask your teacher if you need it reopened.
         </div>
       )}
 

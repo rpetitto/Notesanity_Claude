@@ -4,9 +4,11 @@ import { KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import { StudentAssignmentCard, type StudentAssignmentData } from "./ClassView";
-import { Button, CardLink, Chip, Input, Modal } from "../components/ui";
+import StudentAssignmentNav, {
+  WORK_EMPTY, bucketAssignments, type WorkTab,
+} from "../components/StudentAssignmentNav";
+import {Button, CardLink, Input, Modal } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
-import { cn } from "../lib/utils";
 
 /** `GET /api/classes` rows also carry `emoji` — declared locally since `ClassSummary`
  * (shared with other owners' code) doesn't yet. There's no `hasCover` flag on this
@@ -51,20 +53,6 @@ function toCardData(a: MyAssignment): StudentAssignmentData {
     grade: a.grade,
   };
 }
-
-type WorkTab = "todo" | "handed-in" | "marked";
-
-const WORK_TABS: { key: WorkTab; label: string }[] = [
-  { key: "todo", label: "To do" },
-  { key: "handed-in", label: "Handed in" },
-  { key: "marked", label: "Marked" },
-];
-
-const WORK_EMPTY: Record<WorkTab, string> = {
-  todo: "Nothing due. Enjoy it.",
-  "handed-in": "Nothing waiting to be marked.",
-  marked: "No marked work yet.",
-};
 
 function ClassCard({ cls }: { cls: ClassRow }) {
   const [coverFailed, setCoverFailed] = useState(false);
@@ -167,17 +155,7 @@ export default function StudentHome() {
   const [workTab, setWorkTab] = useState<WorkTab>("todo");
 
   const assignments = assignmentsQ.data?.assignments ?? [];
-  const buckets = useMemo(() => {
-    const todo: MyAssignment[] = [];
-    const handedIn: MyAssignment[] = [];
-    const marked: MyAssignment[] = [];
-    for (const a of assignments) {
-      if (a.status === "returned") marked.push(a);
-      else if (a.status === "submitted") handedIn.push(a);
-      else todo.push(a);
-    }
-    return { todo, "handed-in": handedIn, marked };
-  }, [assignments]);
+  const buckets = useMemo(() => bucketAssignments<MyAssignment>(assignments), [assignments]);
 
   const current = buckets[workTab];
 
@@ -219,26 +197,16 @@ export default function StudentHome() {
       <section>
         <h2 className="label-caps mb-3 text-pine/70">Assignments</h2>
 
-        <div className="mb-5 flex items-center gap-3 overflow-x-auto">
-          <div className="flex gap-1 rounded-full border-[3px] border-pine bg-white p-1">
-            {WORK_TABS.map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setWorkTab(key)}
-                className={cn(
-                  "inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-full px-4 font-display text-[17px] transition-colors sm:px-5",
-                  workTab === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
-                )}
-              >
-                {label}
-                <Chip tone={workTab === key ? "mint" : "quiet"} className="h-6 min-w-6 justify-center px-1.5 text-[14px]">
-                  {buckets[key].length}
-                </Chip>
-              </button>
-            ))}
-          </div>
-        </div>
+        <StudentAssignmentNav
+          className="mb-5"
+          value={workTab}
+          onChange={setWorkTab}
+          counts={{
+            todo: buckets.todo.length,
+            "handed-in": buckets["handed-in"].length,
+            marked: buckets.marked.length,
+          }}
+        />
 
         {assignmentsQ.isLoading && <Spinner />}
         {assignmentsQ.error && <ErrorNote error={assignmentsQ.error as Error} />}
