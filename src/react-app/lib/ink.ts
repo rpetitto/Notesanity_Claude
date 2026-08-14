@@ -137,6 +137,48 @@ export function hitStroke(strokes: Stroke[], x: number, y: number, radius: numbe
 }
 
 /**
+ * Straighten a highlighter stroke that was aimed along a line of text.
+ *
+ * A hand dragged across a line wanders a little vertically but travels a long
+ * way horizontally. When a stroke fits that shape we replace it with a level
+ * bar at the average height — what a highlighter run against a ruler would
+ * give. Anything else is left exactly as drawn: a short dab, a circled
+ * diagram, a deliberate diagonal or a wavy underline all fail one of the
+ * tests below, which is also the escape hatch for anyone who wants the raw
+ * gesture kept.
+ *
+ * Returns the input array untouched when no snapping applies, so callers can
+ * use the result unconditionally.
+ */
+export function straightenHighlight(p: number[], nibWidth: number): number[] {
+  if (p.length < 12) return p; // fewer than four samples — nothing to judge
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, sumY = 0, n = 0;
+  for (let i = 0; i + 2 < p.length; i += 3) {
+    const x = p[i];
+    const y = p[i + 1];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    sumY += y;
+    n++;
+  }
+
+  const span = maxX - minX;
+  const drift = maxY - minY;
+  // Long enough to be highlighting something, level enough to have been aimed
+  // along a line, and far wider than it is tall so shapes are never caught.
+  const tolerance = Math.max(nibWidth * 0.8, span * 0.06);
+  if (span < 24 || drift > tolerance || span < drift * 5) return p;
+
+  // Keep the direction of travel so erasing and hit-testing behave the same.
+  const rightwards = p[0] <= p[p.length - 3];
+  const y = sumY / n;
+  return rightwards ? [minX, y, 0.5, maxX, y, 0.5] : [maxX, y, 0.5, minX, y, 0.5];
+}
+
+/**
  * Paint one stroke.
  *
  * Pen strokes taper with stylus pressure, which means drawing segment-by-segment

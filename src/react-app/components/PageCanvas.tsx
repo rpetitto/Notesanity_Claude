@@ -30,7 +30,7 @@ import {
 import { toast } from "sonner";
 import type { FieldRec } from "../lib/api";
 import {
-  type LayerData, type Stroke, type ToolKind, drawLayer, drawStroke, hitStroke,
+  type LayerData, type Stroke, type ToolKind, drawLayer, drawStroke, hitStroke, straightenHighlight,
 } from "../lib/ink";
 import { renderPageToCanvas } from "../lib/pdf";
 import { cn } from "../lib/utils";
@@ -199,11 +199,13 @@ export default function PageCanvas({
       points.current = [];
       return;
     }
+    const highlighter = tool.kind === "highlighter";
+    const path = highlighter ? straightenHighlight(points.current, tool.width) : points.current;
     const stroke: Stroke = {
-      t: tool.kind === "highlighter" ? "h" : "p",
+      t: highlighter ? "h" : "p",
       c: tool.color,
       w: tool.width,
-      p: points.current.slice(),
+      p: path.slice(),
     };
     onLayerChange({ ...activeLayer, s: [...activeLayer.s, stroke] });
     points.current = [];
@@ -215,10 +217,22 @@ export default function PageCanvas({
     const ctx = liveRef.current?.getContext("2d");
     if (!ctx) return;
     const p = points.current;
-    // Paint only what's new — repainting the whole stroke each frame gets
+
+    // Highlighters repaint whole. The stroke can snap straight at any moment as
+    // the gesture develops, so the preview has to be able to un-draw itself —
+    // and translucent segments painted over each other would darken at the
+    // joins anyway. A highlight is a few hundred points at most.
+    if (tool.kind === "highlighter") {
+      ctx.clearRect(0, 0, cssW, cssH);
+      const path = straightenHighlight(p, tool.width);
+      if (path.length >= 6) drawStroke(ctx, { t: "h", c: tool.color, w: tool.width, p: path }, scale);
+      return;
+    }
+
+    // Pen paints only what's new — repainting the whole stroke each frame gets
     // expensive on low-powered Chromebooks once a stroke is long.
     const partial: Stroke = {
-      t: tool.kind === "highlighter" ? "h" : "p",
+      t: "p",
       c: tool.color,
       w: tool.width,
       p: p.slice(Math.max(0, drawnUpTo.current)),
@@ -227,7 +241,7 @@ export default function PageCanvas({
       drawStroke(ctx, partial, scale);
       drawnUpTo.current = p.length - 3;
     }
-  }, [tool, scale]);
+  }, [tool, scale, cssW, cssH]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "pen") lastPenAt.current = Date.now();
