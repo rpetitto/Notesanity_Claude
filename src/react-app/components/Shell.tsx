@@ -21,7 +21,7 @@ export function Avatar({ name, picture, size = 32 }: { name: string; picture?: s
   return (
     <div
       className="flex shrink-0 items-center justify-center rounded-full border-2 border-pine bg-mint font-display font-bold text-pine"
-      style={{ width: size, height: size, fontSize: size * 0.4 }}
+      style={{ width: size, height: size, fontSize: Math.max(13, size * 0.42) }}
     >
       {initials(name || "?")}
     </div>
@@ -61,7 +61,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
 
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-30 border-b-[3px] border-pine bg-oat/95 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b-2 border-pine/12 bg-oat/95 backdrop-blur">
         <div className={cn("mx-auto flex h-14 items-center gap-4 px-4", wide ? "max-w-none" : "max-w-6xl")}>
           <Link to={user?.role === "teacher" ? "/classes" : "/work"} className="flex items-center gap-2">
             <Logo size={26} />
@@ -74,7 +74,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
                 key={to}
                 to={to}
                 className={cn(
-                  "flex min-h-[44px] items-center gap-2 rounded-full border-[3px] px-4 font-display text-[15px] font-bold transition-colors",
+                  "flex min-h-[44px] items-center gap-2 rounded-full border-[3px] px-4 font-display text-[16px] font-bold transition-colors",
                   pathname.startsWith(to)
                     ? "border-pine bg-pine text-oat"
                     : "border-transparent text-pine hover:bg-pine/8",
@@ -105,7 +105,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
       {/* Phone navigation. The header row collapses below sm:, so without this
           there is no way to move between sections on a handset. */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 flex border-t-[3px] border-pine bg-oat/97 backdrop-blur sm:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 flex border-t-2 border-pine/12 bg-oat/97 backdrop-blur sm:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {nav.map(({ to, label, icon: Icon }) => {
@@ -115,7 +115,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
               key={to}
               to={to}
               className={cn(
-                "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 font-display text-[12px] font-bold",
+                "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 font-display text-[16px] font-bold",
                 active ? "text-pine" : "text-pine/55",
               )}
             >

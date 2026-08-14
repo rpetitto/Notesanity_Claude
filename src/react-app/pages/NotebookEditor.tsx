@@ -18,7 +18,13 @@ import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, IconButton, Input, Textarea } from "../components/ui";
 import { useBackTo } from "../lib/useBackTo";
-import { cn, formatDue } from "../lib/utils";
+import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
+
+/** Header controls share one height so a row of them lines up. */
+const BUTTON_ROW =
+  "inline-flex h-12 items-center gap-2 rounded-full border-[3px] border-pine bg-white px-5 " +
+  "font-display text-[17px] font-bold text-pine shadow-[4px_4px_0_0_var(--color-pine)] " +
+  "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none";
 
 type FieldTool = "none" | "text" | "checkbox" | "choice" | "prompt" | "image" | "audio";
 
@@ -50,8 +56,8 @@ interface AnnotationRow {
 }
 
 const ACCENT_SWATCHES = [
-  "#1A73E8", "#34A853", "#EA4335", "#F9AB00", "#9334E6",
-  "#1E8E9C", "#D93025", "#E37400", "#202124", "#5F6368",
+  "#2E7D6B", "#20302C", "#3F6C9E", "#7A5C8E", "#C4703F",
+  "#D9A441", "#A3341F", "#4F7A3A",
 ];
 
 interface NotebookAssignment {
@@ -390,19 +396,19 @@ export default function NotebookEditor() {
    * aside and the mobile drawer, so the two never drift out of sync. */
   const sidePanelBody = (isMobile: boolean) => (
     <>
-      <div className="flex border-b-[3px] border-pine">
+      <div className="flex border-b-2 border-pine/12">
         {(["pages", "assignments"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setSidePanel(tab)}
             className={cn(
-              "flex-1 px-3 py-2 text-xs font-display font-bold capitalize transition-colors",
+              "flex h-12 flex-1 items-center justify-center gap-1.5 px-3 font-display text-[17px] font-bold capitalize transition-colors",
               sidePanel === tab ? "border-b-[3px] -mb-[3px] border-pine text-pine" : "text-pine/50 hover:bg-oat",
             )}
           >
             {tab}
             {tab === "assignments" && assignments.length > 0 && (
-              <span className="ml-1 rounded-full border-2 border-pine/20 bg-oat px-1.5 py-0.5 text-[10px] text-pine/70">
+              <span className="ml-1 rounded-full border-2 border-pine/20 bg-oat px-1.5 py-0.5 text-[16px] text-pine/70">
                 {assignments.length}
               </span>
             )}
@@ -435,7 +441,7 @@ export default function NotebookEditor() {
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {assignments.length === 0 ? (
-            <p className="px-2 py-6 text-center text-xs text-pine/60">
+            <p className="px-2 py-6 text-center text-[16px] text-pine/60">
               No assignments use this notebook yet. Select pages, then choose “Create assignment”.
             </p>
           ) : (
@@ -449,15 +455,15 @@ export default function NotebookEditor() {
                 <div className="flex items-start gap-1.5">
                   <ClipboardList className="mt-0.5 h-3.5 w-3.5 shrink-0 text-pine/50" strokeWidth={2.5} />
                   <div className="min-w-0">
-                    <div className="truncate text-xs font-bold text-pine">{a.title}</div>
-                    <div className="mt-0.5 text-[10px] text-pine/70">
+                    <div className="truncate text-[16px] font-bold text-pine">{a.title}</div>
+                    <div className="mt-0.5 text-[16px] text-pine/70">
                       {a.pageCount} page{a.pageCount === 1 ? "" : "s"} · {formatDue(a.dueAt)}
                     </div>
                     <div className="mt-1 flex items-center gap-1">
-                      <Chip tone={a.status === "active" ? "mint" : "quiet"} className="px-1.5 py-0.5 text-[10px]">
+                      <Chip tone={a.status === "active" ? "mint" : "quiet"} className="px-1.5 py-0.5 text-[16px]">
                         {a.status === "active" ? "Active" : "Draft"}
                       </Chip>
-                      <span className="text-[10px] text-pine/70">{a.submitted}/{a.total} in</span>
+                      <span className="text-[16px] text-pine/70">{a.submitted}/{a.total} in</span>
                     </div>
                   </div>
                 </div>
@@ -472,20 +478,20 @@ export default function NotebookEditor() {
   return (
     <div className="flex h-dvh flex-col bg-oat">
       <div className="h-1 shrink-0" style={{ backgroundColor: notebook.accentColor || "#20302C" }} />
-      <header className="relative flex flex-wrap items-center gap-3 border-b-[3px] border-pine bg-white px-3 py-2">
+      <header className="relative flex flex-wrap items-center gap-3 border-b-2 border-pine/12 bg-white px-3 py-2">
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
         <button
           type="button"
           onClick={() => setPagesDrawerOpen(true)}
-          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-[3px] border-pine px-3 py-2 text-xs font-display font-bold text-pine hover:bg-oat sm:hidden"
+          className={cn(BUTTON_ROW, "sm:hidden")}
         >
           <PanelLeft className="h-4 w-4" strokeWidth={2.5} /> Pages
         </button>
         <div className="min-w-0 flex-1 sm:flex-initial">
-          <div className="truncate font-display text-sm font-bold text-pine">{notebook.title}</div>
-          <div className="text-xs text-pine/70">
+          <div className="truncate font-display text-[16px] font-bold text-pine">{notebook.title}</div>
+          <div className="text-[16px] text-pine/70">
             {livePages.length} page{livePages.length === 1 ? "" : "s"}
             {archivedCount > 0 && ` · ${archivedCount} archived`}
             {assignments.length > 0 && ` · ${assignments.length} assignment${assignments.length === 1 ? "" : "s"}`}
@@ -499,30 +505,24 @@ export default function NotebookEditor() {
           >
             {notebook.status === "published" ? "Published" : "Draft"}
           </Chip>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             onClick={() => setAppearanceOpen((v) => !v)}
             aria-expanded={appearanceOpen}
-            className={cn(
-              "inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-[3px] px-3 py-2 text-sm font-display font-bold transition-colors",
-              appearanceOpen ? "border-pine bg-oat text-pine" : "border-pine/20 text-pine hover:bg-oat",
-            )}
+            className={cn(appearanceOpen && "bg-oat")}
           >
-            <Palette className="h-4 w-4" strokeWidth={2.5} /> Appearance
-          </button>
+            <Palette className="h-5 w-5" strokeWidth={2.5} /> Appearance
+          </Button>
           <Button variant="secondary" onClick={() => addPagesRef.current?.click()} disabled={!!busyMessage}>
-            <Plus className="h-4 w-4" strokeWidth={2.5} /> {busyMessage || "Add pages"}
+            <Plus className="h-5 w-5" strokeWidth={2.5} /> {busyMessage || "Add pages"}
           </Button>
           {hasUnpublishedAnnotations && (
-            <span
-              title="Students will see these annotations after you Update student notebooks."
-              className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-2.5 py-1 text-xs font-bold text-[#5c4611]"
-            >
-              <Pen className="h-3 w-3" strokeWidth={2.5} /> Unpublished annotations
-            </span>
+            <Chip tone="warn" icon={<Pen className="h-4 w-4" strokeWidth={2.5} />}>
+              Unpublished annotations
+            </Chip>
           )}
           <Button variant="primary" onClick={() => publish.mutate()} disabled={publish.isPending}>
-            <Send className="h-4 w-4" strokeWidth={2.5} />
+            <Send className="h-5 w-5" strokeWidth={2.5} />
             {notebook.status === "published" ? "Update student notebooks" : "Publish to students"}
           </Button>
         </div>
@@ -541,7 +541,7 @@ export default function NotebookEditor() {
         {appearanceOpen && (
           <AppearancePopover
             notebookId={notebookId}
-            accentColor={notebook.accentColor || "#1A73E8"}
+            accentColor={notebook.accentColor || DEFAULT_ACCENT}
             hasCover={notebook.hasCover}
             coverBump={coverBump}
             coverInputRef={coverInputRef}
@@ -554,7 +554,7 @@ export default function NotebookEditor() {
         )}
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 border-b-[3px] border-pine bg-white px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b-2 border-pine/12 bg-white px-3 py-2">
         <span className="label-caps text-pine/60">Add field:</span>
         {([
           { k: "text", label: "Text box", icon: TypeIcon },
@@ -568,21 +568,21 @@ export default function NotebookEditor() {
             key={k}
             onClick={() => { setAnnotateMode(false); setTool(tool === k ? "none" : k); }}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1.5 text-xs font-bold transition-colors",
+              "inline-flex h-11 items-center gap-2 rounded-full border-2 px-4 font-display text-[16px] font-bold transition-colors",
               tool === k ? "border-pine bg-mint text-pine" : "border-pine/20 text-pine/70 hover:bg-oat",
             )}
           >
             <Icon className="h-3.5 w-3.5" strokeWidth={2.5} /> {label}
           </button>
         ))}
-        {tool !== "none" && <span className="text-xs text-pine/60">Drag on the page to place it</span>}
+        {tool !== "none" && <span className="text-[16px] text-pine/60">Drag on the page to place it</span>}
 
         <span className="mx-1 h-5 w-px bg-pine/20" aria-hidden />
         <button
           onClick={() => { setTool("none"); setAnnotateMode((v) => !v); }}
           aria-pressed={annotateMode}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1.5 text-xs font-bold transition-colors",
+            "inline-flex h-11 items-center gap-2 rounded-full border-2 px-4 font-display text-[16px] font-bold transition-colors",
             annotateMode ? "border-pine bg-pine text-oat" : "border-pine/20 text-pine/70 hover:bg-oat",
           )}
         >
@@ -593,7 +593,7 @@ export default function NotebookEditor() {
           <select
             value={zoom}
             onChange={(e) => setZoom(Number(e.target.value))}
-            className="rounded-[12px] border-2 border-pine/20 px-1.5 py-1 text-xs text-pine"
+            className="rounded-[12px] border-2 border-pine/20 px-1.5 py-1 text-[16px] text-pine"
             aria-label="Zoom"
           >
             {[0.5, 0.75, 1, 1.25, 1.5].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
@@ -618,15 +618,15 @@ export default function NotebookEditor() {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-64 shrink-0 flex-col border-r-[3px] border-pine bg-white sm:flex">
+        <aside className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
           {sidePanelBody(false)}
         </aside>
 
         {pagesDrawerOpen && (
           <div className="fixed inset-0 z-40 flex sm:hidden">
             <div className="absolute inset-0 bg-pine/40" onClick={() => setPagesDrawerOpen(false)} aria-hidden />
-            <div className="relative flex h-full w-[85vw] max-w-xs flex-col border-r-[3px] border-pine bg-white shadow-xl">
-              <div className="flex items-center justify-between border-b-[3px] border-pine px-3 py-2">
+            <div className="relative flex h-full w-[85vw] max-w-xs flex-col border-r-2 border-pine/12 bg-white shadow-xl">
+              <div className="flex items-center justify-between border-b-2 border-pine/12 px-3 py-2">
                 <span className="label-caps text-pine/70">Notebook</span>
                 <button
                   type="button"
@@ -644,7 +644,7 @@ export default function NotebookEditor() {
 
         <div ref={containerRef} className="relative min-w-0 flex-1 overflow-auto bg-oat p-4">
           {!page ? (
-            <div className="py-20 text-center text-sm text-pine/70">
+            <div className="py-20 text-center text-[16px] text-pine/70">
               Every page is archived. Restore one from the list to keep editing.
             </div>
           ) : (
@@ -657,7 +657,7 @@ export default function NotebookEditor() {
                 >
                   <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
                 </button>
-                <span className="text-xs text-pine/70">
+                <span className="text-[16px] text-pine/70">
                   {page.label || `Page ${pageIdx + 1}`} · {pageIdx + 1} of {livePages.length}
                 </span>
                 <button
@@ -742,38 +742,38 @@ export default function NotebookEditor() {
           {/* Floating action bar for the current page multi-selection. */}
           {selection.size > 0 && (
             <div className="sticky bottom-4 z-20 mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-full border-[3px] border-pine bg-white px-3 py-2 shadow-[4px_4px_0_0_var(--color-pine)]">
-              <span className="whitespace-nowrap text-xs font-bold text-pine">
+              <span className="whitespace-nowrap text-[16px] font-bold text-pine">
                 {selection.size} page{selection.size === 1 ? "" : "s"} selected
               </span>
               <button
                 onClick={createAssignmentFromSelection}
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine bg-white px-3 py-1.5 text-xs font-bold text-pine hover:bg-oat"
+                className="inline-flex h-11 items-center gap-2 rounded-full border-2 border-pine bg-white px-4 font-display text-[16px] font-bold text-pine hover:bg-oat"
               >
                 <ClipboardList className="h-3.5 w-3.5" strokeWidth={2.5} /> Create assignment
               </button>
               <button
                 onClick={groupSelection}
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-xs font-bold text-pine hover:bg-oat"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat"
               >
                 <FolderPlus className="h-3.5 w-3.5" strokeWidth={2.5} /> Group
               </button>
               <button
                 onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "archive" })}
                 title="Hide from students but keep their work"
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-xs font-bold text-pine hover:bg-oat"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat"
               >
                 <EyeOff className="h-3.5 w-3.5" strokeWidth={2.5} /> Archive
               </button>
               <button
                 onClick={() => confirmDelete(Array.from(selection))}
                 title="Delete permanently, including student work"
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-[#a3341f] px-3 py-1.5 text-xs font-bold text-[#a3341f] hover:bg-[#a3341f]/8"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-[#a3341f] px-3 py-1.5 text-[16px] font-bold text-[#a3341f] hover:bg-[#a3341f]/8"
               >
                 <Trash2 className="h-3.5 w-3.5" strokeWidth={2.5} /> Delete
               </button>
               <button
                 onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "restore" })}
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-xs font-bold text-pine hover:bg-oat"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat"
               >
                 <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.5} /> Restore
               </button>
@@ -834,8 +834,8 @@ function AppearancePopover({
       ref={popRef}
       className="absolute right-3 top-full z-30 mt-2 w-72 rounded-[22px] border-[3px] border-pine bg-white p-4 shadow-[6px_6px_0_0_var(--color-pine)]"
     >
-      <h3 className="font-display text-sm font-bold text-pine">Appearance</h3>
-      <p className="mt-1 text-xs leading-relaxed text-pine/70">
+      <h3 className="font-display text-[16px] font-bold text-pine">Appearance</h3>
+      <p className="mt-1 text-[16px] leading-relaxed text-pine/70">
         The colour and cover image are how this notebook appears on its tile.
       </p>
 
@@ -892,7 +892,7 @@ function AppearancePopover({
               type="button"
               onClick={() => coverInputRef.current?.click()}
               disabled={uploading}
-              className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-xs font-bold text-pine hover:bg-oat disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
             >
               {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" strokeWidth={2.5} />}
               {hasCover ? "Replace" : "Upload"}
@@ -901,7 +901,7 @@ function AppearancePopover({
               <button
                 type="button"
                 onClick={onClearCover}
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-xs text-pine/70 hover:bg-oat"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-[16px] text-pine/70 hover:bg-oat"
               >
                 <X className="h-3.5 w-3.5" strokeWidth={2.5} /> Remove cover
               </button>
@@ -1036,7 +1036,7 @@ function FieldLayer({
               setDrag({ id: f.id, mode: "move", startX: p.x, startY: p.y, orig: f });
             }}
           >
-            <span className="pointer-events-none absolute -top-5 left-0 whitespace-nowrap rounded bg-pine px-1.5 py-0.5 text-[10px] font-bold text-oat">
+            <span className="pointer-events-none absolute -top-5 left-0 whitespace-nowrap rounded bg-pine px-1.5 py-0.5 text-[16px] font-bold text-oat">
               {f.type}{f.label ? ` · ${f.label}` : ""}
             </span>
             <div
@@ -1129,12 +1129,12 @@ function FieldInspector({
   const body = (
     <>
       <div className="flex items-center justify-between">
-        <h3 className="font-display text-sm font-bold text-pine">Field</h3>
+        <h3 className="font-display text-[16px] font-bold text-pine">Field</h3>
         <button onClick={onClose} className="rounded p-1 text-pine/50 hover:bg-pine/8">
           <ChevronDown className="h-4 w-4" strokeWidth={2.5} />
         </button>
       </div>
-      <p className="mt-1 text-xs capitalize text-pine/70">{field.type}</p>
+      <p className="mt-1 text-[16px] capitalize text-pine/70">{field.type}</p>
 
       {field.type !== "image" && field.type !== "audio" && (
         <>
@@ -1143,7 +1143,7 @@ function FieldInspector({
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             onBlur={() => onSave({ label })}
-            className="mt-1 text-sm"
+            className="mt-1 text-[16px]"
             placeholder="e.g. Your answer"
           />
         </>
@@ -1157,7 +1157,7 @@ function FieldInspector({
             onChange={(e) => setOptions(e.target.value)}
             onBlur={() => onSave({ options: options.split("\n").map((s) => s.trim()).filter(Boolean) })}
             rows={4}
-            className="mt-1 text-sm"
+            className="mt-1 text-[16px]"
           />
         </>
       )}
@@ -1171,7 +1171,7 @@ function FieldInspector({
             onBlur={() => onSave({ prompt })}
             rows={4}
             placeholder="e.g. Explain your reasoning in 2-3 sentences."
-            className="mt-1 text-sm"
+            className="mt-1 text-[16px]"
           />
 
           <label className="label-caps mt-4 block text-pine/70">Illustration (optional)</label>
@@ -1187,7 +1187,7 @@ function FieldInspector({
                   type="button"
                   onClick={() => mediaInputRef.current?.click()}
                   disabled={mediaBusy}
-                  className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-xs font-bold text-pine hover:bg-oat disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
                 >
                   {mediaBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" strokeWidth={2.5} />}
                   Replace
@@ -1196,7 +1196,7 @@ function FieldInspector({
                   type="button"
                   onClick={() => void removeMedia()}
                   disabled={mediaBusy}
-                  className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-xs text-pine/70 hover:bg-oat disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-[16px] text-pine/70 hover:bg-oat disabled:opacity-50"
                 >
                   <X className="h-3.5 w-3.5" strokeWidth={2.5} /> Remove image
                 </button>
@@ -1207,7 +1207,7 @@ function FieldInspector({
               type="button"
               onClick={() => mediaInputRef.current?.click()}
               disabled={mediaBusy}
-              className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-xs font-bold text-pine hover:bg-oat disabled:opacity-50"
+              className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-2.5 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
             >
               {mediaBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" strokeWidth={2.5} />}
               Upload image
@@ -1228,25 +1228,25 @@ function FieldInspector({
       )}
 
       {field.type === "image" && (
-        <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[11px] leading-relaxed text-pine/70">
+        <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[16px] leading-relaxed text-pine/70">
           Students will see an empty box here and can add their own picture. The box's shape is the
           crop area, so size it to the aspect ratio you want their photo to fit.
         </p>
       )}
 
       {field.type === "audio" && (
-        <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[11px] leading-relaxed text-pine/70">
+        <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[16px] leading-relaxed text-pine/70">
           Students will see a record button here and can record a short answer in place.
         </p>
       )}
 
-      <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[11px] leading-relaxed text-pine/70">
+      <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[16px] leading-relaxed text-pine/70">
         Moving or resizing a field keeps every answer students have already typed into it.
       </p>
 
       <button
         onClick={onDelete}
-        className="mt-4 inline-flex w-full min-h-[44px] items-center justify-center gap-1.5 rounded-[12px] border-2 border-[#a3341f]/40 px-3 py-2 text-sm font-bold text-[#a3341f] hover:bg-[#a3341f]/8"
+        className="mt-4 inline-flex w-full min-h-[44px] items-center justify-center gap-1.5 rounded-[12px] border-2 border-[#a3341f]/40 px-3 py-2 text-[16px] font-bold text-[#a3341f] hover:bg-[#a3341f]/8"
       >
         <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete field
       </button>
@@ -1255,7 +1255,7 @@ function FieldInspector({
 
   return (
     <>
-      <aside className="hidden w-64 shrink-0 border-l-[3px] border-pine bg-white p-4 sm:block">
+      <aside className="hidden w-64 shrink-0 border-l-2 border-pine/12 bg-white p-4 sm:block">
         {body}
       </aside>
 

@@ -113,7 +113,7 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
   return (
     <Frame embedded={embedded}>
       {!embedded && (
-        <button onClick={goBack} className="mb-4 inline-flex items-center gap-1.5 text-[15px] text-pine/70 hover:text-pine">
+        <button onClick={goBack} className="mb-4 inline-flex items-center gap-1.5 text-[16px] text-pine/70 hover:text-pine">
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} /> Back
         </button>
       )}
@@ -128,12 +128,12 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
           >
             <div>
               <h1 className="font-display text-[22px] text-pine">{data.className}</h1>
-              <p className="text-[15px] text-pine/70">My grades</p>
+              <p className="text-[16px] text-pine/70">My grades</p>
             </div>
             {data.totals && (
               <div className="text-right">
                 <div className="font-display text-[32px] leading-none text-pine">{data.totals.percent}%</div>
-                <div className="mt-1 text-[13px] text-pine/70">
+                <div className="mt-1 text-[16px] text-pine/70">
                   {data.totals.earned} / {data.totals.possible} points
                 </div>
               </div>
@@ -153,17 +153,17 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-display text-pine">{a.title}</div>
-                      <div className="text-[13px] text-pine/70">Due {formatDue(a.dueAt)}</div>
+                      <div className="text-[16px] text-pine/70">Due {formatDue(a.dueAt)}</div>
                     </div>
                     <div className="flex items-center gap-3">
                       <Chip tone={STATUS_TONE[a.status]}>{STATUS_LABEL[a.status]}</Chip>
-                      <div className={cn("text-[15px] font-display", a.grade ? "text-pine" : "text-pine/45")}>
+                      <div className={cn("text-[16px] font-display", a.grade ? "text-pine" : "text-pine/45")}>
                         {gradeText(a)}
                       </div>
                     </div>
                   </div>
                   {a.grade?.feedback && (
-                    <div className="mt-3 flex items-start gap-2 rounded-[12px] bg-oat px-3 py-2 text-[15px] italic text-pine/80">
+                    <div className="mt-3 flex items-start gap-2 rounded-[12px] bg-oat px-3 py-2 text-[16px] italic text-pine/80">
                       <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-pine/50" strokeWidth={2.5} />
                       <span>&ldquo;{a.grade.feedback}&rdquo;</span>
                     </div>
@@ -210,9 +210,9 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
 
       {!isLoading && !error && data && (
         <div className="overflow-x-auto rounded-[22px] border-[3px] border-pine bg-white">
-          <table className="w-full border-collapse text-[15px]">
+          <table className="w-full border-collapse text-[16px]">
             <thead>
-              <tr className="border-b-[3px] border-pine bg-oat">
+              <tr className="border-b-2 border-pine/12 bg-oat">
                 <th className="sticky left-0 z-10 min-w-[180px] bg-oat px-4 py-3 text-left font-display text-pine">
                   Student
                 </th>
@@ -229,7 +229,7 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
                 <tr key={st.id} className="border-b border-pine/15 last:border-0">
                   <td className="sticky left-0 z-10 bg-white px-4 py-3">
                     <div className="font-display text-pine">{st.name}</div>
-                    <div className="text-[13px] text-pine/70">{st.email}</div>
+                    <div className="text-[16px] text-pine/70">{st.email}</div>
                   </td>
                   {data.assignments.map((a) => {
                     const sub = data.submissions.find((s) => s.assignment_id === a.id && s.student_id === st.id);
@@ -248,7 +248,7 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
             </tbody>
           </table>
           {data.students.length === 0 && (
-            <div className="px-4 py-10 text-center text-[15px] text-pine/70">No students enrolled yet.</div>
+            <div className="px-4 py-10 text-center text-[16px] text-pine/70">No students enrolled yet.</div>
           )}
         </div>
       )}

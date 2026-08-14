@@ -86,7 +86,7 @@ app.post("/api/classes", handler(async (c) => {
     )
     .bind(
       id, user.org_id, user.id, body.name.trim(), body.section?.trim() ?? "",
-      await uniqueJoinCode(), body.accentColor ?? "#1A73E8", now(), now(),
+      await uniqueJoinCode(), body.accentColor ?? "#2E7D6B", now(), now(),
     )
     .run();
   const cls = await db.prepare(`SELECT * FROM classes WHERE id = ?`).bind(id).first();

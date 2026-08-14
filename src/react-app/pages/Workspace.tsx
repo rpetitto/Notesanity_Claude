@@ -16,6 +16,12 @@ import { ErrorNote, Spinner, FlingBadge } from "../components/Shell";
 import { Button, Chip, IconButton } from "../components/ui";
 import { cn, formatDue, isOverdue } from "../lib/utils";
 
+/** Header controls share one height so a row of them lines up. */
+const BUTTON_ROW =
+  "inline-flex h-12 items-center gap-2 rounded-full border-[3px] border-pine bg-white px-5 " +
+  "font-display text-[17px] font-bold text-pine shadow-[4px_4px_0_0_var(--color-pine)] " +
+  "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none";
+
 const FINGER_KEY = "notesanity:fingerDraw";
 const RAIL_KEY = "notesanity:studentRail";
 
@@ -161,7 +167,7 @@ export default function Workspace() {
     return (
       <div className="mx-auto max-w-2xl p-6">
         <ErrorNote error={workQuery.error as Error} />
-        <button onClick={() => navigate(-1)} className="mt-4 text-sm font-bold text-pine underline">Go back</button>
+        <button onClick={() => navigate(-1)} className="mt-4 text-[16px] font-bold text-pine underline">Go back</button>
       </div>
     );
   }
@@ -171,7 +177,7 @@ export default function Workspace() {
 
   return (
     <div className="flex h-dvh flex-col bg-oat">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b-[3px] border-pine bg-white px-3 py-2">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b-2 border-pine/12 bg-white px-3 py-2">
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
@@ -187,14 +193,14 @@ export default function Workspace() {
         <button
           type="button"
           onClick={() => setMobileRailOpen(true)}
-          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-[3px] border-pine px-3 py-2 text-xs font-display font-bold text-pine hover:bg-oat sm:hidden"
+          className={cn(BUTTON_ROW, "sm:hidden")}
           aria-label="Show pages"
         >
           <PanelLeft className="h-4 w-4" strokeWidth={2.5} /> Pages
         </button>
         <div className="min-w-0 flex-1 sm:flex-initial">
-          <div className="truncate font-display text-sm font-bold text-pine">{data.notebook.title}</div>
-          <div className="truncate text-xs text-pine/70">
+          <div className="truncate font-display text-[16px] font-bold text-pine">{data.notebook.title}</div>
+          <div className="truncate text-[16px] text-pine/70">
             {assignment ? assignment.title : "Notebook"}
             {pages.length > 0 && ` · Page ${Math.max(1, pageIndex + 1)} of ${pages.length}`}
           </div>
@@ -230,14 +236,14 @@ export default function Workspace() {
       </header>
 
       {locked && (
-        <div className="flex items-center gap-2 border-b-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-4 py-2 text-sm text-[#5c4611]">
+        <div className="flex items-center gap-2 border-b-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-4 py-2 text-[16px] text-[#5c4611]">
           <Check className="h-4 w-4" strokeWidth={2.5} />
           Turned in{submission?.submittedAt ? ` ${formatDue(submission.submittedAt)}` : ""} — locked until your teacher returns it.
         </div>
       )}
 
       {submission?.grade && (
-        <div className="border-b-[3px] border-pine bg-mint/40 px-4 py-2 text-sm text-pine">
+        <div className="border-b-2 border-pine/12 bg-mint/40 px-4 py-2 text-[16px] text-pine">
           <span className="font-display font-bold">Grade: </span>
           {assignment?.grading === "points" && `${submission.grade.points ?? "—"} / ${assignment.pointsMax}`}
           {assignment?.grading === "letter" && (submission.grade.letter ?? "—")}
@@ -272,7 +278,7 @@ export default function Workspace() {
             onClick={() => setMobileRailOpen(false)}
             aria-hidden
           />
-          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r-[3px] border-pine bg-white px-2 py-3 shadow-xl">
+          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 shadow-xl">
             <div className="mb-2 flex items-center justify-between px-1">
               <span className="label-caps text-pine/70">Pages</span>
               <button
@@ -302,7 +308,7 @@ export default function Workspace() {
                     pageHeight={page.height}
                     width={64}
                   />
-                  <span className="w-full truncate text-center text-[11px] text-pine/70">
+                  <span className="w-full truncate text-center text-[16px] text-pine/70">
                     {i + 1}{page.label ? ` · ${page.label}` : ""}
                   </span>
                 </button>
@@ -314,7 +320,7 @@ export default function Workspace() {
 
       <div className="relative flex min-h-0 flex-1">
         {railOpen && (
-          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r-[3px] border-pine bg-white px-2 py-3 sm:block">
+          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 sm:block">
             <div className="flex flex-col gap-3">
               {pages.map((page, i) => (
                 <button
@@ -333,7 +339,7 @@ export default function Workspace() {
                     pageHeight={page.height}
                     width={64}
                   />
-                  <span className="w-full truncate text-center text-[11px] text-pine/70">
+                  <span className="w-full truncate text-center text-[16px] text-pine/70">
                     {i + 1}{page.label ? ` · ${page.label}` : ""}
                   </span>
                 </button>
@@ -345,7 +351,7 @@ export default function Workspace() {
           <button
             type="button"
             onClick={() => setRailOpen(true)}
-            className="absolute bottom-20 left-3 z-20 hidden items-center gap-1 rounded-full border-[3px] border-pine bg-white px-3 py-2 text-xs font-display font-bold text-pine shadow-[3px_3px_0_0_var(--color-pine)] hover:bg-oat sm:flex"
+            className="absolute bottom-20 left-3 z-20 hidden items-center gap-1 rounded-full border-[3px] border-pine bg-white px-3 py-2 text-[16px] font-display font-bold text-pine shadow-[3px_3px_0_0_var(--color-pine)] hover:bg-oat sm:flex"
             aria-label="Show pages"
           >
             <ChevronRight className="h-3.5 w-3.5" strokeWidth={2.5} /> Pages

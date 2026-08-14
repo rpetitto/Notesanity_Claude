@@ -69,7 +69,7 @@ function ClassCard({ cls }: { cls: ClassRow }) {
   const accent = cls.accent_color || "#20302C";
   return (
     <CardLink to={`/classes/${cls.id}`}>
-      <div className="relative h-20 w-full overflow-hidden border-b-[3px] border-pine">
+      <div className="relative h-20 w-full overflow-hidden border-b-2 border-pine/12">
         <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}, ${accent}99)` }} />
         {!coverFailed && (
           <img
@@ -83,16 +83,16 @@ function ClassCard({ cls }: { cls: ClassRow }) {
       <div className="p-4">
         <div className="flex items-center gap-2.5">
           {cls.emoji && (
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-oat text-base">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-oat text-[17px]">
               {cls.emoji}
             </span>
           )}
           <div className="min-w-0 flex-1">
-            <div className="truncate font-display text-sm font-bold text-pine">{cls.name}</div>
-            <div className="truncate text-xs text-pine/70">{cls.section || " "}</div>
+            <div className="truncate font-display text-[16px] font-bold text-pine">{cls.name}</div>
+            <div className="truncate text-[16px] text-pine/70">{cls.section || " "}</div>
           </div>
         </div>
-        <div className="mt-3 text-xs text-pine/70">
+        <div className="mt-3 text-[16px] text-pine/70">
           {cls.notebook_count} notebook{cls.notebook_count === 1 ? "" : "s"}
         </div>
       </div>
@@ -114,15 +114,15 @@ function AssignmentRow({ a }: { a: MyAssignment }) {
     >
       <span className="mt-0.5 h-9 w-1.5 shrink-0 rounded-full border border-pine/30" style={{ backgroundColor: a.accentColor || "#20302C" }} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-bold text-pine">{a.title}</span>
-        <span className="block truncate text-xs text-pine/70">
+        <span className="block truncate text-[16px] font-bold text-pine">{a.title}</span>
+        <span className="block truncate text-[16px] text-pine/70">
           {a.className} &middot; {a.notebookTitle}
         </span>
       </span>
-      <span className="hidden shrink-0 text-xs text-pine/70 sm:block">
+      <span className="hidden shrink-0 text-[16px] text-pine/70 sm:block">
         {a.complete}/{a.total} pages
       </span>
-      <span className={cn("shrink-0 text-xs", overdue ? "font-bold text-[#a3341f]" : "text-pine/70")}>
+      <span className={cn("shrink-0 text-[16px]", overdue ? "font-bold text-[#a3341f]" : "text-pine/70")}>
         {formatDue(a.dueAt)}
       </span>
       <Chip tone={STATUS_TONE[a.status]} icon={a.status === "returned" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}>
@@ -265,11 +265,11 @@ export default function StudentHome() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {notebooksQ.data.notebooks.map((nb) => (
               <Card key={nb.id} pressable className="cursor-pointer" onClick={() => navigate(`/notebooks/${nb.id}`)}>
-                <div className="h-1.5 w-full border-b-[3px] border-pine" style={{ backgroundColor: nb.accent_color || "#20302C" }} />
+                <div className="h-1.5 w-full border-b-2 border-pine/12" style={{ backgroundColor: nb.accent_color || "#20302C" }} />
                 <div className="p-4 text-left">
-                  <div className="truncate font-display text-sm font-bold text-pine">{nb.title}</div>
-                  <div className="truncate text-xs text-pine/70">{nb.class_name}</div>
-                  <div className="mt-3 text-xs text-pine/70">{nb.page_count} pages</div>
+                  <div className="truncate font-display text-[16px] font-bold text-pine">{nb.title}</div>
+                  <div className="truncate text-[16px] text-pine/70">{nb.class_name}</div>
+                  <div className="mt-3 text-[16px] text-pine/70">{nb.page_count} pages</div>
                 </div>
               </Card>
             ))}

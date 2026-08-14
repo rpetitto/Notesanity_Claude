@@ -6,7 +6,7 @@ import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/She
 import PageThumb from "../components/PageThumb";
 import { ButtonLink, Card, Chip } from "../components/ui";
 import { api, assetUrl, type PageRec } from "../lib/api";
-import { cn, formatDue, isOverdue } from "../lib/utils";
+import { cn, formatDue, isOverdue, DEFAULT_ACCENT } from "../lib/utils";
 
 interface TeachingAssignment {
   id: string;
@@ -156,10 +156,10 @@ function StudentRows({
   grading: "none" | "complete" | "points" | "letter";
   pointsMax: number;
 }) {
-  if (rows.length === 0) return <p className="py-3 text-[15px] text-pine/70">No students enrolled.</p>;
+  if (rows.length === 0) return <p className="py-3 text-[16px] text-pine/70">No students enrolled.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[420px] text-[15px]">
+      <table className="w-full min-w-[420px] text-[16px]">
         <tbody className="divide-y divide-pine/10">
           {rows.map((r) => (
             <tr key={r.student.id}>
@@ -170,11 +170,11 @@ function StudentRows({
                 </div>
               </td>
               <td className="py-2 pr-3">
-                <Chip tone={STATUS_TONE[r.status] ?? "quiet"} className="text-[11px]">
+                <Chip tone={STATUS_TONE[r.status] ?? "quiet"} className="text-[16px]">
                   {STATUS_LABELS[r.status] ?? r.status}
                 </Chip>
               </td>
-              <td className="whitespace-nowrap py-2 pr-3 text-[13px] text-pine/70">
+              <td className="whitespace-nowrap py-2 pr-3 text-[16px] text-pine/70">
                 {r.complete}/{r.total} pages
               </td>
               <td className="whitespace-nowrap py-2 text-right font-display text-pine">
@@ -227,7 +227,7 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
 
   const stackPages = assignedPages.slice(0, 4);
   const extra = Math.max(0, assignedPages.length - stackPages.length);
-  const accent = a.notebookColor || "#1A73E8";
+  const accent = a.notebookColor || DEFAULT_ACCENT;
 
   return (
     <Card>
@@ -260,7 +260,7 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
               </div>
             ))}
             {extra > 0 && (
-              <span className="absolute -bottom-1 -right-1 z-20 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-pine px-1 font-display text-[10px] text-oat">
+              <span className="absolute -bottom-1 -right-1 z-20 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-pine px-1 font-display text-[16px] text-oat">
                 +{extra}
               </span>
             )}
@@ -272,14 +272,14 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
                 <Link to={`/assignments/${a.id}`} className="block truncate font-display text-[17px] text-pine hover:underline">
                   {a.title}
                 </Link>
-                <div className="mt-0.5 truncate text-[13px] text-pine/70">
+                <div className="mt-0.5 truncate text-[16px] text-pine/70">
                   {a.notebookTitle} &middot; {pageNumbersLabel}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Chip tone={a.status === "draft" ? "quiet" : "default"}>
                     {a.status === "draft" ? "Draft" : "Active"}
                   </Chip>
-                  <span className={cn("text-[13px]", overdue ? "font-display text-[#a3341f]" : "text-pine/70")}>
+                  <span className={cn("text-[16px]", overdue ? "font-display text-[#a3341f]" : "text-pine/70")}>
                     Due {formatDue(a.dueAt)}
                   </span>
                 </div>
@@ -302,7 +302,7 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="mt-3 flex h-9 items-center gap-1 rounded-full px-2 font-display text-[13px] text-pine/70 hover:bg-pine/8"
+              className="mt-3 flex h-9 items-center gap-1 rounded-full px-2 font-display text-[16px] text-pine/70 hover:bg-pine/8"
             >
               <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} strokeWidth={2.5} />
               {expanded ? "Hide students" : "Show students"}
@@ -355,7 +355,7 @@ export default function TeacherAssignments() {
       <div className="mb-1 flex items-center justify-between gap-3">
         <h1 className="font-display text-[32px] text-pine">Assignments</h1>
       </div>
-      <p className="mb-6 text-[15px] text-pine/70">Every assignment across every class you teach.</p>
+      <p className="mb-6 text-[16px] text-pine/70">Every assignment across every class you teach.</p>
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
         {FILTERS.map((f) => (
@@ -364,7 +364,7 @@ export default function TeacherAssignments() {
             type="button"
             onClick={() => setFilter(f.key)}
             className={cn(
-              "flex h-9 items-center rounded-full border-2 px-3.5 font-display text-[13px] transition-colors",
+              "flex h-9 items-center rounded-full border-2 px-3.5 font-display text-[16px] transition-colors",
               filter === f.key ? "border-pine bg-pine text-oat" : "border-pine/25 bg-white text-pine hover:bg-oat",
             )}
           >
@@ -394,8 +394,8 @@ export default function TeacherAssignments() {
           {groups.map((g) => (
             <div key={g.className}>
               <div className="mb-3 flex items-center gap-2">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: g.accentColor || "#1A73E8" }} />
-                <h2 className="font-display text-[15px] text-pine">{g.className}</h2>
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: g.accentColor || DEFAULT_ACCENT }} />
+                <h2 className="font-display text-[16px] text-pine">{g.className}</h2>
               </div>
               <div className="space-y-3">
                 {g.items.map((a) => (

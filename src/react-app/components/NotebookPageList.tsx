@@ -172,7 +172,7 @@ export default function NotebookPageList({
               const count = assignmentCounts[p.id] ?? 0;
               return (
                 <div key={p.id}>
-                  {showDropLine && <div className="mx-1 my-0.5 h-0.5 rounded bg-blue-500" />}
+                  {showDropLine && <div className="mx-1 my-0.5 h-0.5 rounded bg-mint" />}
                   <div
                     ref={(node) => { rowRefs.current[p.id] = node; }}
                     onClick={(e) => {
@@ -181,10 +181,10 @@ export default function NotebookPageList({
                     }}
                     className={cn(
                       "group mb-1 flex cursor-pointer items-start gap-1.5 rounded-lg p-1.5 transition-colors",
-                      currentPageId === p.id && "bg-blue-50 ring-1 ring-blue-200",
-                      selection.has(p.id) && "bg-blue-100/60",
+                      currentPageId === p.id && "bg-mint/20 ring-1 ring-mint",
+                      selection.has(p.id) && "bg-mint/30",
                       isDragging && "opacity-40",
-                      !isDragging && currentPageId !== p.id && !selection.has(p.id) && "hover:bg-slate-50",
+                      !isDragging && currentPageId !== p.id && !selection.has(p.id) && "hover:bg-oat",
                       p.archived && "opacity-50",
                     )}
                   >
@@ -196,7 +196,7 @@ export default function NotebookPageList({
                       onPointerUp={endDrag}
                       onPointerCancel={endDrag}
                       onClick={(e) => e.stopPropagation()}
-                      className="mt-6 cursor-grab touch-none rounded p-0.5 text-slate-300 hover:text-slate-600 active:cursor-grabbing"
+                      className="mt-6 cursor-grab touch-none rounded p-0.5 text-pine/35 hover:text-pine/75 active:cursor-grabbing"
                     >
                       <GripVertical className="h-4 w-4" />
                     </button>
@@ -209,7 +209,7 @@ export default function NotebookPageList({
                         const native = e.nativeEvent as unknown as { shiftKey?: boolean };
                         toggleSelect(p.id, !!native.shiftKey);
                       }}
-                      className="mt-6 h-4 w-4 shrink-0 accent-blue-600"
+                      className="mt-6 h-4 w-4 shrink-0 accent-pine"
                       aria-label={`Select page ${index + 1}`}
                     />
 
@@ -225,7 +225,7 @@ export default function NotebookPageList({
                       {count > 0 && (
                         <span
                           title={`Used in ${count} assignment${count === 1 ? "" : "s"}`}
-                          className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-semibold text-white ring-2 ring-white"
+                          className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-pine bg-mint px-1 font-display text-[13px] text-pine"
                         >
                           {count}
                         </span>
@@ -244,37 +244,37 @@ export default function NotebookPageList({
                             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                             if (e.key === "Escape") setRenaming(null);
                           }}
-                          className="w-full rounded border border-blue-400 px-1 py-0.5 text-xs outline-none"
+                          className="w-full rounded border border-pine px-1 py-0.5 text-[16px] outline-none"
                         />
                       ) : (
-                        <div className="truncate text-xs font-medium text-slate-700">
+                        <div className="truncate text-[16px] font-medium text-pine">
                           {p.label || `Page ${index + 1}`}
                         </div>
                       )}
-                      <div className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400">
+                      <div className="mt-0.5 flex items-center gap-1 text-[16px] text-pine/55">
                         <span>#{index + 1}</span>
-                        {count > 0 && <span className="text-blue-600">· assigned</span>}
-                        {!!p.archived && <span className="text-amber-600">· archived</span>}
+                        {count > 0 && <span className="text-pine">· assigned</span>}
+                        {!!p.archived && <span className="text-[#5c4611]">· archived</span>}
                       </div>
                       <div className="mt-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                         <button
                           title="Rename page"
                           onClick={(e) => { e.stopPropagation(); setRenaming(p.id); }}
-                          className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
+                          className="rounded p-1 text-pine/55 hover:bg-white hover:text-pine"
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button
                           title={p.archived ? "Restore page" : "Hide from students (keeps their work)"}
                           onClick={(e) => { e.stopPropagation(); onArchiveToggle(p.id, !p.archived); }}
-                          className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
+                          className="rounded p-1 text-pine/55 hover:bg-white hover:text-pine"
                         >
                           {p.archived ? <RotateCcw className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
                         </button>
                         <button
                           title="Delete page permanently"
                           onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
-                          className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                          className="rounded p-1 text-pine/55 hover:bg-[#fbe9e4] hover:text-[#a3341f]"
                         >
                           <Trash2 className="h-3 w-3" />
                         </button>
@@ -287,7 +287,7 @@ export default function NotebookPageList({
             {isCollapsed && (flatIndex += section.pages.length) >= 0 && (
               <button
                 onClick={() => toggleCollapsed(section.name)}
-                className="mb-1 w-full rounded-lg border border-dashed border-slate-200 py-2 text-[11px] text-slate-500 hover:bg-slate-50"
+                className="mb-1 w-full rounded-lg border border-dashed border-pine/20 py-2 text-[16px] text-pine/70 hover:bg-oat"
               >
                 {section.pages.length} page{section.pages.length === 1 ? "" : "s"} hidden — show
               </button>
@@ -301,11 +301,11 @@ export default function NotebookPageList({
         }
 
         return (
-          <div key={`${section.name}-${si}`} className="mb-2 rounded-xl border border-slate-200 bg-slate-50/60 p-1.5">
-            <div className="mb-1 flex items-center gap-1 px-1">
+          <div key={`${section.name}-${si}`} className="mb-2 rounded-xl border border-pine/20 bg-oat/60 p-1.5">
+            <div className="mb-1 flex h-11 items-center gap-1 px-1">
               <button
                 onClick={() => toggleCollapsed(section.name)}
-                className="rounded p-0.5 text-slate-500 hover:bg-white"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-white"
                 aria-label={isCollapsed ? "Expand section" : "Collapse section"}
               >
                 {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -323,22 +323,22 @@ export default function NotebookPageList({
                     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                     if (e.key === "Escape") setRenaming(null);
                   }}
-                  className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-[11px] outline-none"
+                  className="min-w-0 flex-1 rounded border border-pine px-1 py-0.5 text-[16px] outline-none"
                 />
               ) : (
                 <button
                   onDoubleClick={() => setRenaming(`group:${section.name}`)}
                   onClick={() => toggleCollapsed(section.name)}
-                  className="min-w-0 flex-1 truncate text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600"
+                  className="label-caps min-w-0 flex-1 truncate self-stretch text-left leading-[44px] text-pine/80"
                   title="Double-click to rename"
                 >
                   {section.name}
                 </button>
               )}
-              <span className="text-[10px] text-slate-400">{section.pages.length}</span>
+              <span className="text-[16px] text-pine/55">{section.pages.length}</span>
               <button
                 onClick={() => setRenaming(`group:${section.name}`)}
-                className="rounded p-0.5 text-slate-400 hover:bg-white hover:text-slate-700"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-pine/70 hover:bg-white hover:text-pine"
                 title="Rename section"
               >
                 <Pencil className="h-3 w-3" />
@@ -350,7 +350,7 @@ export default function NotebookPageList({
       })}
 
       {/* Trailing drop zone so a page can be moved to the very end. */}
-      {dropAt === pages.length && <div className="mx-1 h-0.5 rounded bg-blue-500" />}
+      {dropAt === pages.length && <div className="mx-1 h-0.5 rounded bg-mint" />}
     </div>
   );
 }

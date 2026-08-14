@@ -68,10 +68,24 @@ h1, h2, h3, h4, .font-display {
 .label-caps {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+
+/**
+ * Structural rules between regions.
+ *
+ * The book's 3px Pine outline describes an *object* — a card, a button, an
+ * input. Running that same weight across a whole header or down a panel edge
+ * reads as a hard black bar and chops the screen up, so regions are separated
+ * with a light Pine tint instead and the full-strength outline stays on things
+ * you can pick up or press.
+ */
+.rule-b { border-bottom: 2px solid rgba(32, 48, 44, 0.12); }
+.rule-t { border-top: 2px solid rgba(32, 48, 44, 0.12); }
+.rule-r { border-right: 2px solid rgba(32, 48, 44, 0.12); }
+.rule-l { border-left: 2px solid rgba(32, 48, 44, 0.12); }
 
 /* iOS Safari zooms the page when an input under 16px takes focus. */
 @supports (-webkit-touch-callout: none) {

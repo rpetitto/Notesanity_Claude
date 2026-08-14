@@ -59,7 +59,7 @@ function OrgSettings() {
   return (
     <Card className="p-5">
       <h2 className="font-display text-[17px] text-pine">School settings</h2>
-      <p className="mt-1 text-[15px] text-pine/70">
+      <p className="mt-1 text-[16px] text-pine/70">
         Domains listed as teacher or student automatically get that role on first sign-in. Everyone else chooses their
         role themselves.
       </p>
@@ -124,15 +124,15 @@ function OrgUsers() {
             <Avatar name={u.name} picture={u.picture} size={32} />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-display text-pine">
-                {u.name} {u.is_admin ? <span className="text-[13px] font-sans font-normal text-pine/60">(admin)</span> : null}
+                {u.name} {u.is_admin ? <span className="text-[16px] font-sans font-normal text-pine/60">(admin)</span> : null}
               </span>
-              <span className="block truncate text-[13px] text-pine/70">{u.email}</span>
+              <span className="block truncate text-[16px] text-pine/70">{u.email}</span>
             </span>
             <Select
               value={u.role === "pending" ? "" : u.role}
               onChange={(e) => mutation.mutate({ id: u.id, role: e.target.value as "teacher" | "student" })}
               disabled={mutation.isPending}
-              className="min-h-[40px] w-auto shrink-0 px-2 text-[13px]"
+              className="min-h-[40px] w-auto shrink-0 px-2 text-[16px]"
             >
               <option value="" disabled>
                 Pending
@@ -173,7 +173,7 @@ export default function Settings() {
         <Avatar name={user.name} picture={user.picture} size={52} />
         <div className="min-w-0 flex-1">
           <div className="truncate font-display text-[17px] text-pine">{user.name}</div>
-          <div className="truncate text-[15px] text-pine/70">{user.email}</div>
+          <div className="truncate text-[16px] text-pine/70">{user.email}</div>
         </div>
         <Chip tone="quiet" className="shrink-0 capitalize">
           {user.role}

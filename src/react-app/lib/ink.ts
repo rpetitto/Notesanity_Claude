@@ -216,7 +216,11 @@ export function drawLayer(ctx: CanvasRenderingContext2D, layer: LayerData, scale
   for (const s of layer.s) if (s.t !== "h") drawStroke(ctx, s, scale);
 }
 
-export const PEN_COLORS = ["#202124", "#1A73E8", "#34A853", "#EA4335", "#F9AB00", "#9334E6"];
-export const TEACHER_COLORS = ["#D93025", "#9334E6", "#1A73E8", "#137333"];
-export const HIGHLIGHTER_COLORS = ["#FFF176", "#A5D6A7", "#90CAF9", "#F48FB1"];
+// Ink has to stay legible over a printed page, so these are saturated enough to
+// read as handwriting while staying in the brand's muted register.
+export const PEN_COLORS = ["#20302C", "#2E7D6B", "#3F6C9E", "#A3341F", "#7A5C8E", "#D9A441"];
+// Marking convention puts a warm red first.
+export const TEACHER_COLORS = ["#A3341F", "#7A5C8E", "#2E7D6B", "#3F6C9E"];
+// Highlighters sit under the text, so they stay pale.
+export const HIGHLIGHTER_COLORS = ["#7FD1AE", "#F2D98D", "#9EC5E8", "#E5B3C6"];
 export const STAMPS = ["✅", "⭐", "👍", "❤️", "🎯", "🔥", "💡", "❓", "❌", "🤔", "👏", "📌"];

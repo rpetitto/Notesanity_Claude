@@ -50,7 +50,7 @@ function DeleteAssignmentModal({
         <div className="py-8"><Spinner label="Checking impact…" /></div>
       ) : (
         <>
-          <div className="mt-1 space-y-1.5 text-[15px] text-pine/80">
+          <div className="mt-1 space-y-1.5 text-[16px] text-pine/80">
             {impact.submitted > 0 && (
               <p>{impact.submitted} of {impact.total} students have turned this in.</p>
             )}
@@ -59,7 +59,7 @@ function DeleteAssignmentModal({
               <p>No one has turned this in yet.</p>
             )}
           </div>
-          <p className="mt-3 rounded-[12px] bg-oat p-3 text-[13px] leading-relaxed text-pine/80">
+          <p className="mt-3 rounded-[12px] bg-oat p-3 text-[16px] leading-relaxed text-pine/80">
             Deleting removes the assignment and all of its grades and submission records.
             It does <strong>not</strong> delete the pages or anything students wrote on them —
             that work stays in the notebook.
@@ -190,7 +190,7 @@ export default function AssignmentEditor() {
         {classQuery.error && <div className="mt-4"><ErrorNote error={classQuery.error as Error} /></div>}
 
         {editing && hasImpact && impact && (
-          <div className="mt-4 rounded-[12px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[15px] text-[#5c4611]">
+          <div className="mt-4 rounded-[12px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[16px] text-[#5c4611]">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={2.5} />
               <div className="space-y-1.5">
@@ -254,7 +254,7 @@ export default function AssignmentEditor() {
               ))}
             </Select>
             {notebooks.length === 0 && (
-              <p className="mt-1.5 text-[13px] text-[#8a6a1f]">
+              <p className="mt-1.5 text-[16px] text-[#8a6a1f]">
                 No published notebooks yet — publish one first, then create the assignment.
               </p>
             )}
@@ -264,11 +264,11 @@ export default function AssignmentEditor() {
             <div>
               <div className="flex items-center justify-between">
                 <Label>Pages ({pageIds.length} selected)</Label>
-                <button type="button" onClick={toggleAll} className="font-display text-[13px] text-pine hover:underline">
+                <button type="button" onClick={toggleAll} className="font-display text-[16px] text-pine hover:underline">
                   {pageIds.length === pages.length ? "Clear all" : "Select all"}
                 </button>
               </div>
-              <p className="mt-0.5 text-[13px] text-pine/70">Pages don't have to be next to each other.</p>
+              <p className="mt-0.5 text-[16px] text-pine/70">Pages don't have to be next to each other.</p>
               <div className="mt-2 grid grid-cols-3 gap-2.5 sm:grid-cols-5 lg:grid-cols-7">
                 {pages.map((p, i) => {
                   const on = pageIds.includes(p.id);
@@ -292,7 +292,7 @@ export default function AssignmentEditor() {
                         pageHeight={p.height}
                         width={72}
                       />
-                      <span className="absolute bottom-1.5 left-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-pine bg-white px-1 font-display text-[10px] text-pine">
+                      <span className="absolute bottom-1.5 left-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-pine bg-white px-1 font-display text-[16px] text-pine">
                         {i + 1}
                       </span>
                       {on && (
@@ -316,7 +316,7 @@ export default function AssignmentEditor() {
                 onChange={(e) => setReleaseAt(e.target.value)}
                 className="mt-1.5"
               />
-              <p className="mt-1 text-[13px] text-pine/70">Leave blank to release immediately.</p>
+              <p className="mt-1 text-[16px] text-pine/70">Leave blank to release immediately.</p>
             </div>
             <div>
               <Label>Due</Label>

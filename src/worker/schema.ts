@@ -359,3 +359,15 @@ migrate("003_notebook_cover", async () => {
     await db.prepare(`ALTER TABLE notebooks ADD COLUMN cover_key TEXT`).run();
   }
 });
+
+/**
+ * Retire the placeholder Google blue.
+ *
+ * Accents were seeded with #1A73E8 before the brand existed; it clashes badly
+ * with Pine and Oat. Anything still on the old default moves to the brand's
+ * deep teal. A colour a teacher actually chose is left alone.
+ */
+migrate("008_brand_accents", async () => {
+  await db.prepare(`UPDATE classes SET accent_color = '#2E7D6B' WHERE accent_color = '#1A73E8'`).run();
+  await db.prepare(`UPDATE notebooks SET accent_color = '#2E7D6B' WHERE accent_color = '#1A73E8'`).run();
+});

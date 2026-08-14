@@ -59,8 +59,8 @@ export default function Landing({ error }: { error?: Error | null }) {
         {blocked && (
           <div className="mb-5 rounded-[22px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[#5c4611]">
             <div className="font-display text-[17px]">We can't sign you in</div>
-            <p className="mt-1 text-[15px] leading-relaxed">{error?.message}</p>
-            <a href={signOutHref} className="mt-3 inline-block font-display text-[15px] underline">
+            <p className="mt-1 text-[16px] leading-relaxed">{error?.message}</p>
+            <a href={signOutHref} className="mt-3 inline-block font-display text-[16px] underline">
               Sign out and use another account
             </a>
           </div>
@@ -69,7 +69,7 @@ export default function Landing({ error }: { error?: Error | null }) {
         {linkProblem === "link_expired" && (
           <div className="mb-5 rounded-[22px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[#5c4611]">
             <div className="font-display text-[17px]">That link has expired</div>
-            <p className="mt-1 text-[15px]">Links last 20 minutes and work once. Ask for a fresh one below.</p>
+            <p className="mt-1 text-[16px]">Links last 20 minutes and work once. Ask for a fresh one below.</p>
           </div>
         )}
 
@@ -101,7 +101,7 @@ export default function Landing({ error }: { error?: Error | null }) {
                     type="button"
                     onClick={() => setMethod(key)}
                     className={cn(
-                      "flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full font-display text-[14px] transition-colors",
+                      "flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full font-display text-[16px] transition-colors",
                       method === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
                     )}
                   >
@@ -156,7 +156,7 @@ export default function Landing({ error }: { error?: Error | null }) {
                       onChange={(e) => setPassword(e.target.value)}
                       className="mt-1.5"
                     />
-                    {register && <p className="mt-1.5 text-[14px] text-pine/70">At least 10 characters.</p>}
+                    {register && <p className="mt-1.5 text-[16px] text-pine/70">At least 10 characters.</p>}
                   </>
                 )}
 
@@ -177,7 +177,7 @@ export default function Landing({ error }: { error?: Error | null }) {
               </form>
 
               {method === "password" && (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[15px]">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[16px]">
                   <button
                     type="button"
                     onClick={() => setRegister((v) => !v)}
@@ -221,7 +221,7 @@ export default function Landing({ error }: { error?: Error | null }) {
           )}
         </div>
 
-        <p className="mx-auto mt-5 max-w-sm text-center text-[14px] text-pine/60">
+        <p className="mx-auto mt-5 max-w-sm text-center text-[16px] text-pine/60">
           The first person to sign in sets up the school.
         </p>
       </div>

@@ -47,7 +47,26 @@ export const toLocalInput = (iso?: string | null) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const PALETTE = ["#1A73E8", "#34A853", "#EA4335", "#F9AB00", "#9334E6", "#1E8E9C", "#D93025", "#E37400"];
+/**
+ * Accent palette for classes and notebooks.
+ *
+ * Every colour here is muted enough to sit on Oat and hold its own beside Pine
+ * and Mint. Mint itself is deliberately absent: it means "the action" or "done",
+ * so letting a class adopt it would break that signal.
+ */
+const PALETTE = [
+  "#2E7D6B", // deep teal
+  "#20302C", // pine
+  "#3F6C9E", // slate blue
+  "#7A5C8E", // plum
+  "#C4703F", // clay
+  "#D9A441", // ochre
+  "#A3341F", // brick
+  "#4F7A3A", // moss
+];
+
+/** Used wherever a class or notebook hasn't picked a colour yet. */
+export const DEFAULT_ACCENT = "#2E7D6B";
 export function accentFor(seed: string): string {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;

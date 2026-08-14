@@ -92,7 +92,7 @@ export default function UploadNotebook() {
     <Shell>
       <div className="mx-auto max-w-xl">
         <h1 className="text-xl text-pine">New notebook</h1>
-        <p className="measure mt-1 text-sm text-pine/70">
+        <p className="measure mt-1 text-[16px] text-pine/70">
           Upload a PDF, Word document, or PowerPoint. Notesanity keeps the original layout exactly as it is and
           turns each page into a workspace your students can write on.
         </p>
@@ -120,10 +120,10 @@ export default function UploadNotebook() {
             )}
           >
             {busy ? <Loader2 className="h-7 w-7 animate-spin text-pine" /> : <FileUp className="h-7 w-7 text-pine/50" strokeWidth={2.5} />}
-            <span className="text-sm font-bold text-pine">
+            <span className="text-[16px] font-bold text-pine">
               {busy ? message || "Working…" : file ? file.name : "Choose a file"}
             </span>
-            {!busy && <span className="text-xs text-pine/70">PDF, DOCX, or PPTX · up to 25MB</span>}
+            {!busy && <span className="text-[16px] text-pine/70">PDF, DOCX, or PPTX · up to 25MB</span>}
           </button>
 
           <input
@@ -140,7 +140,7 @@ export default function UploadNotebook() {
           />
 
           {needsConversion(file ?? new File([], "x.pdf")) && !busy && (
-            <p className="mt-3 rounded-[12px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-3 py-2 text-xs text-[#5c4611]">
+            <p className="mt-3 rounded-[12px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-3 py-2 text-[16px] text-[#5c4611]">
               Office files are converted to PDF through your own Google Drive. You'll be asked to grant access once —
               the temporary file is deleted straight after conversion.
             </p>

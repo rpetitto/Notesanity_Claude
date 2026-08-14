@@ -39,7 +39,7 @@ export default function RolePicker() {
               <PenSquare className="h-7 w-7" strokeWidth={2.5} />
             </span>
             <span className="font-display text-lg text-pine">I'm a teacher</span>
-            <span className="text-sm text-pine/70">Create classes, build notebooks, and grade student work.</span>
+            <span className="text-[16px] text-pine/70">Create classes, build notebooks, and grade student work.</span>
           </button>
 
           <button
@@ -52,7 +52,7 @@ export default function RolePicker() {
               <GraduationCap className="h-7 w-7" strokeWidth={2.5} />
             </span>
             <span className="font-display text-lg text-pine">I'm a student</span>
-            <span className="text-sm text-pine/70">Join classes and complete your notebook assignments.</span>
+            <span className="text-[16px] text-pine/70">Join classes and complete your notebook assignments.</span>
           </button>
         </div>
       </div>

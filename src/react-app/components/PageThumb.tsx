@@ -62,11 +62,11 @@ export default function PageThumb({
   return (
     <div
       ref={wrapRef}
-      className={cn("relative overflow-hidden rounded border border-slate-200 bg-white", className)}
+      className={cn("relative overflow-hidden rounded border border-pine/20 bg-white", className)}
       style={{ width, height }}
     >
       <canvas ref={canvasRef} style={{ width, height }} className={cn("block", dimmed && "opacity-40")} />
-      {!ready && <div className="absolute inset-0 animate-pulse bg-slate-100" />}
+      {!ready && <div className="absolute inset-0 animate-pulse bg-oat" />}
     </div>
   );
 }

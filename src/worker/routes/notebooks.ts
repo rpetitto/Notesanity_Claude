@@ -95,7 +95,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
     notebook: {
       id: nb.id, classId: nb.class_id, title: nb.title, status: nb.status,
       pageCount: nb.page_count, assetKey: nb.asset_key, lastPublishedAt: nb.last_published_at,
-      accentColor: nb.accent_color ?? "#1A73E8", hasCover: !!nb.cover_key,
+      accentColor: nb.accent_color ?? "#2E7D6B", hasCover: !!nb.cover_key,
     },
     pages: pages.results ?? [],
     fields: fields.results ?? [],
@@ -516,7 +516,7 @@ app.patch("/api/notebooks/:id", handler(async (c) => {
     .prepare(`UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, updated_at = ? WHERE id = ?`)
     .bind(
       b.title?.trim() || nb.title,
-      b.accentColor ?? nb.accent_color ?? "#1A73E8",
+      b.accentColor ?? nb.accent_color ?? "#2E7D6B",
       b.clearCover ? null : nb.cover_key,
       now(),
       nb.id,

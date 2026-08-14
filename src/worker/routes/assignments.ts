@@ -56,7 +56,7 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
     const pageIds: string[] = JSON.parse(a.page_ids || "[]");
     const base = {
       id: a.id, title: a.title, notebookId: a.notebook_id, notebookTitle: a.notebook_title,
-      notebookColor: a.notebook_color ?? "#1A73E8", notebookHasCover: !!a.notebook_has_cover,
+      notebookColor: a.notebook_color ?? "#2E7D6B", notebookHasCover: !!a.notebook_has_cover,
       pageCount: pageIds.length, releaseAt: a.release_at, dueAt: a.due_at,
       grading: a.grading, pointsMax: a.points_max, status: a.status,
     };
@@ -492,7 +492,7 @@ app.get("/api/classes/:id/my-grades", handler(async (c) => {
 
   return c.json({
     className: cls?.name ?? "",
-    accentColor: cls?.accent_color ?? "#1A73E8",
+    accentColor: cls?.accent_color ?? "#2E7D6B",
     assignments,
     totals: possible > 0 ? { earned, possible, percent: Math.round((earned / possible) * 100) } : null,
   });
@@ -591,7 +591,7 @@ app.get("/api/my/teaching", handler(async (c) => {
       id: a.id, title: a.title, classId: a.class_id, className: a.class_name,
       accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
       notebookId: a.notebook_id, notebookTitle: a.notebook_title,
-      notebookColor: a.notebook_color ?? "#1A73E8", notebookHasCover: !!a.notebook_has_cover,
+      notebookColor: a.notebook_color ?? "#2E7D6B", notebookHasCover: !!a.notebook_has_cover,
       pageCount: JSON.parse(a.page_ids || "[]").length,
       dueAt: a.due_at, releaseAt: a.release_at, grading: a.grading, pointsMax: a.points_max,
       status: a.status,
@@ -634,7 +634,7 @@ app.get("/api/my/assignments", handler(async (c) => {
       id: a.id, title: a.title, classId: a.class_id, className: a.class_name,
       accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
       notebookId: a.notebook_id, notebookTitle: a.notebook_title,
-      notebookColor: a.notebook_color ?? "#1A73E8",
+      notebookColor: a.notebook_color ?? "#2E7D6B",
       dueAt: a.due_at, grading: a.grading, pointsMax: a.points_max,
       total: pageIds.length,
       complete: await completionFor(inst?.id ?? null, pageIds),

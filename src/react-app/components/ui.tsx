@@ -17,11 +17,15 @@ import { cn } from "../lib/utils";
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md" | "lg";
 
+/**
+ * One height per size, applied as a fixed height rather than a minimum, so a row
+ * of buttons lines up exactly however much text each one carries. Nothing drops
+ * below a 44px target or below the book's 16px interface minimum.
+ */
 const SIZES: Record<Size, string> = {
-  // Nothing drops below a 44px target.
-  sm: "min-h-[44px] px-4 text-[15px]",
-  md: "min-h-[48px] px-5 text-[16px]",
-  lg: "min-h-[52px] px-6 text-[17px]",
+  sm: "h-11 px-4 text-[16px]",
+  md: "h-12 px-5 text-[17px]",
+  lg: "h-14 px-7 text-[18px]",
 };
 
 /** Mint only ever carries dark text — Oat or white on Mint fails at every size. */
@@ -146,8 +150,8 @@ export function Chip({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border-2 px-3 py-1",
-        "font-display text-[13px] font-bold",
+        "inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-full border-2 px-3.5",
+        "font-display text-[16px] font-bold",
         CHIP_TONES[tone],
         className,
       )}
@@ -163,7 +167,7 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
     <input
       ref={ref}
       className={cn(
-        "min-h-[48px] w-full rounded-[12px] border-[3px] border-pine bg-white px-3.5 py-2 text-[16px]",
+        "h-12 w-full rounded-[12px] border-[3px] border-pine bg-white px-4 text-[17px]",
         "placeholder:text-pine/45 focus:outline-none focus:ring-[3px] focus:ring-mint",
         "disabled:bg-oat disabled:text-pine/60",
         className,
@@ -178,7 +182,7 @@ export function Textarea({ className, ...props }: React.TextareaHTMLAttributes<H
   return (
     <textarea
       className={cn(
-        "w-full rounded-[12px] border-[3px] border-pine bg-white px-3.5 py-2.5 text-[16px]",
+        "w-full rounded-[12px] border-[3px] border-pine bg-white px-4 py-3 text-[17px]",
         "placeholder:text-pine/45 focus:outline-none focus:ring-[3px] focus:ring-mint",
         className,
       )}
@@ -191,7 +195,7 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
   return (
     <select
       className={cn(
-        "min-h-[48px] w-full rounded-[12px] border-[3px] border-pine bg-white px-3 text-[16px]",
+        "h-12 w-full rounded-[12px] border-[3px] border-pine bg-white px-3.5 text-[17px]",
         "focus:outline-none focus:ring-[3px] focus:ring-mint",
         className,
       )}
@@ -202,7 +206,7 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
 
 export function Label({ className, children, htmlFor }: { className?: string; children: ReactNode; htmlFor?: string }) {
   return (
-    <label htmlFor={htmlFor} className={cn("label-caps block text-pine/70", className)}>
+    <label htmlFor={htmlFor} className={cn("label-caps block text-pine/75", className)}>
       {children}
     </label>
   );

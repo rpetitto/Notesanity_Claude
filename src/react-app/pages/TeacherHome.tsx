@@ -7,6 +7,7 @@ import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import { Button, Input, Label, Modal } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
+import { DEFAULT_ACCENT } from "../lib/utils";
 
 /** `GET /api/classes` rows also carry `emoji` — declared locally since `ClassSummary`
  * (shared with other owners' code) doesn't yet. There's no `hasCover` flag on this
@@ -29,7 +30,7 @@ function useEscapeClose(active: boolean, onClose: () => void) {
 
 function ClassCard({ cls }: { cls: ClassRow }) {
   const [coverFailed, setCoverFailed] = useState(false);
-  const accent = cls.accent_color || "#1A73E8";
+  const accent = cls.accent_color || DEFAULT_ACCENT;
   return (
     <Link
       to={`/classes/${cls.id}`}
@@ -49,16 +50,16 @@ function ClassCard({ cls }: { cls: ClassRow }) {
       <div className="p-4">
         <div className="flex items-center gap-2.5">
           {cls.emoji && (
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-oat text-base">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-oat text-[17px]">
               {cls.emoji}
             </span>
           )}
           <div className="min-w-0 flex-1">
             <div className="truncate font-display text-[17px] text-pine">{cls.name}</div>
-            <div className="truncate text-[13px] text-pine/70">{cls.section || " "}</div>
+            <div className="truncate text-[16px] text-pine/70">{cls.section || " "}</div>
           </div>
         </div>
-        <div className="mt-4 flex items-center gap-4 text-[13px] text-pine/70">
+        <div className="mt-4 flex items-center gap-4 text-[16px] text-pine/70">
           <span className="flex items-center gap-1.5">
             <Users className="h-3.5 w-3.5" strokeWidth={2.5} />
             {cls.student_count} student{cls.student_count === 1 ? "" : "s"}
@@ -176,7 +177,7 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
       {loading && <Spinner label="Loading your courses…" />}
       {!loading && error && <ErrorNote error={new Error(error)} />}
       {!loading && !error && courses && courses.length === 0 && (
-        <p className="py-6 text-center text-[15px] text-pine/70">No active courses found in Google Classroom.</p>
+        <p className="py-6 text-center text-[16px] text-pine/70">No active courses found in Google Classroom.</p>
       )}
       {!loading && !error && courses && courses.length > 0 && (
         <ul className="space-y-2">
@@ -186,11 +187,11 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
                 type="button"
                 disabled={importingId !== null}
                 onClick={() => importCourse(course)}
-                className="flex w-full items-center justify-between rounded-[12px] border-[3px] border-pine px-4 py-3 text-left text-[15px] hover:bg-oat disabled:opacity-60"
+                className="flex w-full items-center justify-between rounded-[12px] border-[3px] border-pine px-4 py-3 text-left text-[16px] hover:bg-oat disabled:opacity-60"
               >
                 <span>
                   <span className="block font-display text-pine">{course.name}</span>
-                  {course.section && <span className="block text-[13px] text-pine/70">{course.section}</span>}
+                  {course.section && <span className="block text-[16px] text-pine/70">{course.section}</span>}
                 </span>
                 {importingId === course.id && (
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-pine/25 border-t-pine" />

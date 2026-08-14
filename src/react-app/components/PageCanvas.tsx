@@ -377,7 +377,7 @@ export default function PageCanvas({
       }}
     >
       <canvas ref={baseRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block" />
-      {!baseReady && <div className="absolute inset-0 animate-pulse bg-slate-100" />}
+      {!baseReady && <div className="absolute inset-0 animate-pulse bg-oat" />}
 
       {masterLayer && (
         <canvas ref={masterRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
@@ -440,14 +440,14 @@ export default function PageCanvas({
                 value={t.v}
                 onChange={(e) => updateText(t.id, e.target.value)}
                 onBlur={() => { if (!t.v.trim()) removeText(t.id); else setEditingText(null); }}
-                className="w-full resize-none rounded border border-blue-400 bg-white/95 px-1 py-0.5 outline-none"
+                className="w-full resize-none rounded border border-pine bg-white/95 px-1 py-0.5 outline-none"
                 style={{ fontSize: t.s * scale, lineHeight: 1.25, color: t.c }}
                 rows={2}
               />
             ) : (
               <div
                 onClick={() => own && setEditingText(t.id)}
-                className={cn("whitespace-pre-wrap break-words", own && "cursor-text rounded hover:bg-blue-50/50")}
+                className={cn("whitespace-pre-wrap break-words", own && "cursor-text rounded hover:bg-mint/20/50")}
                 style={{ fontSize: t.s * scale, lineHeight: 1.25, color: t.c }}
               >
                 {t.v}
@@ -512,19 +512,19 @@ function CommentPin({
         onClick={onOpen}
         title={comment.t || "Comment"}
         className={cn(
-          "flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[11px] font-semibold text-white shadow-md ring-2 ring-white",
-          teacher ? "bg-rose-600" : "bg-blue-600",
+          "flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-pine font-display text-[16px] text-pine shadow-md",
+          teacher ? "bg-mint" : "bg-white",
         )}
       >
         {index}
       </button>
 
       {open && (
-        <div className="absolute left-3 top-3 z-20 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+        <div className="absolute left-3 top-3 z-20 w-56 rounded-lg border border-pine/20 bg-white p-2 shadow-lg">
+          <div className="mb-1 flex items-center gap-1.5 text-[16px] text-pine/70">
             <MessageSquare className="h-3 w-3" />
             {comment.a || (teacher ? "Teacher" : "Student")}
-            <button onClick={onClose} className="ml-auto rounded p-0.5 hover:bg-slate-100">
+            <button onClick={onClose} className="ml-auto rounded p-0.5 hover:bg-oat">
               <X className="h-3 w-3" />
             </button>
           </div>
@@ -536,15 +536,15 @@ function CommentPin({
                 onChange={(e) => onChange(e.target.value)}
                 rows={3}
                 placeholder="Add a comment…"
-                className="w-full resize-none rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-blue-500"
+                className="w-full resize-none rounded border border-pine/35 px-1.5 py-1 text-[16px] outline-none focus:border-pine"
               />
               <div className="mt-1 flex justify-between">
-                <button onClick={onDelete} className="text-[11px] text-rose-600 hover:underline">Delete</button>
-                <button onClick={onClose} className="text-[11px] text-blue-600 hover:underline">Done</button>
+                <button onClick={onDelete} className="text-[16px] text-[#a3341f] hover:underline">Delete</button>
+                <button onClick={onClose} className="text-[16px] text-pine hover:underline">Done</button>
               </div>
             </>
           ) : (
-            <p className="whitespace-pre-wrap break-words text-xs text-slate-700">{comment.t}</p>
+            <p className="whitespace-pre-wrap break-words text-[16px] text-pine">{comment.t}</p>
           )}
         </div>
       )}
@@ -574,13 +574,13 @@ function FieldControl({
   if (field.type === "prompt") {
     return (
       <div
-        className="absolute flex flex-col overflow-hidden rounded border-2 border-blue-300/70 bg-white/70"
+        className="absolute flex flex-col overflow-hidden rounded border-2 border-pine/45 bg-white/70"
         style={style}
         title={field.label}
       >
         {field.prompt && (
           <div
-            className="shrink-0 px-1.5 pt-1 text-[11px] font-semibold text-slate-700"
+            className="shrink-0 px-1.5 pt-1 text-[16px] font-semibold text-pine"
             style={{ fontSize: Math.max(10, Math.min(13, field.h * scale * 0.14)) }}
           >
             {field.prompt}
@@ -645,8 +645,8 @@ function FieldControl({
         title={field.label}
         className={cn(
           "absolute flex items-center justify-center rounded border-2 transition-colors",
-          text === "1" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-blue-300/70 bg-white/60",
-          editable ? "cursor-pointer hover:border-blue-500" : "cursor-default",
+          text === "1" ? "border-pine bg-mint/20 text-pine" : "border-pine/45 bg-white/60",
+          editable ? "cursor-pointer hover:border-pine" : "cursor-default",
         )}
         style={style}
       >
@@ -668,7 +668,7 @@ function FieldControl({
         value={text}
         onChange={(e) => onChange(e.target.value)}
         title={field.label}
-        className="absolute rounded border-2 border-blue-300/70 bg-white/80 px-1 outline-none focus:border-blue-500"
+        className="absolute rounded border-2 border-pine/45 bg-white/80 px-1 outline-none focus:border-pine"
         style={{ ...style, fontSize: Math.max(11, field.h * scale * 0.5) }}
       >
         <option value="">—</option>
@@ -685,7 +685,7 @@ function FieldControl({
       placeholder={field.label}
       className={cn(
         "absolute resize-none rounded border-2 bg-white/70 px-1 py-0.5 outline-none",
-        editable ? "border-blue-300/70 focus:border-blue-500 focus:bg-white" : "border-transparent bg-transparent",
+        editable ? "border-pine/45 focus:border-pine focus:bg-white" : "border-transparent bg-transparent",
       )}
       style={{ ...style, fontSize: Math.max(11, Math.min(16, field.h * scale * 0.42)), lineHeight: 1.2 }}
     />
@@ -775,7 +775,7 @@ function ResponseImageField({
 
   return (
     <div
-      className="absolute overflow-hidden rounded border-2 border-blue-300/70 bg-white/60"
+      className="absolute overflow-hidden rounded border-2 border-pine/45 bg-white/60"
       style={style}
       title={field.label}
     >
@@ -790,7 +790,7 @@ function ResponseImageField({
 
       {uploading ? (
         <div className="flex h-full w-full items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+          <Loader2 className="h-5 w-5 animate-spin text-pine" />
         </div>
       ) : exists ? (
         <div className="group relative h-full w-full">
@@ -801,7 +801,7 @@ function ResponseImageField({
                 type="button"
                 onClick={() => inputRef.current?.click()}
                 title="Replace image"
-                className="flex h-6 w-6 items-center justify-center rounded bg-white/90 text-slate-700 hover:bg-white"
+                className="flex h-6 w-6 items-center justify-center rounded bg-white/90 text-pine hover:bg-white"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
@@ -809,7 +809,7 @@ function ResponseImageField({
                 type="button"
                 onClick={() => void remove()}
                 title="Remove image"
-                className="flex h-6 w-6 items-center justify-center rounded bg-white/90 text-rose-600 hover:bg-white"
+                className="flex h-6 w-6 items-center justify-center rounded bg-white/90 text-[#a3341f] hover:bg-white"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -820,13 +820,13 @@ function ResponseImageField({
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-slate-300 bg-slate-50/70 text-slate-500 hover:border-blue-400 hover:text-blue-600"
+          className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-pine/35 bg-oat/70 text-pine/70 hover:border-pine hover:text-pine"
         >
           <ImageIcon className="h-5 w-5" />
-          <span className="text-[11px] font-medium">Add image</span>
+          <span className="text-[16px] font-medium">Add image</span>
         </button>
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">No image</div>
+        <div className="flex h-full w-full items-center justify-center text-[16px] text-pine/55">No image</div>
       )}
     </div>
   );
@@ -948,7 +948,7 @@ function ResponseAudioField({
 
   return (
     <div
-      className="absolute overflow-hidden rounded border-2 border-blue-300/70 bg-white/60"
+      className="absolute overflow-hidden rounded border-2 border-pine/45 bg-white/60"
       style={style}
       title={field.label}
     >
@@ -963,17 +963,17 @@ function ResponseAudioField({
 
       {uploading ? (
         <div className="flex h-full w-full items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+          <Loader2 className="h-5 w-5 animate-spin text-pine" />
         </div>
       ) : exists ? (
         <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1">
           <audio controls src={url} className="w-full" style={{ height: 40, minHeight: 40 }} />
           {editable && (
             <div className="flex gap-2">
-              <button type="button" onClick={() => inputRef.current?.click()} className="text-[11px] text-blue-600 hover:underline">
+              <button type="button" onClick={() => inputRef.current?.click()} className="text-[16px] text-pine hover:underline">
                 Replace
               </button>
-              <button type="button" onClick={() => void remove()} className="text-[11px] text-rose-600 hover:underline">
+              <button type="button" onClick={() => void remove()} className="text-[16px] text-[#a3341f] hover:underline">
                 Remove
               </button>
             </div>
@@ -981,26 +981,26 @@ function ResponseAudioField({
         </div>
       ) : editable ? (
         recording ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-slate-600">
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-pine/75">
             <button
               type="button"
               onClick={stopRecording}
               title="Stop recording"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-600 text-white hover:bg-rose-700"
+              className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#a3341f] bg-white text-[#a3341f] hover:bg-[#fbe9e4]"
             >
               <Square className="h-3.5 w-3.5 fill-current" />
             </button>
-            <span className="text-[11px] tabular-nums">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
+            <span className="text-[16px] tabular-nums">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
           </div>
         ) : (
-          <div className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-slate-300 bg-slate-50/70 text-slate-500">
+          <div className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-pine/35 bg-oat/70 text-pine/70">
             <div className="flex items-center gap-2">
               {canRecord && (
                 <button
                   type="button"
                   onClick={() => void startRecording()}
                   title="Record audio"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-mint text-white hover:bg-mint"
                 >
                   <Mic className="h-4 w-4" />
                 </button>
@@ -1008,17 +1008,17 @@ function ResponseAudioField({
               <button
                 type="button"
                 onClick={() => inputRef.current?.click()}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-pine/35 text-pine/75 hover:border-pine hover:text-pine"
                 title="Attach audio file"
               >
                 <Music className="h-4 w-4" />
               </button>
             </div>
-            <span className="text-center text-[11px] font-medium leading-tight">Record or attach audio</span>
+            <span className="text-center text-[16px] font-medium leading-tight">Record or attach audio</span>
           </div>
         )
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-[11px] text-slate-400">No recording</div>
+        <div className="flex h-full w-full items-center justify-center text-[16px] text-pine/55">No recording</div>
       )}
     </div>
   );

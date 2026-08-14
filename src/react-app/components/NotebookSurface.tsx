@@ -135,7 +135,7 @@ export default function NotebookSurface({
   );
 
   return (
-    <div ref={containerRef} className="h-full overflow-auto bg-slate-100" style={{ overscrollBehavior: "contain" }}>
+    <div ref={containerRef} className="h-full overflow-auto bg-oat" style={{ overscrollBehavior: "contain" }}>
       {header}
       <div className="flex flex-col items-center gap-6 px-4 py-6">
         {pages.map((page, i) => (
@@ -145,7 +145,7 @@ export default function NotebookSurface({
             data-page-id={page.id}
             className="relative"
           >
-            <div className="mb-1.5 flex items-center justify-between text-xs text-slate-500">
+            <div className="mb-1.5 flex items-center justify-between text-[16px] text-pine/70">
               <span>{page.label || `Page ${i + 1}`}</span>
             </div>
             <LazyPage width={page.width * scale} height={page.height * scale}>

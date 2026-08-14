@@ -11,12 +11,12 @@ import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/She
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, Card, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
 import { api, assetUrl, type AssignmentSummary } from "../lib/api";
-import { cn, formatDue, isOverdue, relativeTime } from "../lib/utils";
+import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
 const SWATCHES = [
-  "#1A73E8", "#34A853", "#EA4335", "#F9AB00", "#9334E6",
-  "#1E8E9C", "#D93025", "#E37400", "#202124", "#5F6368",
+  "#2E7D6B", "#20302C", "#3F6C9E", "#7A5C8E", "#C4703F",
+  "#D9A441", "#A3341F", "#4F7A3A",
 ];
 
 /** Local view of an assignment row that also carries the notebook's colour, since
@@ -160,16 +160,16 @@ function BackfillModal({
 
   return (
     <Modal onClose={onClose} title="Backfill assignments">
-      <p className="mb-4 text-[15px] text-pine/70">
+      <p className="mb-4 text-[16px] text-pine/70">
         Choose which assignments <span className="font-display text-pine">{student.name}</span> should be held to.
       </p>
 
-      {assignments.length === 0 && <p className="py-4 text-[15px] text-pine/70">No active assignments in this class.</p>}
+      {assignments.length === 0 && <p className="py-4 text-[16px] text-pine/70">No active assignments in this class.</p>}
       {assignments.length > 0 && (
         <ul className="space-y-2">
           {assignments.map((a) => (
             <li key={a.id}>
-              <label className="flex items-center gap-3 rounded-[12px] border-[3px] border-pine px-3 py-2.5 text-[15px] hover:bg-oat">
+              <label className="flex items-center gap-3 rounded-[12px] border-[3px] border-pine px-3 py-2.5 text-[16px] hover:bg-oat">
                 <input
                   type="checkbox"
                   checked={checked.has(a.id)}
@@ -178,7 +178,7 @@ function BackfillModal({
                 />
                 <span className="flex-1">
                   <span className="block font-display text-pine">{a.title}</span>
-                  <span className="block text-[13px] text-pine/70">{formatDue(a.due_at)}</span>
+                  <span className="block text-[16px] text-pine/70">{formatDue(a.due_at)}</span>
                 </span>
               </label>
             </li>
@@ -258,7 +258,7 @@ function CoTeacherModal({ classId, onClose }: { classId: string; onClose: () => 
 
   return (
     <Modal onClose={onClose} title="Add co-teachers">
-      <p className="text-[13px] text-pine/70">
+      <p className="text-[16px] text-pine/70">
         Co-teachers can build notebooks, assign work and grade — the same as you. They can't remove the class owner.
       </p>
       <Textarea
@@ -295,7 +295,7 @@ function CustomizeModal({
 }) {
   const qc = useQueryClient();
   const [emoji, setEmoji] = useState(cls.emoji ?? "");
-  const [color, setColor] = useState(cls.accent_color || "#1A73E8");
+  const [color, setColor] = useState(cls.accent_color || DEFAULT_ACCENT);
   const fileRef = useRef<HTMLInputElement | null>(null);
   useEscapeClose(onClose);
 
@@ -447,7 +447,7 @@ function CustomizeModal({
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploadCover.isPending}
-            className="mt-1.5 flex h-24 w-full items-center justify-center gap-2 rounded-xl border-[3px] border-dashed border-pine/40 text-[15px] text-pine/60 hover:bg-oat disabled:opacity-60"
+            className="mt-1.5 flex h-24 w-full items-center justify-center gap-2 rounded-xl border-[3px] border-dashed border-pine/40 text-[16px] text-pine/60 hover:bg-oat disabled:opacity-60"
           >
             <Upload className="h-4 w-4" strokeWidth={2.5} />
             {uploadCover.isPending ? "Uploading…" : "Upload an image"}
@@ -580,7 +580,7 @@ export default function ClassView() {
     <Shell>
       {isTeacher && pendingStudents.length > 0 && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-4 py-3">
-          <div className="text-[15px] text-[#5c4611]">
+          <div className="text-[16px] text-[#5c4611]">
             <span className="font-display">
               {pendingStudents.length === 1
                 ? `${pendingStudents[0].name} joined recently`
@@ -605,7 +605,7 @@ export default function ClassView() {
           ) : (
             <div
               className="absolute inset-0"
-              style={{ background: `linear-gradient(135deg, ${cls.accent_color || "#1A73E8"}, ${cls.accent_color || "#1A73E8"}99)` }}
+              style={{ background: `linear-gradient(135deg, ${cls.accent_color || DEFAULT_ACCENT}, ${cls.accent_color || DEFAULT_ACCENT}99)` }}
             />
           )}
           <div
@@ -623,7 +623,7 @@ export default function ClassView() {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div className="min-w-0">
-            {cls.section && <p className="truncate text-[15px] text-pine/70">{cls.section}</p>}
+            {cls.section && <p className="truncate text-[16px] text-pine/70">{cls.section}</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {isTeacher && (
@@ -662,7 +662,7 @@ export default function ClassView() {
               type="button"
               onClick={() => setTab(key)}
               className={cn(
-                "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 font-display text-[13px] transition-colors sm:px-4",
+                "inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-full px-4 font-display text-[17px] transition-colors sm:px-5",
                 tab === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
               )}
             >
@@ -696,7 +696,7 @@ export default function ClassView() {
           {classQ.data.notebooks.length > 0 && (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {classQ.data.notebooks.map((nb) => {
-                const accent = nb.accent_color || "#1A73E8";
+                const accent = nb.accent_color || DEFAULT_ACCENT;
                 const to = isTeacher ? `/notebooks/${nb.id}/edit` : `/notebooks/${nb.id}`;
                 return (
                   <Link
@@ -731,12 +731,12 @@ export default function ClassView() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-display text-[17px] text-pine">{nb.title}</div>
-                        <div className="mt-0.5 text-[13px] text-pine/70">{nb.page_count} pages</div>
+                        <div className="mt-0.5 text-[16px] text-pine/70">{nb.page_count} pages</div>
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                           <Chip tone={nb.status === "published" ? "mint" : "quiet"} className="capitalize">
                             {nb.status}
                           </Chip>
-                          <span className="text-[11px] text-pine/50">{relativeTime(nb.updated_at)}</span>
+                          <span className="text-[16px] text-pine/50">{relativeTime(nb.updated_at)}</span>
                         </div>
                       </div>
                     </div>
@@ -776,10 +776,10 @@ export default function ClassView() {
                 <li key={a.id}>
                   <Link to={`/assignments/${a.id}`} className="flex flex-wrap items-center gap-3 px-5 py-3.5 hover:bg-oat">
                     <span className="min-w-0 flex-1 truncate font-display text-pine">{a.title}</span>
-                    <span className="shrink-0 text-[13px] text-pine/70">{a.pageCount} pages</span>
+                    <span className="shrink-0 text-[16px] text-pine/70">{a.pageCount} pages</span>
                     <span
                       className={cn(
-                        "shrink-0 text-[13px]",
+                        "shrink-0 text-[16px]",
                         isOverdue(a.dueAt) ? "font-display text-[#a3341f]" : "text-pine/70",
                       )}
                     >
@@ -788,7 +788,7 @@ export default function ClassView() {
                     <Chip tone={a.status === "active" ? "mint" : "quiet"} className="capitalize">
                       {a.status}
                     </Chip>
-                    <span className="shrink-0 text-[13px] text-pine/70">
+                    <span className="shrink-0 text-[16px] text-pine/70">
                       {a.complete ?? 0}/{a.pageCount} pages
                     </span>
                   </Link>
@@ -823,7 +823,7 @@ export default function ClassView() {
                   <Avatar name={t.name} picture={t.picture} size={30} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-display text-pine">{t.name}</span>
-                    <span className="block truncate text-[13px] text-pine/70">{t.email}</span>
+                    <span className="block truncate text-[16px] text-pine/70">{t.email}</span>
                   </span>
                   {t.is_owner ? (
                     <Chip tone="quiet" className="shrink-0">Owner</Chip>
@@ -860,10 +860,10 @@ export default function ClassView() {
                       <Avatar name={r.name} picture={r.picture} size={32} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-display text-pine">{r.name}</span>
-                        <span className="block truncate text-[13px] text-pine/70">{r.email}</span>
+                        <span className="block truncate text-[16px] text-pine/70">{r.email}</span>
                       </span>
                     </Link>
-                    <span className="hidden shrink-0 text-[13px] text-pine/50 sm:block">Joined {relativeTime(r.joined_at)}</span>
+                    <span className="hidden shrink-0 text-[16px] text-pine/50 sm:block">Joined {relativeTime(r.joined_at)}</span>
                     <Link
                       to={`/classes/${id}/students/${r.id}`}
                       title="Browse notebooks"
