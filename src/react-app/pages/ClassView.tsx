@@ -834,20 +834,33 @@ export default function ClassView() {
 
       <div className="mb-5 flex items-center gap-3 overflow-x-auto">
         <div className="flex gap-1 rounded-full border-[3px] border-pine bg-white p-1">
-          {TABS.filter((t) => t.key !== "roster" || isTeacher).map(({ key, label, studentLabel, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={cn(
-                "inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-full px-4 font-display text-[17px] transition-colors sm:px-5",
-                tab === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
-              )}
-            >
-              <Icon className="h-4 w-4" strokeWidth={2.5} />
-              {!isTeacher && studentLabel ? studentLabel : label}
-            </button>
-          ))}
+          {TABS.filter((t) => t.key !== "roster" || isTeacher).map(({ key, label, studentLabel, icon: Icon }) => {
+            const todoCount = key === "assignments" && !isTeacher ? studentBuckets.todo.length : 0;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={cn(
+                  "inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-full px-4 font-display text-[17px] transition-colors sm:px-5",
+                  tab === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
+                )}
+              >
+                <Icon className="h-4 w-4" strokeWidth={2.5} />
+                {!isTeacher && studentLabel ? studentLabel : label}
+                {todoCount > 0 && (
+                  <span
+                    className={cn(
+                      "inline-flex h-6 min-w-6 items-center justify-center rounded-full border-2 px-1.5 text-[15px]",
+                      tab === key ? "border-oat/40 text-oat" : "border-pine/25 text-pine/75",
+                    )}
+                  >
+                    {todoCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
