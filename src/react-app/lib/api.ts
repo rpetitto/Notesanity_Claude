@@ -141,13 +141,6 @@ export interface AssignmentSummary {
   returned?: number;
   total?: number;
   myStatus?: string;
-  complete?: number;
-  /** Component count (fields, or the page itself when a page has none) a
-   * student's `complete` is measured against — distinct from `pageCount`,
-   * which just counts assigned pages. Only present for a student's own row. */
-  progressTotal?: number;
-  /** Whether `progressTotal` counts fields ("item") or pages ("page"). */
-  progressUnit?: "item" | "page";
   grade?: { points: number | null; letter: string | null; complete: number | null; feedback?: string } | null;
 }
 

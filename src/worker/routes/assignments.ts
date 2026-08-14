@@ -2,7 +2,6 @@ import { app, db } from "flingit";
 import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { logActivity } from "../lib/activity";
-import { INPUT_FIELD_TYPES } from "./notebooks";
 
 /** An empty ink layer still serializes to a few characters, so require real content. */
 const HAS_CONTENT = 24;
@@ -15,84 +14,51 @@ async function loadAssignment(c: any, assignmentId: string) {
 }
 
 /**
- * Progress is tracked per component, not per page: each teacher-defined field
- * (text box, checkbox, prompt, image, audio) is its own unit of work, so a
- * page with five fields and one filled in reads as 1/5, not 1/1. A page with
- * no fields at all — an open page meant for free digital ink — has no
- * component to point at, so it falls back to being one component of its own,
- * satisfied by any real ink on it.
+ * Has this student done anything on these pages, and when last?
  *
- * `unit` is what the resulting number should be *called*. Plenty of notebooks
- * are pure ink with no teacher-placed fields anywhere; there, every count is
- * the page fallback, and calling those "items" describes something the student
- * can't see on the page. Such an assignment reports pages, which is what it
- * actually measures.
+ * Deliberately not a fraction. Counting "completion" meant deciding what
+ * counts as done, and any answer to that was wrong for somebody: a page of
+ * free annotation over a PDF has nothing to tally, a page of questions can be
+ * filled with a single character each, and reference pages have nothing to do
+ * at all. What a teacher actually needs to know is who has started and who
+ * went quiet, so that is what this reports.
+ *
+ * Ink and typed answers count equally — annotating a diagram is work in the
+ * same way that filling a box is.
  */
-async function pageComponents(
-  pageIds: string[],
-): Promise<{ fieldsByPage: Map<string, number>; total: number; unit: "item" | "page" }> {
-  const fieldsByPage = new Map<string, number>();
-  if (pageIds.length === 0) return { fieldsByPage, total: 0, unit: "page" };
-  const placeholders = pageIds.map(() => "?").join(",");
-  // Only fields a student answers count. A rich text block or a picture the
-  // teacher placed is page content — counting it would make the denominator
-  // grow every time a teacher explained something.
-  const inputs = INPUT_FIELD_TYPES.map(() => "?").join(",");
-  const counted = await db
-    .prepare(
-      `SELECT page_id, COUNT(*) AS n FROM fields
-        WHERE archived = 0 AND type IN (${inputs}) AND page_id IN (${placeholders})
-        GROUP BY page_id`,
-    )
-    .bind(...INPUT_FIELD_TYPES, ...pageIds)
-    .all<{ page_id: string; n: number }>();
-  for (const row of counted.results ?? []) fieldsByPage.set(row.page_id, row.n);
-  let total = 0;
-  for (const pid of pageIds) total += fieldsByPage.get(pid) || 1;
-  // Only pages carrying fields appear in the map, so an empty map means the
-  // whole assignment is free-ink pages.
-  return { fieldsByPage, total, unit: fieldsByPage.size > 0 ? "item" : "page" };
-}
+const HAS_INK = 24; // an empty layer still serialises to a few characters
 
-/** Count how many components a student has actually completed, given the
- * structural field counts `pageComponents` already worked out. */
-async function completionFor(
+async function workSignal(
   instanceId: string | null,
   pageIds: string[],
-  fieldsByPage: Map<string, number>,
-): Promise<number> {
-  if (!instanceId || pageIds.length === 0) return 0;
+): Promise<{ started: boolean; lastWorkedAt: string | null }> {
+  if (!instanceId || pageIds.length === 0) return { started: false, lastWorkedAt: null };
   const placeholders = pageIds.map(() => "?").join(",");
 
-  const answered = await db
+  const ink = await db
     .prepare(
-      `SELECT f.page_id, COUNT(*) AS n FROM field_values v
-         JOIN fields f ON f.id = v.field_id
-        WHERE v.instance_id = ? AND f.archived = 0 AND f.type IN (${INPUT_FIELD_TYPES.map(() => "?").join(",")})
-          AND f.page_id IN (${placeholders})
-          AND (TRIM(v.value) <> '' OR v.asset_key IS NOT NULL)
-        GROUP BY f.page_id`,
-    )
-    .bind(instanceId, ...INPUT_FIELD_TYPES, ...pageIds)
-    .all<{ page_id: string; n: number }>();
-  const answeredByPage = new Map((answered.results ?? []).map((r) => [r.page_id, r.n]));
-
-  const inked = await db
-    .prepare(
-      `SELECT DISTINCT page_id FROM layers
-        WHERE instance_id = ? AND kind = 'student' AND LENGTH(data) > ${HAS_CONTENT}
+      `SELECT MAX(updated_at) AS t FROM layers
+        WHERE instance_id = ? AND kind = 'student' AND LENGTH(data) > ${HAS_INK}
           AND page_id IN (${placeholders})`,
     )
     .bind(instanceId, ...pageIds)
-    .all<{ page_id: string }>();
-  const inkedPages = new Set((inked.results ?? []).map((r) => r.page_id));
+    .first<{ t: string | null }>();
 
-  let complete = 0;
-  for (const pid of pageIds) {
-    const fieldCount = fieldsByPage.get(pid) || 0;
-    complete += fieldCount > 0 ? Math.min(answeredByPage.get(pid) ?? 0, fieldCount) : inkedPages.has(pid) ? 1 : 0;
-  }
-  return complete;
+  const typed = await db
+    .prepare(
+      `SELECT MAX(v.updated_at) AS t FROM field_values v
+         JOIN fields f ON f.id = v.field_id
+        WHERE v.instance_id = ? AND f.archived = 0 AND f.page_id IN (${placeholders})
+          AND (TRIM(v.value) <> '' OR v.asset_key IS NOT NULL)`,
+    )
+    .bind(instanceId, ...pageIds)
+    .first<{ t: string | null }>();
+
+  const times = [ink?.t, typed?.t].filter(Boolean) as string[];
+  return {
+    started: times.length > 0,
+    lastWorkedAt: times.length ? times.sort()[times.length - 1] : null,
+  };
 }
 
 app.get("/api/classes/:id/assignments", handler(async (c) => {
@@ -136,17 +102,9 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
         .prepare(`SELECT status, grade_points, grade_letter, grade_complete, feedback, returned_at FROM submissions WHERE assignment_id = ? AND student_id = ?`)
         .bind(a.id, user.id)
         .first<any>();
-      const inst = await db
-        .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
-        .bind(a.notebook_id, user.id)
-        .first<{ id: string }>();
-      const { fieldsByPage, total: progressTotal, unit: progressUnit } = await pageComponents(pageIds);
       assignments.push({
         ...base,
         myStatus: sub?.status ?? "not_started",
-        complete: await completionFor(inst?.id ?? null, pageIds, fieldsByPage),
-        progressTotal,
-        progressUnit,
         grade: sub?.returned_at
           ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete, feedback: sub.feedback }
           : null,
@@ -327,11 +285,6 @@ app.get("/api/assignments/:id", handler(async (c) => {
       .prepare(`SELECT * FROM submissions WHERE assignment_id = ? AND student_id = ?`)
       .bind(a.id, user.id)
       .first<any>();
-    const inst = await db
-      .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
-      .bind(a.notebook_id, user.id)
-      .first<{ id: string }>();
-    const { fieldsByPage, total: progressTotal, unit: progressUnit } = await pageComponents(pageIds);
     return c.json({
       assignment: base,
       isTeacher: false,
@@ -343,9 +296,6 @@ app.get("/api/assignments/:id", handler(async (c) => {
         // page can never offer an action the server would refuse.
         locked: !!sub?.locked,
         graded: !!sub?.graded_at,
-        complete: await completionFor(inst?.id ?? null, pageIds, fieldsByPage),
-        progressTotal,
-        progressUnit,
         grade: sub?.returned_at
           ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete, feedback: sub.feedback }
           : null,
@@ -361,7 +311,6 @@ app.get("/api/assignments/:id", handler(async (c) => {
     .bind(a.class_id)
     .all<any>();
 
-  const { fieldsByPage, total: progressTotal, unit: progressUnit } = await pageComponents(pageIds);
   const rows = [];
   for (const s of roster.results ?? []) {
     const sub = await db
@@ -372,19 +321,16 @@ app.get("/api/assignments/:id", handler(async (c) => {
       .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
       .bind(a.notebook_id, s.id)
       .first<{ id: string }>();
-    const complete = await completionFor(inst?.id ?? null, pageIds, fieldsByPage);
+    const { started, lastWorkedAt } = await workSignal(inst?.id ?? null, pageIds);
     let status = sub?.status ?? "not_started";
-    if (status === "not_started" && complete > 0) status = "in_progress";
+    if (status === "not_started" && started) status = "in_progress";
     rows.push({
       student: s,
       status,
       submittedAt: sub?.submitted_at ?? null,
       returnedAt: sub?.returned_at ?? null,
-      complete,
-      total: progressTotal,
-      // Same for every row, but kept alongside `total` so a row describes its
-      // own number without the caller having to look elsewhere for the noun.
-      unit: progressUnit,
+      // When they last touched it — the thing a teacher actually scans for.
+      lastWorkedAt,
       grade: { points: sub?.grade_points ?? null, letter: sub?.grade_letter ?? null, complete: sub?.grade_complete ?? null },
       feedback: sub?.feedback ?? "",
       graded: !!sub?.graded_at,
@@ -821,11 +767,6 @@ app.get("/api/my/assignments", handler(async (c) => {
       .bind(a.id, user.id)
       .first<any>();
     const pageIds: string[] = JSON.parse(a.page_ids || "[]");
-    const inst = await db
-      .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
-      .bind(a.notebook_id, user.id)
-      .first<{ id: string }>();
-    const { fieldsByPage, total: progressTotal, unit: progressUnit } = await pageComponents(pageIds);
     out.push({
       id: a.id, title: a.title, classId: a.class_id, className: a.class_name,
       accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
@@ -833,9 +774,6 @@ app.get("/api/my/assignments", handler(async (c) => {
       notebookColor: a.notebook_color ?? "#2E7D6B",
       dueAt: a.due_at, grading: a.grading, pointsMax: a.points_max,
       total: pageIds.length,
-      progressTotal,
-      progressUnit,
-      complete: await completionFor(inst?.id ?? null, pageIds, fieldsByPage),
       status: sub?.status ?? "not_started",
       grade: sub?.returned_at ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete } : null,
     });

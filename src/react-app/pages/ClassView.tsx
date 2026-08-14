@@ -14,7 +14,7 @@ import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/She
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
-import { cn, formatDue, formatProgress, isOverdue, relativeTime, DEFAULT_ACCENT, type ProgressUnit } from "../lib/utils";
+import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
 const SWATCHES = [
@@ -484,13 +484,6 @@ export interface StudentAssignmentData {
   dueAt: string | null;
   grading: "none" | "complete" | "points" | "letter";
   pointsMax: number;
-  complete: number;
-  /** Component count `complete` is measured against — fields (text boxes,
-   * checkboxes, prompts, image/audio) across the assigned pages, or the page
-   * itself for a page with none. Falls back to `pageCount` if unset. */
-  progressTotal?: number;
-  /** Whether `progressTotal` counts fields or pages — see `ProgressUnit`. */
-  progressUnit?: ProgressUnit;
   status: "not_started" | "in_progress" | "submitted" | "returned";
   grade: { points: number | null; letter: string | null; complete: number | null } | null;
 }
@@ -627,7 +620,6 @@ export function StudentAssignmentCard({ a }: { a: StudentAssignmentData }) {
             </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-[16px] text-pine/70">
-            <span>{formatProgress(a.complete, a.progressTotal ?? a.pageCount, a.progressUnit)}</span>
             {grade && (
               <Chip tone="mint" icon={<Check className="h-3 w-3" strokeWidth={2.5} />}>
                 {grade}
@@ -1001,9 +993,6 @@ export default function ClassView() {
                         dueAt: a.dueAt,
                         grading: a.grading,
                         pointsMax: a.pointsMax,
-                        complete: a.complete ?? 0,
-                        progressTotal: a.progressTotal,
-                        progressUnit: a.progressUnit,
                         status: (a.myStatus as StudentAssignmentData["status"]) ?? "not_started",
                         grade: a.grade ?? null,
                       }}

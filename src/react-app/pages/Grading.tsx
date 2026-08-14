@@ -29,7 +29,7 @@ import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
-import { cn, formatDue, formatProgress, relativeTime, type ProgressUnit } from "../lib/utils";
+import { cn, formatDue, relativeTime } from "../lib/utils";
 
 /** Header controls share one height so a row of them lines up. */
 const BUTTON_ROW =
@@ -150,10 +150,8 @@ interface GradeRow {
   status: string;
   submittedAt: string | null;
   returnedAt: string | null;
-  complete: number;
-  total: number;
-  /** What `total` counts — fields when the teacher placed any, else pages. */
-  unit?: ProgressUnit;
+  /** When this student last put ink or an answer on the assigned pages. */
+  lastWorkedAt: string | null;
   grade: { points: number | null; letter: string | null; complete: number | null };
   feedback: string;
   graded: boolean;
@@ -643,7 +641,8 @@ export default function Grading() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[16px] font-bold text-pine">{r.student.name}</div>
                   <div className="text-[16px] text-pine/70">
-                    {formatProgress(r.complete, r.total, r.unit)} · {r.status.replace("_", " ")}
+                    {r.status.replace("_", " ")}
+                    {r.lastWorkedAt && ` · ${relativeTime(r.lastWorkedAt)}`}
                   </div>
                 </div>
                 {r.graded && (
@@ -862,9 +861,11 @@ function StatusPill({ row }: { row?: GradeRow }) {
       icon={row.status === "returned" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}
     >
       {row.status.replace("_", " ")}
-      {row.submittedAt && ` · ${relativeTime(row.submittedAt)}`}
-      {" · "}
-      {formatProgress(row.complete, row.total, row.unit)}
+      {row.submittedAt
+        ? ` · handed in ${relativeTime(row.submittedAt)}`
+        : row.lastWorkedAt
+          ? ` · worked ${relativeTime(row.lastWorkedAt)}`
+          : ""}
     </Chip>
   );
 }

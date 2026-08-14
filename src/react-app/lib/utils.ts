@@ -72,19 +72,3 @@ export function accentFor(seed: string): string {
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return PALETTE[h % PALETTE.length];
 }
-
-/**
- * What an assignment's progress fraction is counting.
- *
- * `item` when the teacher placed fields (text boxes, checkboxes, prompts,
- * image/audio slots) on the assigned pages — those are what a student fills
- * in. `page` when they didn't: a pure ink notebook has nothing to point at
- * but the pages themselves, and calling those "items" names something the
- * student can't see.
- */
-export type ProgressUnit = "item" | "page";
-
-/** Render a progress fraction with the noun that matches what it counts. */
-export function formatProgress(complete: number, total: number, unit: ProgressUnit = "page"): string {
-  return `${complete}/${total} ${unit}${total === 1 ? "" : "s"}`;
-}

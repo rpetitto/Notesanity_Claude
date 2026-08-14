@@ -13,9 +13,6 @@ export const FIELD_TYPES = [
   "richtext", "figure",
 ];
 
-/** The subset a student is expected to complete — what progress is measured against. */
-export const INPUT_FIELD_TYPES = ["text", "checkbox", "choice", "prompt", "image", "audio"];
-
 /** Teacher-or-enrolled-student access to a notebook, resolved via its class. */
 async function notebookAccess(c: any, notebookId: string) {
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();

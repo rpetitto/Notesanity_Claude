@@ -6,7 +6,7 @@ import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/She
 import PageThumb from "../components/PageThumb";
 import { ButtonLink, Card, Chip } from "../components/ui";
 import { api, pageSource, type PageRec } from "../lib/api";
-import { cn, formatDue, formatProgress, isOverdue, DEFAULT_ACCENT, type ProgressUnit } from "../lib/utils";
+import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 
 interface TeachingAssignment {
   id: string;
@@ -64,10 +64,8 @@ interface AssignmentDetailRow {
   status: "not_started" | "in_progress" | "submitted" | "returned";
   submittedAt: string | null;
   returnedAt: string | null;
-  complete: number;
-  total: number;
-  /** What `total` counts — fields when the teacher placed any, else pages. */
-  unit?: ProgressUnit;
+  /** When this student last put ink or an answer on the assigned pages. */
+  lastWorkedAt: string | null;
   grade: { points: number | null; letter: string | null; complete: number | null };
   feedback: string;
   graded: boolean;
@@ -163,7 +161,15 @@ function StudentRows({
   if (rows.length === 0) return <p className="py-3 text-[16px] text-pine/70">No students enrolled.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[420px] text-[16px]">
+      <table className="w-full min-w-[460px] text-[16px]">
+        <thead>
+          <tr className="border-b-2 border-pine/12">
+            <th className="label-caps py-1.5 pr-3 text-left text-pine/55">Student</th>
+            <th className="label-caps py-1.5 pr-3 text-left text-pine/55">Status</th>
+            <th className="label-caps py-1.5 pr-3 text-left text-pine/55">Last activity</th>
+            <th className="label-caps py-1.5 text-right text-pine/55">Grade</th>
+          </tr>
+        </thead>
         <tbody className="divide-y divide-pine/10">
           {rows.map((r) => (
             <tr key={r.student.id} className="group">
@@ -182,7 +188,12 @@ function StudentRows({
                 </Chip>
               </td>
               <td className="whitespace-nowrap py-2 pr-3 text-[16px] text-pine/70">
-                {formatProgress(r.complete, r.total, r.unit)}
+                {/* Once it's in, when they handed it in is the more useful fact. */}
+                {r.submittedAt
+                  ? `Handed in ${relativeTime(r.submittedAt)}`
+                  : r.lastWorkedAt
+                    ? relativeTime(r.lastWorkedAt)
+                    : "—"}
               </td>
               <td className="whitespace-nowrap py-2 text-right font-display text-pine">
                 {gradeLabel(grading, pointsMax, r.grade, r.graded)}
