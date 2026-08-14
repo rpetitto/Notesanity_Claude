@@ -20,10 +20,18 @@ async function loadAssignment(c: any, assignmentId: string) {
  * no fields at all — an open page meant for free digital ink — has no
  * component to point at, so it falls back to being one component of its own,
  * satisfied by any real ink on it.
+ *
+ * `unit` is what the resulting number should be *called*. Plenty of notebooks
+ * are pure ink with no teacher-placed fields anywhere; there, every count is
+ * the page fallback, and calling those "items" describes something the student
+ * can't see on the page. Such an assignment reports pages, which is what it
+ * actually measures.
  */
-async function pageComponents(pageIds: string[]): Promise<{ fieldsByPage: Map<string, number>; total: number }> {
+async function pageComponents(
+  pageIds: string[],
+): Promise<{ fieldsByPage: Map<string, number>; total: number; unit: "item" | "page" }> {
   const fieldsByPage = new Map<string, number>();
-  if (pageIds.length === 0) return { fieldsByPage, total: 0 };
+  if (pageIds.length === 0) return { fieldsByPage, total: 0, unit: "page" };
   const placeholders = pageIds.map(() => "?").join(",");
   const counted = await db
     .prepare(
@@ -36,7 +44,9 @@ async function pageComponents(pageIds: string[]): Promise<{ fieldsByPage: Map<st
   for (const row of counted.results ?? []) fieldsByPage.set(row.page_id, row.n);
   let total = 0;
   for (const pid of pageIds) total += fieldsByPage.get(pid) || 1;
-  return { fieldsByPage, total };
+  // Only pages carrying fields appear in the map, so an empty map means the
+  // whole assignment is free-ink pages.
+  return { fieldsByPage, total, unit: fieldsByPage.size > 0 ? "item" : "page" };
 }
 
 /** Count how many components a student has actually completed, given the
@@ -124,12 +134,13 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
         .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
         .bind(a.notebook_id, user.id)
         .first<{ id: string }>();
-      const { fieldsByPage, total: progressTotal } = await pageComponents(pageIds);
+      const { fieldsByPage, total: progressTotal, unit: progressUnit } = await pageComponents(pageIds);
       assignments.push({
         ...base,
         myStatus: sub?.status ?? "not_started",
         complete: await completionFor(inst?.id ?? null, pageIds, fieldsByPage),
         progressTotal,
+        progressUnit,
         grade: sub?.returned_at
           ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete, feedback: sub.feedback }
           : null,
@@ -314,7 +325,7 @@ app.get("/api/assignments/:id", handler(async (c) => {
       .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
       .bind(a.notebook_id, user.id)
       .first<{ id: string }>();
-    const { fieldsByPage, total: progressTotal } = await pageComponents(pageIds);
+    const { fieldsByPage, total: progressTotal, unit: progressUnit } = await pageComponents(pageIds);
     return c.json({
       assignment: base,
       isTeacher: false,
@@ -328,6 +339,7 @@ app.get("/api/assignments/:id", handler(async (c) => {
         graded: !!sub?.graded_at,
         complete: await completionFor(inst?.id ?? null, pageIds, fieldsByPage),
         progressTotal,
+        progressUnit,
         grade: sub?.returned_at
           ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete, feedback: sub.feedback }
           : null,
@@ -343,7 +355,7 @@ app.get("/api/assignments/:id", handler(async (c) => {
     .bind(a.class_id)
     .all<any>();
 
-  const { fieldsByPage, total: progressTotal } = await pageComponents(pageIds);
+  const { fieldsByPage, total: progressTotal, unit: progressUnit } = await pageComponents(pageIds);
   const rows = [];
   for (const s of roster.results ?? []) {
     const sub = await db
@@ -364,6 +376,9 @@ app.get("/api/assignments/:id", handler(async (c) => {
       returnedAt: sub?.returned_at ?? null,
       complete,
       total: progressTotal,
+      // Same for every row, but kept alongside `total` so a row describes its
+      // own number without the caller having to look elsewhere for the noun.
+      unit: progressUnit,
       grade: { points: sub?.grade_points ?? null, letter: sub?.grade_letter ?? null, complete: sub?.grade_complete ?? null },
       feedback: sub?.feedback ?? "",
       graded: !!sub?.graded_at,
@@ -804,7 +819,7 @@ app.get("/api/my/assignments", handler(async (c) => {
       .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
       .bind(a.notebook_id, user.id)
       .first<{ id: string }>();
-    const { fieldsByPage, total: progressTotal } = await pageComponents(pageIds);
+    const { fieldsByPage, total: progressTotal, unit: progressUnit } = await pageComponents(pageIds);
     out.push({
       id: a.id, title: a.title, classId: a.class_id, className: a.class_name,
       accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
@@ -813,6 +828,7 @@ app.get("/api/my/assignments", handler(async (c) => {
       dueAt: a.due_at, grading: a.grading, pointsMax: a.points_max,
       total: pageIds.length,
       progressTotal,
+      progressUnit,
       complete: await completionFor(inst?.id ?? null, pageIds, fieldsByPage),
       status: sub?.status ?? "not_started",
       grade: sub?.returned_at ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete } : null,

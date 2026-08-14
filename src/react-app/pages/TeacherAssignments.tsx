@@ -6,7 +6,7 @@ import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/She
 import PageThumb from "../components/PageThumb";
 import { ButtonLink, Card, Chip } from "../components/ui";
 import { api, assetUrl, type PageRec } from "../lib/api";
-import { cn, formatDue, isOverdue, DEFAULT_ACCENT } from "../lib/utils";
+import { cn, formatDue, formatProgress, isOverdue, DEFAULT_ACCENT, type ProgressUnit } from "../lib/utils";
 
 interface TeachingAssignment {
   id: string;
@@ -66,6 +66,8 @@ interface AssignmentDetailRow {
   returnedAt: string | null;
   complete: number;
   total: number;
+  /** What `total` counts — fields when the teacher placed any, else pages. */
+  unit?: ProgressUnit;
   grade: { points: number | null; letter: string | null; complete: number | null };
   feedback: string;
   graded: boolean;
@@ -180,7 +182,7 @@ function StudentRows({
                 </Chip>
               </td>
               <td className="whitespace-nowrap py-2 pr-3 text-[16px] text-pine/70">
-                {r.complete}/{r.total} pages
+                {formatProgress(r.complete, r.total, r.unit)}
               </td>
               <td className="whitespace-nowrap py-2 text-right font-display text-pine">
                 {gradeLabel(grading, pointsMax, r.grade, r.graded)}

@@ -29,7 +29,7 @@ import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
-import { cn, formatDue, relativeTime } from "../lib/utils";
+import { cn, formatDue, formatProgress, relativeTime, type ProgressUnit } from "../lib/utils";
 
 /** Header controls share one height so a row of them lines up. */
 const BUTTON_ROW =
@@ -155,6 +155,8 @@ interface GradeRow {
   returnedAt: string | null;
   complete: number;
   total: number;
+  /** What `total` counts — fields when the teacher placed any, else pages. */
+  unit?: ProgressUnit;
   grade: { points: number | null; letter: string | null; complete: number | null };
   feedback: string;
   graded: boolean;
@@ -644,7 +646,7 @@ export default function Grading() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[16px] font-bold text-pine">{r.student.name}</div>
                   <div className="text-[16px] text-pine/70">
-                    {r.complete}/{r.total} pages · {r.status.replace("_", " ")}
+                    {formatProgress(r.complete, r.total, r.unit)} · {r.status.replace("_", " ")}
                   </div>
                 </div>
                 {r.graded && (
@@ -865,7 +867,7 @@ function StatusPill({ row }: { row?: GradeRow }) {
       {row.status.replace("_", " ")}
       {row.submittedAt && ` · ${relativeTime(row.submittedAt)}`}
       {" · "}
-      {row.complete}/{row.total} pages
+      {formatProgress(row.complete, row.total, row.unit)}
     </Chip>
   );
 }
