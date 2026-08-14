@@ -32,6 +32,8 @@ interface MyAssignment {
   grading: "none" | "complete" | "points" | "letter";
   pointsMax: number;
   total: number;
+  /** Component count `complete` is measured against — see `StudentAssignmentData`. */
+  progressTotal: number;
   complete: number;
   status: "not_started" | "in_progress" | "submitted" | "returned";
   grade: { points: number | null; letter: string | null; complete: number | null } | null;
@@ -49,6 +51,7 @@ function toCardData(a: MyAssignment): StudentAssignmentData {
     grading: a.grading,
     pointsMax: a.pointsMax,
     complete: a.complete,
+    progressTotal: a.progressTotal,
     status: a.status,
     grade: a.grade,
   };

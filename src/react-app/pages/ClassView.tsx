@@ -483,6 +483,10 @@ export interface StudentAssignmentData {
   grading: "none" | "complete" | "points" | "letter";
   pointsMax: number;
   complete: number;
+  /** Component count `complete` is measured against — fields (text boxes,
+   * checkboxes, prompts, image/audio) across the assigned pages, or the page
+   * itself for a page with none. Falls back to `pageCount` if unset. */
+  progressTotal?: number;
   status: "not_started" | "in_progress" | "submitted" | "returned";
   grade: { points: number | null; letter: string | null; complete: number | null } | null;
 }
@@ -622,7 +626,7 @@ export function StudentAssignmentCard({ a }: { a: StudentAssignmentData }) {
             </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-[16px] text-pine/70">
-            <span>{a.complete}/{a.pageCount} pages</span>
+            <span>{a.complete}/{a.progressTotal ?? a.pageCount} items</span>
             {grade && (
               <Chip tone="mint" icon={<Check className="h-3 w-3" strokeWidth={2.5} />}>
                 {grade}
@@ -995,6 +999,7 @@ export default function ClassView() {
                         grading: a.grading,
                         pointsMax: a.pointsMax,
                         complete: a.complete ?? 0,
+                        progressTotal: a.progressTotal,
                         status: (a.myStatus as StudentAssignmentData["status"]) ?? "not_started",
                         grade: a.grade ?? null,
                       }}
