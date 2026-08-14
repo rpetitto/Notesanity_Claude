@@ -1035,10 +1035,14 @@ function ResponseAudioField({
     rec.stop();
   };
 
+  // The native player, the Record/Attach buttons and the Replace/Remove links
+  // all need real room to be legible and tappable — a teacher can draw this
+  // field as small as they like, so the box floors out at a minimum size
+  // instead of compressing everything down to fit whatever was drawn.
   return (
     <div
-      className="absolute overflow-hidden rounded border-2 border-pine/45 bg-white/60"
-      style={style}
+      className="absolute overflow-visible rounded border-2 border-pine/45 bg-white/60"
+      style={{ ...style, minWidth: 260, minHeight: 76 }}
       title={field.label}
     >
       <input
@@ -1055,14 +1059,14 @@ function ResponseAudioField({
           <Loader2 className="h-5 w-5 animate-spin text-pine" />
         </div>
       ) : exists ? (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden p-1">
-          <audio controls src={url} className="w-full shrink-0" style={{ height: 38, minHeight: 38 }} />
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2">
+          <audio controls src={url} className="w-full shrink-0" style={{ height: 44, minHeight: 44 }} />
           {editable && (
-            <div className="flex gap-2">
-              <button type="button" onClick={() => inputRef.current?.click()} className="text-[16px] text-pine hover:underline">
+            <div className="flex gap-4">
+              <button type="button" onClick={() => inputRef.current?.click()} className="text-[16px] font-bold text-pine hover:underline">
                 Replace
               </button>
-              <button type="button" onClick={() => void remove()} className="text-[16px] text-[#a3341f] hover:underline">
+              <button type="button" onClick={() => void remove()} className="text-[16px] font-bold text-[#a3341f] hover:underline">
                 Remove
               </button>
             </div>
@@ -1070,40 +1074,40 @@ function ResponseAudioField({
         </div>
       ) : editable ? (
         recording ? (
-          <div className="flex h-full w-full items-center justify-center gap-2 px-2 text-pine/75">
+          <div className="flex h-full w-full items-center justify-center gap-3 px-3 text-pine/75">
             <button
               type="button"
               onClick={stopRecording}
               title="Stop recording"
-              className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#a3341f] bg-white text-[#a3341f] hover:bg-[#fbe9e4]"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-[#a3341f] bg-white text-[#a3341f] hover:bg-[#fbe9e4]"
             >
-              <Square className="h-3.5 w-3.5 fill-current" />
+              <Square className="h-4 w-4 fill-current" />
             </button>
-            <span className="text-[16px] tabular-nums">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
+            <span className="text-[17px] font-bold tabular-nums">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
           </div>
         ) : (
-          <div className="flex h-full w-full items-center justify-center gap-2 border-2 border-dashed border-pine/35 bg-oat/70 px-2 text-pine/70">
-            <div className="flex shrink-0 items-center gap-2">
+          <div className="flex h-full w-full items-center justify-center gap-3 border-2 border-dashed border-pine/35 bg-oat/70 px-3 text-pine/70">
+            <div className="flex shrink-0 items-center gap-2.5">
               {canRecord && (
                 <button
                   type="button"
                   onClick={() => void startRecording()}
                   title="Record audio"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-mint text-pine"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-mint text-pine"
                 >
-                  <Mic className="h-4 w-4" strokeWidth={2.5} />
+                  <Mic className="h-5 w-5" strokeWidth={2.5} />
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => inputRef.current?.click()}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-pine/45 bg-white text-pine hover:border-pine"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-pine/45 bg-white text-pine hover:border-pine"
                 title="Attach an audio file"
               >
-                <Music className="h-4 w-4" strokeWidth={2.5} />
+                <Music className="h-5 w-5" strokeWidth={2.5} />
               </button>
             </div>
-            <span className="min-w-0 truncate text-[16px] leading-tight">Record or attach</span>
+            <span className="min-w-0 truncate text-[16px] font-bold leading-tight">Record or attach</span>
           </div>
         )
       ) : (
