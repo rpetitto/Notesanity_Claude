@@ -1,8 +1,8 @@
 /**
  * Email/password and magic-link sign-in, alongside Fling's built-in Google auth.
  *
- * Passwords are stored as PBKDF2-SHA256 (210k iterations, per-user salt) — never
- * reversible, and compared in constant time. Magic-link and reset tokens are
+ * Passwords are stored as PBKDF2-SHA256 (per-user salt) — never reversible,
+ * and compared in constant time. Magic-link and reset tokens are
  * stored only as SHA-256 hashes, so a database dump can't be replayed as a login.
  * Sessions are opaque random ids looked up in the database, which is why no
  * signing secret is needed for the cookie to be unforgeable.
@@ -22,6 +22,21 @@ const SESSION_DAYS = 30;
 const TOKEN_MINUTES = 20;
 const MIN_PASSWORD = 10;
 
+/**
+ * PBKDF2 work factor.
+ *
+ * The Workers runtime refuses more than 100,000 iterations in a single
+ * `deriveBits` call, so that ceiling is the work factor — not a number chosen
+ * for its own sake. It is lower than current OWASP guidance for PBKDF2, which
+ * the runtime simply doesn't allow; the stored-per-credential `iterations`
+ * column exists so the factor can be raised for new passwords if that changes,
+ * without invalidating existing ones.
+ *
+ * Node's WebCrypto has no such limit, which is exactly why a higher value
+ * passed every local test and failed for every real signup.
+ */
+const PBKDF2_ITERATIONS = 100_000;
+
 const enc = new TextEncoder();
 const toHex = (buf: ArrayBuffer) =>
   [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -37,7 +52,11 @@ async function sha256(value: string): Promise<string> {
 async function derive(password: string, salt: string, iterations: number): Promise<string> {
   const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: enc.encode(salt), iterations, hash: "SHA-256" },
+    // Clamped rather than passed through: a stored count above the ceiling
+    // would throw, turning a wrong-password check into a 500. Clamping makes it
+    // fail as a mismatch instead, which is the honest answer for a credential
+    // this runtime cannot reproduce.
+    { name: "PBKDF2", salt: enc.encode(salt), iterations: Math.min(iterations, PBKDF2_ITERATIONS), hash: "SHA-256" },
     key,
     256,
   );
@@ -183,7 +202,7 @@ app.post("/api/auth/password/register", handler(async (c) => {
   }
 
   const salt = randomToken(16);
-  const iterations = 210000;
+  const iterations = PBKDF2_ITERATIONS;
   await db
     .prepare(`INSERT INTO credentials (user_id, password_hash, salt, iterations, updated_at) VALUES (?, ?, ?, ?, ?)`)
     .bind(user.id, await derive(password, salt, iterations), salt, iterations, now())
@@ -204,7 +223,7 @@ app.post("/api/auth/password/login", handler(async (c) => {
   // Always do the work, so a missing account and a wrong password take the same
   // time and produce the same message.
   const salt = cred?.salt ?? "placeholder-salt";
-  const iterations = cred?.iterations ?? 210000;
+  const iterations = cred?.iterations ?? PBKDF2_ITERATIONS;
   const attempt = await derive(password ?? "", salt, iterations);
   if (!cred || !timingSafeEqual(attempt, cred.password_hash)) {
     throw new HttpError(401, "That email and password don't match.");
@@ -229,7 +248,7 @@ app.post("/api/auth/password/change", handler(async (c) => {
   }
 
   const salt = randomToken(16);
-  const iterations = 210000;
+  const iterations = PBKDF2_ITERATIONS;
   const hash = await derive(newPassword, salt, iterations);
   if (cred) {
     await db
