@@ -56,28 +56,44 @@ function PageRail({
     else sections.push({ name, pages: [{ page, number: i + 1 }] });
   });
 
-  const row = ({ page, number }: { page: PageRec; number: number }) => (
-    <button
-      key={page.id}
-      type="button"
-      onClick={() => onSelect(page.id)}
-      className={cn(
-        "mb-1 flex w-full items-start gap-2 rounded-lg border-2 p-1.5 text-left transition-colors",
-        visiblePage === page.id ? "border-pine bg-mint/30" : "border-transparent hover:bg-oat",
-      )}
-    >
-      <PageThumb {...pageSource(notebookId, page)} width={52} />
-      <span className="min-w-0 flex-1 pt-0.5">
-        <span className="block truncate text-[16px] font-medium text-pine">
-          {page.label || `Page ${number}`}
+  const row = ({ page, number }: { page: PageRec; number: number }) => {
+    // `assignedIds` is only passed while the whole notebook is on show, which is
+    // the only time the distinction is worth drawing.
+    const scoped = !!assignedIds;
+    const assigned = assignedIds?.has(page.id) ?? false;
+    const faded = scoped && !assigned;
+    return (
+      <button
+        key={page.id}
+        type="button"
+        onClick={() => onSelect(page.id)}
+        className={cn(
+          "relative mb-1 flex w-full items-start gap-2 overflow-hidden rounded-lg border-2 p-1.5 pl-2.5 text-left transition-colors",
+          visiblePage === page.id ? "border-pine bg-mint/30" : "border-transparent hover:bg-oat",
+          // Dimmed rather than hidden: context pages are still readable, just
+          // clearly not the thing that was set.
+          faded && "opacity-55 hover:opacity-100",
+        )}
+      >
+        {assigned && (
+          <span
+            aria-hidden
+            className="absolute inset-y-1 left-0.5 w-1.5 rounded-full bg-mint"
+          />
+        )}
+        <PageThumb {...pageSource(notebookId, page)} width={52} dimmed={faded} />
+        <span className="min-w-0 flex-1 pt-0.5">
+          <span className={cn("block truncate text-[16px]", assigned ? "font-bold text-pine" : "font-medium text-pine")}>
+            {page.label || `Page ${number}`}
+          </span>
+          <span className="mt-0.5 block text-[16px] text-pine/55">
+            #{number}
+            {assigned && <span className="font-bold text-pine"> · assigned</span>}
+          </span>
         </span>
-        <span className="mt-0.5 block text-[16px] text-pine/55">
-          #{number}
-          {assignedIds?.has(page.id) && <span className="text-pine"> · assigned</span>}
-        </span>
-      </span>
-    </button>
-  );
+      </button>
+    );
+  };
 
   return (
     <div>
