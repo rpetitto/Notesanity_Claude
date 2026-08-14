@@ -10,15 +10,22 @@
  *
  * Hit-testing rule: the pointer surface sits *below* the overlays, so form
  * fields, text boxes and comment pins stay clickable without switching tools.
- * Two different things stand aside, and they are not the same set:
+ * Neither overlay is ever a full-page hit target — only the things on them
+ * take the pointer — so a press that misses everything still reaches the page.
+ * Beyond that, two sets stand aside, and they are not the same set:
  *
- *  - The form-field overlay goes transparent for any tool that *places*
+ *  - The form-field overlay's fields go transparent for any tool that *places*
  *    something (pen/highlighter/eraser/stamp/text/comment), so the gesture
  *    reaches the page rather than the field sitting over it.
  *  - The page's own objects go transparent only for the freehand tools
  *    (pen/highlighter/eraser), so a stroke can cross them — but a text box
  *    stays typeable and a comment pin stays openable while their own tool is
  *    selected, which is the whole point of picking that tool.
+ *
+ * `select` adds no marks but is not inert: it picks up marks on the layer you
+ * write to and moves them. Teacher-placed fields are never draggable — they
+ * are the page itself, not something written on it — and neither is anyone
+ * else's ink, because the hit test only ever looks at your own layer.
  *
  * iOS Safari / Apple Pencil notes:
  *  - Apple Pencil arrives as `pointerType === 'pen'` and carries real `pressure`.
@@ -120,6 +127,37 @@ const MARK_LABEL: Record<MarkHit["kind"], string> = {
   comment: "Comment",
 };
 
+/** Which mark a drag is moving. Strokes have no id, so they go by index. */
+type MarkRef =
+  | { kind: "stroke"; index: number }
+  | { kind: "text"; id: string }
+  | { kind: "stamp"; id: string };
+
+/**
+ * Move one mark by (dx, dy) page units, leaving the rest of the layer alone.
+ *
+ * Returns a new layer, so the same call serves both the live preview during a
+ * drag and the single committed change at the end of one.
+ */
+function translateMark(layer: LayerData, ref: MarkRef, dx: number, dy: number): LayerData {
+  if (ref.kind === "stroke") {
+    return {
+      ...layer,
+      s: layer.s.map((st, i) =>
+        i !== ref.index
+          ? st
+          // Points are a flat [x, y, pressure, ...] run: shift the first two of
+          // every triple and leave pressure be.
+          : { ...st, p: st.p.map((n, j) => (j % 3 === 0 ? n + dx : j % 3 === 1 ? n + dy : n)) },
+      ),
+    };
+  }
+  if (ref.kind === "text") {
+    return { ...layer, x: layer.x.map((t) => (t.id === ref.id ? { ...t, x: t.x + dx, y: t.y + dy } : t)) };
+  }
+  return { ...layer, e: layer.e.map((st) => (st.id === ref.id ? { ...st, x: st.x + dx, y: st.y + dy } : st)) };
+}
+
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
 
@@ -152,6 +190,7 @@ export default function PageCanvas({
   const studentRef = useRef<HTMLCanvasElement>(null);
   const teacherRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
 
   const [baseReady, setBaseReady] = useState(false);
   const [editingText, setEditingText] = useState<string | null>(null);
@@ -197,8 +236,6 @@ export default function PageCanvas({
   useLayoutEffect(() => {
     if (masterLayer) paint(masterRef.current, masterLayer);
   }, [paint, masterLayer]);
-  useLayoutEffect(() => { paint(studentRef.current, studentLayer); }, [paint, studentLayer]);
-  useLayoutEffect(() => { paint(teacherRef.current, teacherLayer); }, [paint, teacherLayer]);
 
   useLayoutEffect(() => {
     const canvas = liveRef.current;
@@ -225,11 +262,88 @@ export default function PageCanvas({
   const lastPenAt = useRef(0);
   const activePointer = useRef<number | null>(null);
 
-  const activeLayer = writeTarget === "teacher" ? teacherLayer : studentLayer;
   const isMarking = MARKING_TOOLS.includes(tool.kind);
   const isPlacing = PLACEMENT_TOOLS.includes(tool.kind);
   const isDrawTool = tool.kind === "pen" || tool.kind === "highlighter";
   const canWrite = writeTarget !== null && !!onLayerChange;
+
+  const activeLayer = writeTarget === "teacher" ? teacherLayer : studentLayer;
+
+  // ---- moving your own marks with the select tool ----
+  /**
+   * Only marks on the layer you write to can be moved: a student rearranges
+   * their own work, a teacher their own marking, and neither touches the
+   * other's. Teacher-placed fields are not marks at all and never move — they
+   * are the page, not something written on it.
+   */
+  const markDrag = useRef<{
+    ref: MarkRef;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    pointerId: number;
+  } | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ ref: MarkRef; dx: number; dy: number } | null>(null);
+  /** Set for the length of a click after a drag, so releasing doesn't also "tap". */
+  const justDragged = useRef(false);
+  const draggableMarks = canWrite && tool.kind === "select";
+
+  /** The layer as it looks mid-drag — the committed layer with one mark shifted. */
+  const previewOf = useCallback((layer: LayerData, target: "student" | "teacher") => {
+    if (!dragOffset || writeTarget !== target) return layer;
+    return translateMark(layer, dragOffset.ref, dragOffset.dx, dragOffset.dy);
+  }, [dragOffset, writeTarget]);
+
+  const shownStudentLayer = previewOf(studentLayer, "student");
+  const shownTeacherLayer = previewOf(teacherLayer, "teacher");
+
+  const beginMarkDrag = (ref: MarkRef, e: React.PointerEvent) => {
+    if (!canWrite || tool.kind !== "select") return false;
+    const surface = e.currentTarget as HTMLElement;
+    try { surface.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    const rect = pageRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    markDrag.current = {
+      ref,
+      startX: (e.clientX - rect.left) / scale,
+      startY: (e.clientY - rect.top) / scale,
+      moved: false,
+      pointerId: e.pointerId,
+    };
+    return true;
+  };
+
+  const moveMarkDrag = (e: React.PointerEvent) => {
+    const d = markDrag.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    const rect = pageRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const dx = (e.clientX - rect.left) / scale - d.startX;
+    const dy = (e.clientY - rect.top) / scale - d.startY;
+    // Below the slop this is still a tap — which is how a text box is opened
+    // for editing rather than shoved half a pixel across the page.
+    if (!d.moved && Math.abs(dx) < DRAG_SLOP / scale && Math.abs(dy) < DRAG_SLOP / scale) return;
+    d.moved = true;
+    e.preventDefault();
+    setDragOffset({ ref: d.ref, dx, dy });
+  };
+
+  /** Commit once, on release, so a drag is a single undo step rather than one per frame. */
+  const endMarkDrag = (e: React.PointerEvent) => {
+    const d = markDrag.current;
+    if (!d || d.pointerId !== e.pointerId) return false;
+    markDrag.current = null;
+    const offset = dragOffset;
+    setDragOffset(null);
+    if (!d.moved || !offset || !onLayerChange) return false;
+    onLayerChange(translateMark(activeLayer, offset.ref, offset.dx, offset.dy));
+    justDragged.current = true;
+    setTimeout(() => { justDragged.current = false; }, 0);
+    return true;
+  };
+
+  useLayoutEffect(() => { paint(studentRef.current, shownStudentLayer); }, [paint, shownStudentLayer]);
+  useLayoutEffect(() => { paint(teacherRef.current, shownTeacherLayer); }, [paint, shownTeacherLayer]);
 
   const toPage = (e: PointerEvent | React.PointerEvent, el: HTMLElement) => {
     const rect = el.getBoundingClientRect();
@@ -297,10 +411,19 @@ export default function PageCanvas({
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "pen") lastPenAt.current = Date.now();
     if (!canWrite) return;
-    if (!shouldAcceptPointer(e)) return;
 
     const surface = e.currentTarget;
     const { x, y } = toPage(e, surface);
+
+    // Select: pick up your own ink if the press landed on some, otherwise do
+    // nothing at all so the page scrolls as it always has.
+    if (tool.kind === "select") {
+      const index = hitStroke(activeLayer.s, x, y, 6 / scale);
+      if (index >= 0) beginMarkDrag({ kind: "stroke", index }, e);
+      return;
+    }
+
+    if (!shouldAcceptPointer(e)) return;
 
     if (tool.kind === "eraser") {
       e.preventDefault();
@@ -378,6 +501,7 @@ export default function PageCanvas({
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "pen") lastPenAt.current = Date.now();
+    if (markDrag.current) { moveMarkDrag(e); return; }
     if (activePointer.current !== e.pointerId) return;
     const surface = e.currentTarget;
 
@@ -419,6 +543,7 @@ export default function PageCanvas({
   };
 
   const endStroke = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (markDrag.current) { endMarkDrag(e); return; }
     if (activePointer.current !== e.pointerId) return;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
     activePointer.current = null;
@@ -492,7 +617,10 @@ export default function PageCanvas({
     setMarkHover(hit ? { x: px, y: py, hit } : null);
   };
 
-  const interactive = canWrite && tool.kind !== "select";
+  // The surface is present for `select` as well, purely so a press that lands on
+  // the student's own ink can pick it up. It claims nothing otherwise, which is
+  // what keeps "scroll only" scrolling.
+  const interactive = canWrite && (tool.kind !== "select" || draggableMarks);
   const blockTouchScroll = interactive && fingerDraw && isMarking;
 
   // Placing anything needs the gesture to reach the page, so the form-field
@@ -503,8 +631,12 @@ export default function PageCanvas({
   const objectPointerEvents = isMarking && canWrite ? "none" : "auto";
 
   const textOwners = [
-    ...studentLayer.x.map((t) => ({ t, own: writeTarget === "student" })),
-    ...teacherLayer.x.map((t) => ({ t, own: writeTarget === "teacher" })),
+    ...shownStudentLayer.x.map((t) => ({ t, own: writeTarget === "student" })),
+    ...shownTeacherLayer.x.map((t) => ({ t, own: writeTarget === "teacher" })),
+  ];
+  const stampOwners = [
+    ...shownStudentLayer.e.map((t) => ({ t, own: writeTarget === "student" })),
+    ...shownTeacherLayer.e.map((t) => ({ t, own: writeTarget === "teacher" })),
   ];
   const comments = [
     ...studentLayer.c.map((k) => ({ k, own: writeTarget === "student", teacher: false })),
@@ -513,6 +645,7 @@ export default function PageCanvas({
 
   return (
     <div
+      ref={pageRef}
       className={cn("relative bg-white shadow-sm select-none", className)}
       onMouseMove={onHoverMove}
       onMouseLeave={() => setMarkHover(null)}
@@ -541,7 +674,7 @@ export default function PageCanvas({
           className="absolute inset-0"
           style={{
             touchAction: blockTouchScroll ? "none" : "auto",
-            cursor: tool.kind === "eraser" ? "cell" : isDrawTool ? "crosshair" : "copy",
+            cursor: tool.kind === "select" ? "default" : tool.kind === "eraser" ? "cell" : isDrawTool ? "crosshair" : "copy",
           }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -552,8 +685,18 @@ export default function PageCanvas({
         />
       )}
 
-      {/* Layer 2 — form fields */}
-      <div className="absolute inset-0" style={{ pointerEvents: fieldsEditable ? fieldPointerEvents : "none" }}>
+      {/* Layer 2 — form fields.
+          The overlay itself never takes the pointer; only the fields on it do.
+          As one full-page hit target it swallowed every press that missed a
+          field, which is fine while nothing below needs them and wrong the
+          moment something does — the select tool has to reach the ink. */}
+      <div
+        className={cn(
+          "absolute inset-0",
+          fieldsEditable && fieldPointerEvents === "auto" && "[&>*]:pointer-events-auto",
+        )}
+        style={{ pointerEvents: "none" }}
+      >
         {fields.map((f) => (
           <FieldControl
             key={f.id}
@@ -600,11 +743,20 @@ export default function PageCanvas({
             key={t.id}
             className="absolute"
             data-typeable={own ? "1" : undefined}
+            onPointerDown={(e) => {
+              if (editingText === t.id) return; // typing, not rearranging
+              if (beginMarkDrag({ kind: "text", id: t.id }, e)) e.stopPropagation();
+            }}
+            onPointerMove={moveMarkDrag}
+            onPointerUp={endMarkDrag}
+            onPointerCancel={endMarkDrag}
             style={{
               left: t.x * scale,
               top: t.y * scale,
               width: t.w * scale,
               pointerEvents: own ? objectPointerEvents : "none",
+              cursor: own && draggableMarks ? "grab" : undefined,
+              touchAction: own && draggableMarks ? "none" : undefined,
             }}
           >
             {own && editingText === t.id ? (
@@ -619,7 +771,7 @@ export default function PageCanvas({
               />
             ) : (
               <div
-                onClick={() => own && setEditingText(t.id)}
+                onClick={() => { if (own && !justDragged.current) setEditingText(t.id); }}
                 className={cn("whitespace-pre-wrap break-words", own && "cursor-text rounded hover:bg-mint/20/50")}
                 style={{ fontSize: t.s * scale, lineHeight: 1.25, color: t.c }}
               >
@@ -629,11 +781,24 @@ export default function PageCanvas({
           </div>
         ))}
 
-        {[...studentLayer.e, ...teacherLayer.e].map((s) => (
+        {stampOwners.map(({ t: s, own }) => (
           <div
             key={s.id}
             className="absolute -translate-x-1/2 -translate-y-1/2 leading-none"
-            style={{ left: s.x * scale, top: s.y * scale, fontSize: s.s * scale }}
+            onPointerDown={(e) => { if (beginMarkDrag({ kind: "stamp", id: s.id }, e)) e.stopPropagation(); }}
+            onPointerMove={moveMarkDrag}
+            onPointerUp={endMarkDrag}
+            onPointerCancel={endMarkDrag}
+            style={{
+              left: s.x * scale,
+              top: s.y * scale,
+              fontSize: s.s * scale,
+              // Only your own stamps take the pointer, and only when the select
+              // tool is up — otherwise they stay out of the way of drawing.
+              pointerEvents: own && draggableMarks ? "auto" : "none",
+              cursor: own && draggableMarks ? "grab" : undefined,
+              touchAction: own && draggableMarks ? "none" : undefined,
+            }}
           >
             {s.e}
           </div>
