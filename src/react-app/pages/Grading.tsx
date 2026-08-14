@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner";
 import { api, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
+import { useBackTo } from "../lib/useBackTo";
 import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
@@ -39,9 +40,28 @@ interface GradeRow {
 
 const LETTERS = ["A", "B", "C", "D", "F"];
 
+/** "Pages 4, 7-9" reads far better than "3 pages" when you're about to grade them. */
+export function formatPageNumbers(numbers?: number[]): string {
+  if (!numbers?.length) return "No pages";
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const runs: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    const n = sorted[i];
+    if (n !== prev + 1) {
+      runs.push(start === prev ? `${start}` : `${start}\u2013${prev}`);
+      start = n;
+    }
+    prev = n;
+  }
+  return `Page${sorted.length === 1 ? "" : "s"} ${runs.join(", ")}`;
+}
+
 export default function Grading() {
   const { assignmentId = "" } = useParams();
   const qc = useQueryClient();
+  const goBack = useBackTo("/assignments");
 
   const detail = useQuery({
     queryKey: ["assignment", assignmentId],
@@ -157,12 +177,14 @@ export default function Grading() {
   return (
     <div className="flex h-dvh flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
-        <Link to={`/classes/${assignment.classId}`} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
+        <button type="button" onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
-        </Link>
+        </button>
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{assignment.title}</div>
-          <div className="text-xs text-slate-500">Due {formatDue(assignment.dueAt)}</div>
+          <div className="truncate text-xs text-slate-500">
+            {formatPageNumbers(assignment.pageNumbers)} · Due {formatDue(assignment.dueAt)}
+          </div>
         </div>
 
         <div className="ml-auto flex items-center gap-2">

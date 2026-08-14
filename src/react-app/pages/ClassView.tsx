@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Copy, Plus, RefreshCw, Upload, UserX, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
+import { AssignmentCard } from "./TeacherAssignments";
 import { api, type AssignmentSummary } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime } from "../lib/utils";
 
@@ -220,7 +221,22 @@ export default function ClassView() {
   const id = classId ?? "";
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>("notebooks");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const [tab, setTabState] = useState<Tab>(
+    tabParam === "assignments" || tabParam === "roster" ? tabParam : "notebooks",
+  );
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", t);
+        return next;
+      },
+      { replace: true },
+    );
+  };
   const [inviteOpen, setInviteOpen] = useState(false);
   const [reviewingStudent, setReviewingStudent] = useState<BackfillStudent | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -456,7 +472,14 @@ export default function ClassView() {
           {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length === 0 && (
             <EmptyState title="No assignments yet" body="Create an assignment from a published notebook." />
           )}
-          {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length > 0 && (
+          {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length > 0 && isTeacher && (
+            <div className="space-y-3">
+              {assignmentsQ.data.assignments.map((a) => (
+                <AssignmentCard key={a.id} a={a} />
+              ))}
+            </div>
+          )}
+          {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length > 0 && !isTeacher && (
             <ul className="divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-white shadow-sm">
               {assignmentsQ.data.assignments.map((a) => (
                 <li key={a.id}>
@@ -479,15 +502,9 @@ export default function ClassView() {
                     >
                       {a.status}
                     </span>
-                    {isTeacher ? (
-                      <span className="shrink-0 text-xs text-slate-500">
-                        {a.submitted ?? 0}/{a.total ?? 0} submitted
-                      </span>
-                    ) : (
-                      <span className="shrink-0 text-xs text-slate-500">
-                        {a.complete ?? 0}/{a.pageCount} pages
-                      </span>
-                    )}
+                    <span className="shrink-0 text-xs text-slate-500">
+                      {a.complete ?? 0}/{a.pageCount} pages
+                    </span>
                   </Link>
                 </li>
               ))}

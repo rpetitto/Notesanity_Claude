@@ -61,7 +61,7 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
       const counts = await db
         .prepare(
           `SELECT
-             SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted,
+             SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS submitted,
              SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS returned,
              COUNT(*) AS total
            FROM submissions WHERE assignment_id = ?`,
@@ -167,16 +167,25 @@ app.patch("/api/assignments/:id", handler(async (c) => {
 app.get("/api/assignments/:id", handler(async (c) => {
   const { a, user, isTeacher } = await loadAssignment(c, param(c, "id"));
   const pageIds: string[] = JSON.parse(a.page_ids || "[]");
-  const pages = pageIds.length
-    ? (await db
-        .prepare(`SELECT id, seq, label FROM pages WHERE id IN (${pageIds.map(() => "?").join(",")}) ORDER BY seq`)
-        .bind(...pageIds)
-        .all()).results ?? []
-    : [];
+
+  // Resolve each assigned page to its position in the notebook, so the UI can
+  // say "pages 4, 7–9" rather than just a count.
+  const notebookPages = await db
+    .prepare(`SELECT id, seq, label FROM pages WHERE notebook_id = ? AND archived = 0 ORDER BY seq`)
+    .bind(a.notebook_id)
+    .all<{ id: string; seq: number; label: string }>();
+  const ordinal = new Map<string, number>();
+  (notebookPages.results ?? []).forEach((p, i) => ordinal.set(p.id, i + 1));
+
+  const pages = (notebookPages.results ?? [])
+    .filter((p) => pageIds.includes(p.id))
+    .map((p) => ({ ...p, number: ordinal.get(p.id) ?? 0 }));
+  const pageNumbers = pages.map((p) => p.number).filter((n) => n > 0);
 
   const base = {
     id: a.id, classId: a.class_id, notebookId: a.notebook_id, title: a.title,
-    instructions: a.instructions, pageIds, pages, releaseAt: a.release_at, dueAt: a.due_at,
+    instructions: a.instructions, pageIds, pages, pageNumbers,
+    releaseAt: a.release_at, dueAt: a.due_at,
     grading: a.grading, pointsMax: a.points_max, status: a.status,
   };
 
@@ -355,6 +364,69 @@ app.get("/api/classes/:id/gradebook", handler(async (c) => {
   });
 }));
 
+/**
+ * A student's own grades for one class. The teacher gradebook is a matrix of
+ * everyone; this is the single row that belongs to the caller, so students get a
+ * real grades view instead of a permission error.
+ */
+app.get("/api/classes/:id/my-grades", handler(async (c) => {
+  const classId = param(c, "id");
+  const { user } = await requireClassMember(c, classId);
+  const cls = await db.prepare(`SELECT name, accent_color FROM classes WHERE id = ?`).bind(classId).first<any>();
+
+  const rows = await db
+    .prepare(
+      `SELECT a.id, a.title, a.due_at, a.grading, a.points_max, a.notebook_id,
+              s.status, s.submitted_at, s.returned_at, s.grade_points, s.grade_letter,
+              s.grade_complete, s.feedback
+         FROM assignments a
+         LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = ?
+        WHERE a.class_id = ? AND a.status = 'active'
+          AND (a.release_at IS NULL OR a.release_at <= datetime('now'))
+        ORDER BY COALESCE(a.due_at, a.created_at)`,
+    )
+    .bind(user.id, classId)
+    .all<any>();
+
+  let earned = 0;
+  let possible = 0;
+  const assignments = (rows.results ?? []).map((r) => {
+    // Only returned work counts — a grade the teacher hasn't released yet must
+    // stay invisible to the student.
+    const released = !!r.returned_at;
+    if (released && r.grading === "points" && r.grade_points !== null) {
+      earned += r.grade_points;
+      possible += r.points_max;
+    }
+    return {
+      id: r.id,
+      title: r.title,
+      notebookId: r.notebook_id,
+      dueAt: r.due_at,
+      grading: r.grading,
+      pointsMax: r.points_max,
+      status: r.status ?? "not_started",
+      submittedAt: r.submitted_at,
+      returnedAt: r.returned_at,
+      grade: released
+        ? {
+            points: r.grade_points,
+            letter: r.grade_letter,
+            complete: r.grade_complete,
+            feedback: r.feedback ?? "",
+          }
+        : null,
+    };
+  });
+
+  return c.json({
+    className: cls?.name ?? "",
+    accentColor: cls?.accent_color ?? "#1A73E8",
+    assignments,
+    totals: possible > 0 ? { earned, possible, percent: Math.round((earned / possible) * 100) } : null,
+  });
+}));
+
 app.get("/api/classes/:id/gradebook.csv", handler(async (c) => {
   const classId = param(c, "id");
   await requireClassTeacher(c, classId);
@@ -434,7 +506,7 @@ app.get("/api/my/teaching", handler(async (c) => {
   for (const a of rows.results ?? []) {
     const counts = await db
       .prepare(
-        `SELECT SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted,
+        `SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS submitted,
                 SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS returned,
                 SUM(CASE WHEN graded_at IS NOT NULL THEN 1 ELSE 0 END) AS graded,
                 COUNT(*) AS total

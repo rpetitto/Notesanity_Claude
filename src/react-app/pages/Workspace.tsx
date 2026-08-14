@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Lock, Send } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronRight, Lock, PanelLeft, Send } from "lucide-react";
 import { toast } from "sonner";
-import { api, type WorkResponse } from "../lib/api";
+import { api, assetUrl, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { useSession } from "../lib/session";
+import { useBackTo } from "../lib/useBackTo";
 import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
+import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { ErrorNote, Spinner, FlingBadge } from "../components/Shell";
 import { cn, formatDue, isOverdue } from "../lib/utils";
 
 const FINGER_KEY = "notesanity:fingerDraw";
+const RAIL_KEY = "notesanity:studentRail";
 
 export default function Workspace() {
   const { notebookId = "" } = useParams();
@@ -21,6 +24,7 @@ export default function Workspace() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user } = useSession();
+  const goBack = useBackTo("/work");
 
   // A teacher has no student instance of their own notebook, so opening the
   // student workspace directly would dead-end. Send them to the editor instead.
@@ -66,6 +70,22 @@ export default function Workspace() {
   const [zoom, setZoom] = useState<ZoomMode>("page");
   const [visiblePage, setVisiblePage] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [railOpen, setRailOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(RAIL_KEY);
+      if (saved !== null) return saved === "1";
+    } catch { /* ignore */ }
+    return typeof window === "undefined" || window.innerWidth >= 640;
+  });
+  useEffect(() => {
+    try { localStorage.setItem(RAIL_KEY, railOpen ? "1" : "0"); } catch { /* ignore */ }
+  }, [railOpen]);
+
+  const goToPage = (id: string) => {
+    setVisiblePage(id);
+    scrollRef.current?.querySelector(`[data-page-id="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   // When opened from an assignment, show only the pages that assignment covers.
   const pages = useMemo(() => {
@@ -134,10 +154,21 @@ export default function Workspace() {
   return (
     <div className="flex h-dvh flex-col">
       <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
-        <Link to={user?.role === "teacher" ? `/classes/${data.notebook.classId}` : "/work"}
+        <button
+          type="button"
+          onClick={goBack}
           className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
-        </Link>
+        </button>
+        <button
+          type="button"
+          onClick={() => setRailOpen((v) => !v)}
+          className="hidden rounded-full p-2 text-slate-500 hover:bg-slate-100 sm:inline-flex"
+          aria-label={railOpen ? "Hide pages" : "Show pages"}
+          aria-pressed={railOpen}
+        >
+          <PanelLeft className="h-4 w-4" />
+        </button>
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{data.notebook.title}</div>
           <div className="truncate text-xs text-slate-500">
@@ -214,25 +245,65 @@ export default function Workspace() {
         />
       )}
 
-      <div className="min-h-0 flex-1">
-        <NotebookSurface
-          notebookId={notebookId}
-          pages={pages}
-          fields={data.fields}
-          studentLayers={work.studentLayers}
-          teacherLayers={work.teacherLayers}
-          fieldValues={work.fieldValues}
-          writeTarget={locked ? null : "student"}
-          tool={tool}
-          fingerDraw={fingerDraw}
-          zoom={zoom}
-          authorName={user?.name}
-          fieldsEditable={!locked}
-          onLayerChange={work.setLayer}
-          onFieldChange={work.setFieldValue}
-          onVisiblePageChange={setVisiblePage}
-          scrollRef={scrollRef}
-        />
+      <div className="relative flex min-h-0 flex-1">
+        {railOpen && (
+          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-2 py-3 sm:block">
+            <div className="flex flex-col gap-3">
+              {pages.map((page, i) => (
+                <button
+                  key={page.id}
+                  type="button"
+                  onClick={() => goToPage(page.id)}
+                  className={cn(
+                    "flex flex-col items-center gap-1 rounded-lg p-1.5 text-left transition-colors",
+                    visiblePage === page.id ? "bg-blue-50 ring-2 ring-blue-500" : "hover:bg-slate-100",
+                  )}
+                >
+                  <PageThumb
+                    pdfUrl={assetUrl(notebookId, page.asset_key)}
+                    sourceIndex={page.source_index}
+                    pageWidth={page.width}
+                    pageHeight={page.height}
+                    width={64}
+                  />
+                  <span className="w-full truncate text-center text-[11px] text-slate-600">
+                    {i + 1}{page.label ? ` · ${page.label}` : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </aside>
+        )}
+        {!railOpen && (
+          <button
+            type="button"
+            onClick={() => setRailOpen(true)}
+            className="absolute bottom-20 left-3 z-20 hidden items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:flex"
+            aria-label="Show pages"
+          >
+            <ChevronRight className="h-3.5 w-3.5" /> Pages
+          </button>
+        )}
+        <div className="min-w-0 flex-1">
+          <NotebookSurface
+            notebookId={notebookId}
+            pages={pages}
+            fields={data.fields}
+            studentLayers={work.studentLayers}
+            teacherLayers={work.teacherLayers}
+            fieldValues={work.fieldValues}
+            writeTarget={locked ? null : "student"}
+            tool={tool}
+            fingerDraw={fingerDraw}
+            zoom={zoom}
+            authorName={user?.name}
+            fieldsEditable={!locked}
+            onLayerChange={work.setLayer}
+            onFieldChange={work.setFieldValue}
+            onVisiblePageChange={setVisiblePage}
+            scrollRef={scrollRef}
+          />
+        </div>
       </div>
       <FlingBadge />
     </div>

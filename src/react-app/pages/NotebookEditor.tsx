@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
-  FolderPlus, ListChecks, Pencil, Plus, RotateCcw, Send, Trash2, Type as TypeIcon, X,
+  FolderPlus, ListChecks, Plus, RotateCcw, Send, Trash2, Type as TypeIcon, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, type FieldRec, type PageRec } from "../lib/api";
 import { readPageSizes } from "../lib/pdf";
 import { convertToPdf, needsConversion } from "../lib/google";
 import PageCanvas from "../components/PageCanvas";
-import PageThumb from "../components/PageThumb";
+import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
 import { emptyLayer } from "../lib/ink";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
+import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue } from "../lib/utils";
 
 type FieldTool = "none" | "text" | "checkbox" | "choice";
@@ -51,6 +52,7 @@ export default function NotebookEditor() {
   const { notebookId = "" } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const goBack = useBackTo("/classes");
 
   const query = useQuery({
     queryKey: ["notebook", notebookId],
@@ -68,8 +70,15 @@ export default function NotebookEditor() {
   const [tool, setTool] = useState<FieldTool>("none");
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [sidePanel, setSidePanel] = useState<"pages" | "assignments">("pages");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sidePanel = (searchParams.get("panel") === "assignments" ? "assignments" : "pages") as
+    | "pages"
+    | "assignments";
+  const setSidePanel = (tab: "pages" | "assignments") => {
+    const next = new URLSearchParams(searchParams);
+    next.set("panel", tab);
+    setSearchParams(next, { replace: true });
+  };
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -94,18 +103,15 @@ export default function NotebookEditor() {
     [query.data?.fields, page],
   );
 
-  // Pages in list order, bucketed by group. Ungrouped pages keep their position
-  // under an unnamed bucket so the list always mirrors the notebook's order.
-  const groups = useMemo(() => {
-    const out: { name: string; pages: EditorPage[] }[] = [];
-    for (const p of allPages) {
-      const name = p.group_name ?? "";
-      const last = out[out.length - 1];
-      if (last && last.name === name) last.pages.push(p);
-      else out.push({ name, pages: [p] });
+  // How many assignments reference each page — surfaced as a badge on the
+  // thumbnail, since a page can legitimately be assigned more than once.
+  const assignmentCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const a of assignmentsQuery.data?.assignments ?? []) {
+      for (const pid of a.pageIds ?? []) counts[pid] = (counts[pid] ?? 0) + 1;
     }
-    return out;
-  }, [allPages]);
+    return counts;
+  }, [assignmentsQuery.data]);
 
   const scale = useMemo(() => {
     if (!page) return 1;
@@ -144,6 +150,27 @@ export default function NotebookEditor() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const arrangePages = useMutation({
+    mutationFn: (entries: ArrangeEntry[]) =>
+      api.post(`/api/notebooks/${notebookId}/pages/arrange`, { pages: entries }),
+    onSuccess: () => invalidate(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deletePages = useMutation({
+    mutationFn: (pageIds: string[]) =>
+      pageIds.length === 1
+        ? api.del(`/api/notebooks/${notebookId}/pages/${pageIds[0]}`)
+        : api.post(`/api/notebooks/${notebookId}/pages/bulk`, { pageIds, action: "delete" }),
+    onSuccess: () => {
+      invalidate();
+      setSelection(new Set());
+      setPageIdx(0);
+      toast.success("Page deleted");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const publish = useMutation({
     mutationFn: () => api.post<{ provisioned: number; summary: any }>(`/api/notebooks/${notebookId}/publish`),
     onSuccess: (res) => {
@@ -157,6 +184,23 @@ export default function NotebookEditor() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  /** Deleting destroys student work, so spell out the consequence first. */
+  const confirmDelete = (pageIds: string[]) => {
+    const assigned = pageIds.filter((id) => (assignmentCounts[id] ?? 0) > 0).length;
+    const lines = [
+      pageIds.length === 1
+        ? "Delete this page permanently?"
+        : `Delete ${pageIds.length} pages permanently?`,
+      "",
+      "Every student's writing on it will be deleted too. This can't be undone.",
+    ];
+    if (assigned > 0) {
+      lines.push("", `${assigned} of them ${assigned === 1 ? "is" : "are"} part of an assignment and will be removed from it.`);
+    }
+    lines.push("", "To hide a page from students but keep their work, use Archive instead.");
+    if (window.confirm(lines.join("\n"))) deletePages.mutate(pageIds);
+  };
 
   const addPages = async (file: File) => {
     try {
@@ -179,26 +223,6 @@ export default function NotebookEditor() {
     } finally {
       setBusyMessage("");
     }
-  };
-
-  const toggleSelect = (id: string, shiftKey: boolean) => {
-    setSelection((prev) => {
-      const next = new Set(prev);
-      if (shiftKey && prev.size > 0) {
-        // Range-select from the last selected page through this one.
-        const order = allPages.map((p) => p.id);
-        const lastId = Array.from(prev)[prev.size - 1];
-        const a = order.indexOf(lastId);
-        const b = order.indexOf(id);
-        if (a >= 0 && b >= 0) {
-          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(order[i]);
-          return next;
-        }
-      }
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   };
 
   const createAssignmentFromSelection = () => {
@@ -233,9 +257,9 @@ export default function NotebookEditor() {
   return (
     <div className="flex h-dvh flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
-        <Link to={`/classes/${notebook.classId}`} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
+        <button type="button" onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
-        </Link>
+        </button>
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{notebook.title}</div>
           <div className="text-xs text-slate-500">
@@ -335,101 +359,26 @@ export default function NotebookEditor() {
           </div>
 
           {sidePanel === "pages" ? (
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {groups.map((group, gi) => (
-                <div key={`${group.name}-${gi}`} className="mb-2">
-                  {group.name && (
-                    <div className="mb-1 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      <FolderPlus className="h-3 w-3" />
-                      <span className="truncate">{group.name}</span>
-                      <span className="text-slate-400">({group.pages.length})</span>
-                    </div>
-                  )}
-                  {group.pages.map((p) => {
-                    const globalIdx = allPages.findIndex((x) => x.id === p.id);
-                    const liveIndex = livePages.findIndex((lp) => lp.id === p.id);
-                    const isSelected = selection.has(p.id);
-                    const isCurrent = page?.id === p.id;
-                    return (
-                      <div
-                        key={p.id}
-                        onClick={(e) => {
-                          if (e.metaKey || e.ctrlKey || e.shiftKey) toggleSelect(p.id, e.shiftKey);
-                          else if (!p.archived && liveIndex >= 0) setPageIdx(liveIndex);
-                        }}
-                        className={cn(
-                          "group mb-1 flex cursor-pointer items-start gap-2 rounded-lg p-1.5 transition-colors",
-                          isCurrent && "bg-blue-50 ring-1 ring-blue-200",
-                          isSelected && "bg-blue-100/60",
-                          !isCurrent && !isSelected && "hover:bg-slate-50",
-                          p.archived && "opacity-50",
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => {
-                            const native = e.nativeEvent as unknown as { shiftKey?: boolean };
-                            toggleSelect(p.id, !!native.shiftKey);
-                          }}
-                          className="mt-6 h-4 w-4 shrink-0 accent-blue-600"
-                          aria-label={`Select page ${globalIdx + 1}`}
-                        />
-                        <PageThumb
-                          pdfUrl={assetUrl(notebookId, p.asset_key)}
-                          sourceIndex={p.source_index}
-                          pageWidth={p.width}
-                          pageHeight={p.height}
-                          width={56}
-                          dimmed={!!p.archived}
-                        />
-                        <div className="min-w-0 flex-1 pt-1">
-                          {renaming === p.id ? (
-                            <input
-                              autoFocus
-                              defaultValue={p.label}
-                              placeholder={`Page ${globalIdx + 1}`}
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                patchPage.mutate({ id: p.id, label: e.target.value.trim() });
-                                setRenaming(null);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                                if (e.key === "Escape") setRenaming(null);
-                              }}
-                              className="w-full rounded border border-blue-400 px-1 py-0.5 text-xs outline-none"
-                            />
-                          ) : (
-                            <div className="truncate text-xs font-medium text-slate-700">
-                              {p.label || `Page ${globalIdx + 1}`}
-                            </div>
-                          )}
-                          <div className="mt-0.5 text-[10px] text-slate-400">#{globalIdx + 1}</div>
-                          <div className="mt-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                            <button
-                              title="Rename page"
-                              onClick={(e) => { e.stopPropagation(); setRenaming(p.id); }}
-                              className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </button>
-                            <button
-                              title={p.archived ? "Restore page" : "Archive page (student work is kept)"}
-                              onClick={(e) => { e.stopPropagation(); patchPage.mutate({ id: p.id, archived: !p.archived }); }}
-                              className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
-                            >
-                              {p.archived ? <RotateCcw className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
+            <NotebookPageList
+              notebookId={notebookId}
+              pages={allPages}
+              assignmentCounts={assignmentCounts}
+              currentPageId={page?.id}
+              selection={selection}
+              onSelectionChange={setSelection}
+              onOpenPage={(id) => {
+                const i = livePages.findIndex((lp) => lp.id === id);
+                if (i >= 0) setPageIdx(i);
+              }}
+              onRename={(id, label) => patchPage.mutate({ id, label })}
+              onArchiveToggle={(id, archived) => patchPage.mutate({ id, archived })}
+              onDelete={(id) => confirmDelete([id])}
+              onArrange={(entries) => arrangePages.mutate(entries)}
+              onRenameGroup={(from, to) => {
+                const ids = allPages.filter((p) => (p.group_name ?? "") === from).map((p) => p.id);
+                if (ids.length) bulkPages.mutate({ pageIds: ids, action: "group", groupName: to });
+              }}
+            />
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               {assignments.length === 0 ? (
@@ -556,9 +505,17 @@ export default function NotebookEditor() {
               </button>
               <button
                 onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "archive" })}
+                title="Hide from students but keep their work"
                 className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50"
               >
                 <EyeOff className="h-3.5 w-3.5" /> Archive
+              </button>
+              <button
+                onClick={() => confirmDelete(Array.from(selection))}
+                title="Delete permanently, including student work"
+                className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 px-3 py-1.5 text-xs text-rose-700 hover:bg-rose-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Delete
               </button>
               <button
                 onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "restore" })}

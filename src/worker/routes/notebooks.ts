@@ -208,10 +208,15 @@ app.post("/api/notebooks/:id/pages/bulk", handler(async (c) => {
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
   const { pageIds, action, groupName } = await c.req.json<{
     pageIds: string[];
-    action: "group" | "ungroup" | "archive" | "restore";
+    action: "group" | "ungroup" | "archive" | "restore" | "delete";
     groupName?: string;
   }>();
   if (!Array.isArray(pageIds) || pageIds.length === 0) throw new HttpError(400, "No pages selected");
+
+  if (action === "delete") {
+    const result = await deletePages(nb.id, pageIds);
+    return c.json({ ok: true, updated: pageIds.length, ...result });
+  }
 
   for (const pid of pageIds) {
     const owned = await db
@@ -239,6 +244,99 @@ app.post("/api/notebooks/:id/pages/bulk", handler(async (c) => {
   return c.json({ ok: true, updated: pageIds.length });
 }));
 
+/**
+ * Permanently delete pages.
+ *
+ * This is the destructive counterpart to archiving. Archiving hides a page but
+ * keeps every stroke a student ever put on it, so it can come back intact;
+ * deleting removes the page, its fields, and all student work on it, and drops
+ * the page from any assignment that referenced it. There is no undo, so the
+ * response reports what it touched for an honest confirmation message.
+ */
+async function deletePages(notebookId: string, pageIds: string[]) {
+  let removedFromAssignments = 0;
+  for (const pid of pageIds) {
+    const owned = await db
+      .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
+      .bind(pid, notebookId)
+      .first();
+    if (!owned) continue;
+
+    // Student answers hang off fields, so they go before the fields themselves.
+    await db
+      .prepare(`DELETE FROM field_values WHERE field_id IN (SELECT id FROM fields WHERE page_id = ?)`)
+      .bind(pid)
+      .run();
+    await db.prepare(`DELETE FROM fields WHERE page_id = ?`).bind(pid).run();
+    await db.prepare(`DELETE FROM layers WHERE page_id = ?`).bind(pid).run();
+    await db.prepare(`DELETE FROM pages WHERE id = ?`).bind(pid).run();
+
+    // Drop the page from any assignment scope that referenced it.
+    const affected = await db
+      .prepare(`SELECT id, page_ids FROM assignments WHERE notebook_id = ? AND page_ids LIKE ?`)
+      .bind(notebookId, `%"${pid}"%`)
+      .all<{ id: string; page_ids: string }>();
+    for (const a of affected.results ?? []) {
+      const remaining = (JSON.parse(a.page_ids || "[]") as string[]).filter((x) => x !== pid);
+      await db
+        .prepare(`UPDATE assignments SET page_ids = ?, updated_at = ? WHERE id = ?`)
+        .bind(JSON.stringify(remaining), now(), a.id)
+        .run();
+      removedFromAssignments++;
+    }
+  }
+
+  const count = await db
+    .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 0`)
+    .bind(notebookId)
+    .first<{ n: number }>();
+  await db
+    .prepare(`UPDATE notebooks SET page_count = ?, updated_at = ? WHERE id = ?`)
+    .bind(count?.n ?? 0, now(), notebookId)
+    .run();
+
+  return { removedFromAssignments };
+}
+
+app.delete("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const result = await deletePages(nb.id, [param(c, "pageId")]);
+  return c.json({ ok: true, ...result });
+}));
+
+/**
+ * Set explicit order and group for a run of pages in one call — the commit for
+ * drag-and-drop. Sequence numbers are rewritten from the given order, so a page
+ * dragged into a section lands exactly where it was dropped.
+ */
+app.post("/api/notebooks/:id/pages/arrange", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { pages } = await c.req.json<{ pages: { id: string; groupName?: string }[] }>();
+  if (!Array.isArray(pages) || pages.length === 0) throw new HttpError(400, "No pages to arrange");
+
+  let seq = 1;
+  for (const p of pages) {
+    const owned = await db
+      .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
+      .bind(p.id, nb.id)
+      .first();
+    if (!owned) continue;
+    if (p.groupName === undefined) {
+      await db.prepare(`UPDATE pages SET seq = ? WHERE id = ?`).bind(seq, p.id).run();
+    } else {
+      await db
+        .prepare(`UPDATE pages SET seq = ?, group_name = ? WHERE id = ?`)
+        .bind(seq, p.groupName, p.id)
+        .run();
+    }
+    seq++;
+  }
+  await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
+  return c.json({ ok: true, arranged: pages.length });
+}));
+
 /** Assignments that draw on this notebook, shown alongside its pages. */
 app.get("/api/notebooks/:id/assignments", handler(async (c) => {
   const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
@@ -258,7 +356,7 @@ app.get("/api/notebooks/:id/assignments", handler(async (c) => {
     const counts = isTeacher
       ? await db
           .prepare(
-            `SELECT SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted,
+            `SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS submitted,
                     SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS returned,
                     COUNT(*) AS total
                FROM submissions WHERE assignment_id = ?`,
