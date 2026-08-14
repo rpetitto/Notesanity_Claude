@@ -7,6 +7,11 @@ import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue } from "../lib/utils";
 
+/** Page chrome when standalone; nothing when embedded inside the class tabs. */
+function Frame({ embedded, wide, children }: { embedded?: boolean; wide?: boolean; children: React.ReactNode }) {
+  return embedded ? <>{children}</> : <Shell wide={wide}>{children}</Shell>;
+}
+
 interface GbAssignment {
   id: string;
   title: string;
@@ -95,7 +100,7 @@ function gradeText(a: MyGradeAssignment): string {
   return "—";
 }
 
-function StudentGrades({ classId }: { classId: string }) {
+function StudentGrades({ classId, embedded }: { classId: string; embedded?: boolean }) {
   const goBack = useBackTo("/work");
   const { data, isLoading, error } = useQuery({
     queryKey: ["my-grades", classId],
@@ -104,9 +109,8 @@ function StudentGrades({ classId }: { classId: string }) {
   });
 
   return (
-    <Shell>
-      <button
-        onClick={goBack}
+    <Frame embedded={embedded}>
+      <button hidden={embedded} onClick={goBack}
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
         <ArrowLeft className="h-4 w-4" /> Back
@@ -169,13 +173,13 @@ function StudentGrades({ classId }: { classId: string }) {
           )}
         </>
       )}
-    </Shell>
+    </Frame>
   );
 }
 
 // ---------- teacher matrix view ----------
 
-function TeacherGradebook({ classId }: { classId: string }) {
+function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: boolean }) {
   const goBack = useBackTo("/classes");
   const { data, isLoading, error } = useQuery({
     queryKey: ["gradebook", classId],
@@ -184,10 +188,10 @@ function TeacherGradebook({ classId }: { classId: string }) {
   });
 
   return (
-    <Shell wide>
+    <Frame embedded={embedded} wide>
       <div className="mb-6 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <button onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
+          <button hidden={embedded} onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
             <ArrowLeft className="h-4 w-4" />
           </button>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Gradebook</h1>
@@ -248,16 +252,23 @@ function TeacherGradebook({ classId }: { classId: string }) {
           )}
         </div>
       )}
-    </Shell>
+    </Frame>
   );
 }
 
-export default function Gradebook() {
-  const { classId } = useParams<{ classId: string }>();
-  const id = classId ?? "";
+/**
+ * Rendered two ways: as its own route, and inline as a tab inside ClassView.
+ * `embedded` drops the page chrome (Shell + back button) so it sits inside the
+ * class tabs without a second header.
+ */
+export default function Gradebook({ embedded, classId: classIdProp }: { embedded?: boolean; classId?: string } = {}) {
+  const params = useParams<{ classId: string }>();
+  const id = classIdProp ?? params.classId ?? "";
   const { user, isLoading } = useSession();
 
   if (isLoading) return <Spinner label="Loading…" />;
 
-  return user?.role === "student" ? <StudentGrades classId={id} /> : <TeacherGradebook classId={id} />;
+  return user?.role === "student"
+    ? <StudentGrades classId={id} embedded={embedded} />
+    : <TeacherGradebook classId={id} embedded={embedded} />;
 }

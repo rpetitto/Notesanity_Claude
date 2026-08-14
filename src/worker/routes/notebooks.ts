@@ -92,6 +92,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
     notebook: {
       id: nb.id, classId: nb.class_id, title: nb.title, status: nb.status,
       pageCount: nb.page_count, assetKey: nb.asset_key, lastPublishedAt: nb.last_published_at,
+      accentColor: nb.accent_color ?? "#1A73E8", hasCover: !!nb.cover_key,
     },
     pages: pages.results ?? [],
     fields: fields.results ?? [],
@@ -452,12 +453,55 @@ app.delete("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
 app.patch("/api/notebooks/:id", handler(async (c) => {
   const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
-  const { title } = await c.req.json<{ title?: string }>();
+  const b = await c.req.json<{ title?: string; accentColor?: string; clearCover?: boolean }>();
+  if (b.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(b.accentColor)) throw new HttpError(400, "Invalid colour");
   await db
-    .prepare(`UPDATE notebooks SET title = ?, updated_at = ? WHERE id = ?`)
-    .bind(title?.trim() || nb.title, now(), nb.id)
+    .prepare(`UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, updated_at = ? WHERE id = ?`)
+    .bind(
+      b.title?.trim() || nb.title,
+      b.accentColor ?? nb.accent_color ?? "#1A73E8",
+      b.clearCover ? null : nb.cover_key,
+      now(),
+      nb.id,
+    )
     .run();
   return c.json({ ok: true });
+}));
+
+const MAX_COVER_BYTES = 4 * 1024 * 1024;
+
+/** Upload a cover image for the notebook tile. */
+app.post("/api/notebooks/:id/cover", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const form = await c.req.parseBody();
+  const file = form["file"] as File | undefined;
+  if (!file) throw new HttpError(400, "No image uploaded");
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+    throw new HttpError(400, "Cover must be a PNG, JPEG, WebP or GIF image");
+  }
+  if (file.size > MAX_COVER_BYTES) throw new HttpError(413, "Cover images are limited to 4MB");
+
+  const key = `notebooks/${nb.id}/cover-${uid()}`;
+  await storage.put(key, await file.arrayBuffer(), { contentType: file.type });
+  await db
+    .prepare(`UPDATE notebooks SET cover_key = ?, updated_at = ? WHERE id = ?`)
+    .bind(key, now(), nb.id)
+    .run();
+  return c.json({ ok: true, coverKey: key });
+}));
+
+app.get("/api/notebooks/:id/cover", handler(async (c) => {
+  const { nb } = await notebookAccess(c, param(c, "id"));
+  if (!nb.cover_key) throw new HttpError(404, "No cover set");
+  const obj = await storage.get(nb.cover_key);
+  if (!obj) throw new HttpError(404, "Cover not found");
+  return new Response(await obj.arrayBuffer(), {
+    headers: {
+      "Content-Type": obj.contentType ?? "image/png",
+      "Cache-Control": "private, max-age=3600",
+    },
+  });
 }));
 
 /**
@@ -519,7 +563,8 @@ app.get("/api/my/notebooks", handler(async (c) => {
   const user = await requireUser(c);
   const rows = await db
     .prepare(
-      `SELECT n.id, n.title, n.page_count, n.updated_at, c.id AS class_id, c.name AS class_name, c.accent_color
+      `SELECT n.id, n.title, n.page_count, n.updated_at, n.accent_color AS notebook_color,
+              n.cover_key, c.id AS class_id, c.name AS class_name, c.accent_color
          FROM notebooks n
          JOIN classes c ON c.id = n.class_id
          JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active'

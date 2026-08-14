@@ -164,19 +164,44 @@ app.get("/api/classes/:id", handler(async (c) => {
     .prepare(
       `SELECT u.id, u.email, u.name, u.picture, e.role, e.status, e.backfill_pending, e.created_at AS joined_at
          FROM enrollments e JOIN users u ON u.id = e.user_id
-        WHERE e.class_id = ? AND e.status = 'active'
+        WHERE e.class_id = ? AND e.status = 'active' AND e.role = 'student'
         ORDER BY u.name`,
     )
     .bind(classId)
     .all();
   const notebooks = await db
-    .prepare(`SELECT id, title, status, page_count, updated_at FROM notebooks WHERE class_id = ? ORDER BY created_at DESC`)
+    .prepare(
+      `SELECT n.id, n.title, n.status, n.page_count, n.updated_at,
+              n.accent_color, n.cover_key IS NOT NULL AS has_cover,
+              p.id AS first_page_id, p.asset_key AS first_asset_key,
+              p.source_index AS first_source_index, p.width AS first_width, p.height AS first_height
+         FROM notebooks n
+         LEFT JOIN pages p ON p.id = (
+           SELECT id FROM pages WHERE notebook_id = n.id AND archived = 0 ORDER BY seq LIMIT 1
+         )
+        WHERE n.class_id = ? ORDER BY n.created_at DESC`,
+    )
     .bind(classId)
+    .all();
+
+  const teachers = await db
+    .prepare(
+      `SELECT u.id, u.email, u.name, u.picture,
+              CASE WHEN u.id = ? THEN 1 ELSE 0 END AS is_owner
+         FROM users u
+        WHERE u.id = ?
+        UNION
+       SELECT u.id, u.email, u.name, u.picture, 0 AS is_owner
+         FROM enrollments e JOIN users u ON u.id = e.user_id
+        WHERE e.class_id = ? AND e.role = 'teacher' AND e.status = 'active'`,
+    )
+    .bind(cls.owner_id, cls.owner_id, classId)
     .all();
   return c.json({
     class: { ...cls, joinCode: isTeacher ? cls.join_code : undefined },
     myRole: isTeacher ? "teacher" : "student",
     roster: isTeacher ? roster.results ?? [] : [],
+    teachers: teachers.results ?? [],
     notebooks: notebooks.results ?? [],
     me: { id: user.id },
   });
@@ -268,6 +293,117 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
     }
   }
   return c.json({ added });
+}));
+
+/**
+ * Add co-teachers by email. A co-teacher gets the same rights over the class as
+ * the owner — building notebooks, grading, managing the roster — but the owner
+ * can't be removed, so a class always has someone responsible for it.
+ */
+app.post("/api/classes/:id/teachers", handler(async (c) => {
+  const classId = param(c, "id");
+  const teacher = await requireClassTeacher(c, classId);
+  const { emails } = await c.req.json<{ emails: string[] }>();
+  const added: string[] = [];
+  const skipped: { email: string; reason: string }[] = [];
+
+  for (const raw of emails ?? []) {
+    const email = raw.trim().toLowerCase();
+    if (!email.includes("@")) continue;
+
+    let person = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first<any>();
+    if (!person) {
+      // Pre-create so they're a co-teacher the moment they first sign in.
+      const pid = uid();
+      await db
+        .prepare(`INSERT INTO users (id, org_id, email, name, role, is_admin, created_at) VALUES (?, ?, ?, ?, 'teacher', 0, ?)`)
+        .bind(pid, teacher.org_id, email, email, now())
+        .run();
+      person = { id: pid, role: "teacher" };
+    } else if (person.role === "student") {
+      skipped.push({ email, reason: "That account is a student — an admin can change their role in Settings." });
+      continue;
+    }
+
+    const cls = await db.prepare(`SELECT owner_id FROM classes WHERE id = ?`).bind(classId).first<any>();
+    if (cls?.owner_id === person.id) { skipped.push({ email, reason: "Already the class owner" }); continue; }
+
+    const existing = await db
+      .prepare(`SELECT id, role FROM enrollments WHERE class_id = ? AND user_id = ?`)
+      .bind(classId, person.id)
+      .first<any>();
+    if (existing) {
+      await db
+        .prepare(`UPDATE enrollments SET role = 'teacher', status = 'active' WHERE id = ?`)
+        .bind(existing.id)
+        .run();
+    } else {
+      await db
+        .prepare(`INSERT INTO enrollments (id, class_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'teacher', 'active', ?)`)
+        .bind(uid(), classId, person.id, now())
+        .run();
+    }
+    added.push(email);
+  }
+  return c.json({ added: added.length, skipped });
+}));
+
+app.delete("/api/classes/:id/teachers/:userId", handler(async (c) => {
+  const classId = param(c, "id");
+  await requireClassTeacher(c, classId);
+  const userId = param(c, "userId");
+  const cls = await db.prepare(`SELECT owner_id FROM classes WHERE id = ?`).bind(classId).first<any>();
+  if (cls?.owner_id === userId) throw new HttpError(400, "The class owner can't be removed");
+  await db
+    .prepare(`UPDATE enrollments SET status = 'removed' WHERE class_id = ? AND user_id = ? AND role = 'teacher'`)
+    .bind(classId, userId)
+    .run();
+  return c.json({ ok: true });
+}));
+
+/**
+ * One student's notebooks in this class, for a teacher browsing their work
+ * outside of any particular assignment.
+ */
+app.get("/api/classes/:id/students/:studentId/notebooks", handler(async (c) => {
+  const classId = param(c, "id");
+  await requireClassTeacher(c, classId);
+  const studentId = param(c, "studentId");
+
+  const student = await db
+    .prepare(
+      `SELECT u.id, u.name, u.email, u.picture FROM users u
+         JOIN enrollments e ON e.user_id = u.id
+        WHERE u.id = ? AND e.class_id = ? AND e.status = 'active'`,
+    )
+    .bind(studentId, classId)
+    .first();
+  if (!student) throw new HttpError(404, "That student isn't in this class");
+
+  const notebooks = await db
+    .prepare(
+      `SELECT n.id, n.title, n.page_count, n.updated_at, n.accent_color,
+              n.cover_key IS NOT NULL AS has_cover,
+              p.asset_key AS first_asset_key, p.source_index AS first_source_index,
+              p.width AS first_width, p.height AS first_height,
+              (SELECT COUNT(DISTINCT l.page_id) FROM layers l
+                 JOIN instances i ON i.id = l.instance_id
+                WHERE i.notebook_id = n.id AND i.student_id = ?
+                  AND l.kind = 'student' AND LENGTH(l.data) > 24) AS pages_worked,
+              (SELECT MAX(l.updated_at) FROM layers l
+                 JOIN instances i ON i.id = l.instance_id
+                WHERE i.notebook_id = n.id AND i.student_id = ? AND l.kind = 'student') AS last_worked_at
+         FROM notebooks n
+         LEFT JOIN pages p ON p.id = (
+           SELECT id FROM pages WHERE notebook_id = n.id AND archived = 0 ORDER BY seq LIMIT 1
+         )
+        WHERE n.class_id = ? AND n.status = 'published'
+        ORDER BY n.created_at DESC`,
+    )
+    .bind(studentId, studentId, classId)
+    .all();
+
+  return c.json({ student, notebooks: notebooks.results ?? [] });
 }));
 
 app.delete("/api/classes/:id/students/:userId", handler(async (c) => {

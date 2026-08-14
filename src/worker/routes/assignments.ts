@@ -163,6 +163,74 @@ app.patch("/api/assignments/:id", handler(async (c) => {
   return c.json({ ok: true });
 }));
 
+/**
+ * What an edit or deletion would actually disturb.
+ *
+ * Editing an assignment is safe for student *work* — that lives on the notebook
+ * instance and is anchored to page UUIDs — but narrowing the page scope hides
+ * pages a student may already have filled in, and changing the grading scheme
+ * strands grades recorded under the old one. The UI asks for this before showing
+ * a confirmation so the warning names real numbers rather than hypotheticals.
+ */
+app.get("/api/assignments/:id/impact", handler(async (c) => {
+  const { a, isTeacher } = await loadAssignment(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const counts = await db
+    .prepare(
+      `SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS submitted,
+              SUM(CASE WHEN graded_at IS NOT NULL THEN 1 ELSE 0 END) AS graded,
+              SUM(CASE WHEN returned_at IS NOT NULL THEN 1 ELSE 0 END) AS returned,
+              COUNT(*) AS total
+         FROM submissions WHERE assignment_id = ?`,
+    )
+    .bind(a.id)
+    .first<any>();
+
+  // Students who have put something on the assigned pages, submitted or not.
+  const pageIds: string[] = JSON.parse(a.page_ids || "[]");
+  let started = 0;
+  if (pageIds.length) {
+    const placeholders = pageIds.map(() => "?").join(",");
+    const row = await db
+      .prepare(
+        `SELECT COUNT(DISTINCT i.student_id) AS n
+           FROM layers l JOIN instances i ON i.id = l.instance_id
+          WHERE i.notebook_id = ? AND l.kind = 'student'
+            AND LENGTH(l.data) > ${HAS_CONTENT} AND l.page_id IN (${placeholders})`,
+      )
+      .bind(a.notebook_id, ...pageIds)
+      .first<{ n: number }>();
+    started = row?.n ?? 0;
+  }
+
+  return c.json({
+    submitted: counts?.submitted ?? 0,
+    graded: counts?.graded ?? 0,
+    returned: counts?.returned ?? 0,
+    total: counts?.total ?? 0,
+    started,
+    grading: a.grading,
+    status: a.status,
+  });
+}));
+
+/**
+ * Delete an assignment. Submissions and grades go with it; the pages and every
+ * stroke students drew on them stay, because those belong to the notebook rather
+ * than to the assignment.
+ */
+app.delete("/api/assignments/:id", handler(async (c) => {
+  const { a, isTeacher } = await loadAssignment(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const counts = await db
+    .prepare(`SELECT COUNT(*) AS n FROM submissions WHERE assignment_id = ?`)
+    .bind(a.id)
+    .first<{ n: number }>();
+  await db.prepare(`DELETE FROM submissions WHERE assignment_id = ?`).bind(a.id).run();
+  await db.prepare(`DELETE FROM assignments WHERE id = ?`).bind(a.id).run();
+  return c.json({ ok: true, deletedSubmissions: counts?.n ?? 0 });
+}));
+
 /** Assignment detail: the teacher status grid, or the student's own progress. */
 app.get("/api/assignments/:id", handler(async (c) => {
   const { a, user, isTeacher } = await loadAssignment(c, param(c, "id"));

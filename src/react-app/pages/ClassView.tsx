@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Copy, Plus, RefreshCw, Upload, UserX, X } from "lucide-react";
+import {
+  BookOpen, ClipboardList, Copy, Eye, GraduationCap, Plus, RefreshCw, Upload, UserPlus, UserX, Users, X,
+} from "lucide-react";
 import { toast } from "sonner";
+import Gradebook from "./Gradebook";
+import PageThumb from "../components/PageThumb";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import { AssignmentCard } from "./TeacherAssignments";
-import { api, type AssignmentSummary } from "../lib/api";
+import { api, assetUrl, type AssignmentSummary } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime } from "../lib/utils";
 
 interface ClassDetail {
@@ -38,12 +42,27 @@ interface ClassNotebook {
   status: "draft" | "published";
   page_count: number;
   updated_at: string;
+  accent_color?: string;
+  has_cover?: number;
+  first_asset_key?: string | null;
+  first_source_index?: number | null;
+  first_width?: number | null;
+  first_height?: number | null;
+}
+
+interface TeacherRow {
+  id: string;
+  name: string;
+  email: string;
+  picture: string | null;
+  is_owner: number;
 }
 
 interface ClassResponse {
   class: ClassDetail;
   myRole: "teacher" | "student";
   roster: RosterRow[];
+  teachers: TeacherRow[];
   notebooks: ClassNotebook[];
   me: { id: string };
 }
@@ -69,7 +88,14 @@ interface BackfillResponse {
   assignments: BackfillAssignment[];
 }
 
-type Tab = "notebooks" | "assignments" | "roster";
+type Tab = "notebooks" | "assignments" | "roster" | "gradebook";
+
+const TABS: { key: Tab; label: string; studentLabel?: string; icon: typeof BookOpen }[] = [
+  { key: "notebooks", label: "Notebooks", icon: BookOpen },
+  { key: "assignments", label: "Assignments", icon: ClipboardList },
+  { key: "roster", label: "Roster", icon: Users },
+  { key: "gradebook", label: "Gradebook", studentLabel: "Grades", icon: GraduationCap },
+];
 
 function useEscapeClose(onClose: () => void) {
   useEffect(() => {
@@ -216,6 +242,64 @@ function InviteModal({ classId, onClose }: { classId: string; onClose: () => voi
   );
 }
 
+/** Co-teachers get full control of the class, so the copy says so plainly. */
+function CoTeacherModal({ classId, onClose }: { classId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [text, setText] = useState("");
+  useEscapeClose(onClose);
+
+  const add = useMutation({
+    mutationFn: () =>
+      api.post<{ added: number; skipped: { email: string; reason: string }[] }>(
+        `/api/classes/${classId}/teachers`,
+        { emails: text.split(/[\s,;]+/).map((e) => e.trim()).filter(Boolean) },
+      ),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["class", classId] });
+      if (res.added > 0) toast.success(`Added ${res.added} co-teacher${res.added === 1 ? "" : "s"}`);
+      for (const s of res.skipped ?? []) toast.error(`${s.email}: ${s.reason}`);
+      if (res.added > 0) onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Add co-teachers</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Co-teachers can build notebooks, assign work and grade — the same as you. They can't remove the class owner.
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <textarea
+          autoFocus
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={4}
+          placeholder="teacher@school.edu, another@school.edu"
+          className="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="h-10 rounded-full px-4 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button
+            onClick={() => add.mutate()}
+            disabled={!text.trim() || add.isPending}
+            className="h-10 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {add.isPending ? "Adding…" : "Add"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ClassView() {
   const { classId } = useParams<{ classId: string }>();
   const id = classId ?? "";
@@ -224,7 +308,9 @@ export default function ClassView() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const [tab, setTabState] = useState<Tab>(
-    tabParam === "assignments" || tabParam === "roster" ? tabParam : "notebooks",
+    tabParam === "assignments" || tabParam === "roster" || tabParam === "gradebook"
+      ? (tabParam as Tab)
+      : "notebooks",
   );
   const setTab = (t: Tab) => {
     setTabState(t);
@@ -238,8 +324,18 @@ export default function ClassView() {
     );
   };
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [coTeacherOpen, setCoTeacherOpen] = useState(false);
   const [reviewingStudent, setReviewingStudent] = useState<BackfillStudent | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const removeTeacherMutation = useMutation({
+    mutationFn: (userId: string) => api.del(`/api/classes/${id}/teachers/${userId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["class", id] });
+      toast.success("Co-teacher removed");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const classQ = useQuery({
     queryKey: ["class", id],
@@ -369,30 +465,23 @@ export default function ClassView() {
         </div>
       </div>
 
-      <div className="mb-5 flex items-center justify-between gap-3">
+      <div className="mb-5 flex items-center gap-3 overflow-x-auto">
         <div className="flex gap-1 rounded-full border border-slate-200 bg-white p-1">
-          {(["notebooks", "assignments", "roster"] as Tab[])
-            .filter((t) => t !== "roster" || isTeacher)
-            .map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className={cn(
-                  "rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors",
-                  tab === t ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100",
-                )}
-              >
-                {t}
-              </button>
-            ))}
+          {TABS.filter((t) => t.key !== "roster" || isTeacher).map(({ key, label, studentLabel, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={cn(
+                "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-medium transition-colors sm:px-4",
+                tab === key ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100",
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {!isTeacher && studentLabel ? studentLabel : label}
+            </button>
+          ))}
         </div>
-        <Link
-          to={`/classes/${id}/gradebook`}
-          className="h-9 shrink-0 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium leading-9 text-slate-700 hover:bg-slate-50"
-        >
-          Gradebook
-        </Link>
       </div>
 
       {tab === "notebooks" && (
@@ -420,36 +509,61 @@ export default function ClassView() {
             <EmptyState title="No notebooks yet" body="Upload a PDF, Word, or PowerPoint file to build your first notebook." />
           )}
           {classQ.data.notebooks.length > 0 && (
-            <ul className="divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {classQ.data.notebooks.map((nb) => {
-                const row = (
-                  <div className="flex items-center justify-between gap-3 px-5 py-3.5">
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">{nb.title}</span>
-                    <span className="shrink-0 text-xs text-slate-500">{nb.page_count} pages</span>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full px-2.5 py-1 text-xs font-medium capitalize",
-                        nb.status === "published" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600",
-                      )}
-                    >
-                      {nb.status}
-                    </span>
-                    <span className="hidden shrink-0 text-xs text-slate-400 sm:block">{relativeTime(nb.updated_at)}</span>
-                  </div>
-                );
+                const accent = nb.accent_color || "#1A73E8";
+                const to = isTeacher ? `/notebooks/${nb.id}/edit` : `/notebooks/${nb.id}`;
                 return (
-                  <li key={nb.id}>
-                    {isTeacher ? (
-                      <Link to={`/notebooks/${nb.id}/edit`} className="block hover:bg-slate-50">
-                        {row}
-                      </Link>
-                    ) : (
-                      row
-                    )}
-                  </li>
+                  <Link
+                    key={nb.id}
+                    to={to}
+                    className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+                  >
+                    <div className="h-1.5" style={{ background: accent }} />
+                    <div className="flex gap-3 p-4">
+                      {/* An uploaded cover wins; otherwise the first page stands in. */}
+                      <div className="shrink-0">
+                        {nb.has_cover ? (
+                          <img
+                            src={`/api/notebooks/${nb.id}/cover`}
+                            alt=""
+                            className="h-[74px] w-14 rounded border border-slate-200 object-cover"
+                          />
+                        ) : nb.first_asset_key ? (
+                          <PageThumb
+                            pdfUrl={assetUrl(nb.id, nb.first_asset_key)}
+                            sourceIndex={nb.first_source_index ?? 0}
+                            pageWidth={nb.first_width ?? 612}
+                            pageHeight={nb.first_height ?? 792}
+                            width={56}
+                          />
+                        ) : (
+                          <div
+                            className="h-[74px] w-14 rounded border border-slate-200"
+                            style={{ background: `linear-gradient(135deg, ${accent}22, ${accent}55)` }}
+                          />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-slate-900">{nb.title}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">{nb.page_count} pages</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[11px] font-medium capitalize",
+                              nb.status === "published" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600",
+                            )}
+                          >
+                            {nb.status}
+                          </span>
+                          <span className="text-[11px] text-slate-400">{relativeTime(nb.updated_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
                 );
               })}
-            </ul>
+            </div>
           )}
         </div>
       )}
@@ -513,17 +627,59 @@ export default function ClassView() {
         </div>
       )}
 
+      {tab === "gradebook" && <Gradebook embedded classId={id} />}
+
       {tab === "roster" && isTeacher && (
         <div>
-          <div className="mb-4 flex justify-end">
+          <div className="mb-4 flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setCoTeacherOpen(true)}
+              className="flex h-10 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <UserPlus className="h-4 w-4" />
+              Add co-teacher
+            </button>
             <button
               type="button"
               onClick={() => setInviteOpen(true)}
               className="flex h-10 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
             >
               <Plus className="h-4 w-4" />
-              Invite by email
+              Invite students
             </button>
+          </div>
+
+          {/* Teaching team */}
+          <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Teaching team</h3>
+            <ul className="mt-2 divide-y divide-slate-100">
+              {(classQ.data.teachers ?? []).map((t) => (
+                <li key={t.id} className="flex items-center gap-3 py-2">
+                  <Avatar name={t.name} picture={t.picture} size={30} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-slate-900">{t.name}</span>
+                    <span className="block truncate text-xs text-slate-500">{t.email}</span>
+                  </span>
+                  {t.is_owner ? (
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">Owner</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Remove ${t.name} as a co-teacher? They keep their account but lose access to this class.`)) {
+                          removeTeacherMutation.mutate(t.id);
+                        }
+                      }}
+                      title="Remove co-teacher"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    >
+                      <UserX className="h-4 w-4" />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
           {classQ.data.roster.length === 0 && <EmptyState title="No students yet" body="Share the join code or invite students by email." />}
           {classQ.data.roster.length > 0 && (
@@ -531,13 +687,26 @@ export default function ClassView() {
               {classQ.data.roster
                 .filter((r) => r.role === "student")
                 .map((r) => (
-                  <li key={r.id} className="flex items-center gap-3 px-5 py-3">
-                    <Avatar name={r.name} picture={r.picture} size={32} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-slate-900">{r.name}</span>
-                      <span className="block truncate text-xs text-slate-500">{r.email}</span>
-                    </span>
+                  <li key={r.id} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50">
+                    <Link
+                      to={`/classes/${id}/students/${r.id}`}
+                      className="flex min-w-0 flex-1 items-center gap-3"
+                      title={`Browse ${r.name}'s notebooks`}
+                    >
+                      <Avatar name={r.name} picture={r.picture} size={32} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-slate-900">{r.name}</span>
+                        <span className="block truncate text-xs text-slate-500">{r.email}</span>
+                      </span>
+                    </Link>
                     <span className="hidden shrink-0 text-xs text-slate-400 sm:block">Joined {relativeTime(r.joined_at)}</span>
+                    <Link
+                      to={`/classes/${id}/students/${r.id}`}
+                      title="Browse notebooks"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Link>
                     <button
                       type="button"
                       onClick={() => removeStudentMutation.mutate(r.id)}
@@ -555,6 +724,7 @@ export default function ClassView() {
       )}
 
       {inviteOpen && <InviteModal classId={id} onClose={() => setInviteOpen(false)} />}
+      {coTeacherOpen && <CoTeacherModal classId={id} onClose={() => setCoTeacherOpen(false)} />}
       {reviewingStudent && (
         <BackfillModal
           classId={id}

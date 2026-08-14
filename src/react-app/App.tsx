@@ -14,6 +14,7 @@ import Workspace from "./pages/Workspace";
 import AssignmentEditor from "./pages/AssignmentEditor";
 import Grading from "./pages/Grading";
 import TeacherAssignments from "./pages/TeacherAssignments";
+import StudentNotebook, { StudentNotebookList } from "./pages/StudentNotebook";
 
 export default function App() {
   const { user, isLoading, error } = useSession();
@@ -46,6 +47,8 @@ export default function App() {
       <Route path="/classes/:classId/upload" element={<UploadNotebook />} />
       <Route path="/classes/:classId/gradebook" element={<Gradebook />} />
       <Route path="/classes/:classId/assignments/new" element={<AssignmentEditor />} />
+      <Route path="/classes/:classId/students/:studentId" element={<StudentNotebookList />} />
+      <Route path="/classes/:classId/students/:studentId/notebooks/:notebookId" element={<StudentNotebook />} />
       <Route path="/assignments" element={<TeacherAssignments />} />
       <Route path="/assignments/:assignmentId" element={<Grading />} />
       <Route path="/assignments/:assignmentId/edit" element={<AssignmentEditor />} />

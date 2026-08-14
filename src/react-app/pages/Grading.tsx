@@ -10,21 +10,143 @@
  * annotating never touches what the student drew.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Lock, Pin, PinOff, Send, Users,
+  ArrowLeft, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Lock, MoreVertical, PanelLeft,
+  Pencil, Pin, PinOff, Send, Trash2, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type WorkResponse } from "../lib/api";
+import { api, assetUrl, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { useBackTo } from "../lib/useBackTo";
 import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
+import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { cn, formatDue, relativeTime } from "../lib/utils";
+
+const RAIL_KEY = "notesanity:gradeRail";
+
+/** What deleting (or heavily editing) an assignment would actually disturb. */
+export interface AssignmentImpact {
+  submitted: number;
+  graded: number;
+  returned: number;
+  total: number;
+  started: number;
+  grading: string;
+  status: string;
+}
+
+/**
+ * A plain confirm dialog isn't enough for a destructive, hard-to-undo action
+ * that affects a whole roster — the teacher needs the real numbers in front of
+ * them, and needs to understand that student *work* survives even though the
+ * assignment record doesn't.
+ */
+export function DeleteAssignmentModal({
+  impact, loading, deleting, onCancel, onConfirm,
+}: {
+  impact: AssignmentImpact | null;
+  loading: boolean;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between">
+          <h3 className="text-base font-semibold text-slate-900">Delete assignment?</h3>
+          <button onClick={onCancel} className="rounded-full p-1 text-slate-400 hover:bg-slate-100" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {loading || !impact ? (
+          <div className="py-8"><Spinner label="Checking impact…" /></div>
+        ) : (
+          <>
+            <div className="mt-3 space-y-1.5 text-sm text-slate-700">
+              {impact.submitted > 0 && (
+                <p>{impact.submitted} of {impact.total} students have turned this in.</p>
+              )}
+              {impact.graded > 0 && <p>{impact.graded} have been graded.</p>}
+              {impact.submitted === 0 && impact.graded === 0 && (
+                <p>No one has turned this in yet.</p>
+              )}
+            </div>
+            <p className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+              Deleting removes the assignment and all of its grades and submission records.
+              It does <strong>not</strong> delete the pages or anything students wrote on them —
+              that work stays in the notebook.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={onCancel}
+                className="rounded-full px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirm}
+                disabled={deleting}
+                className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" /> Delete assignment
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PageRail({
+  pages, pageNumbers, notebookId, pageLocked, activeIndex, activePageId, onSelect,
+}: {
+  pages: PageRec[];
+  pageNumbers?: number[];
+  notebookId: string;
+  pageLocked: boolean;
+  activeIndex: number;
+  activePageId: string;
+  onSelect: (index: number, pageId: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {pages.map((page, i) => {
+        const active = pageLocked ? i === activeIndex : page.id === activePageId;
+        return (
+          <button
+            key={page.id}
+            type="button"
+            onClick={() => onSelect(i, page.id)}
+            className={cn(
+              "flex flex-col items-center gap-1 rounded-lg p-1.5 text-left transition-colors",
+              active ? "bg-blue-50 ring-2 ring-blue-500" : "hover:bg-slate-100",
+            )}
+          >
+            <PageThumb
+              pdfUrl={assetUrl(notebookId, page.asset_key)}
+              sourceIndex={page.source_index}
+              pageWidth={page.width}
+              pageHeight={page.height}
+              width={64}
+            />
+            <span className="w-full truncate text-center text-[11px] text-slate-600">
+              Page {pageNumbers?.[i] ?? i + 1}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 interface GradeRow {
   student: { id: string; name: string; email: string; picture?: string | null };
@@ -61,7 +183,9 @@ export function formatPageNumbers(numbers?: number[]): string {
 export default function Grading() {
   const { assignmentId = "" } = useParams();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const goBack = useBackTo("/assignments");
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const detail = useQuery({
     queryKey: ["assignment", assignmentId],
@@ -71,6 +195,7 @@ export default function Grading() {
 
   const assignment = detail.data?.assignment;
   const rows = detail.data?.rows ?? [];
+  const isTeacher = detail.data?.isTeacher ?? false;
 
   const [studentIdx, setStudentIdx] = useState(0);
   const [pageIdx, setPageIdx] = useState(0);
@@ -82,8 +207,77 @@ export default function Grading() {
   });
   const [fingerDraw, setFingerDraw] = useState(false);
 
+  const [railOpen, setRailOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(RAIL_KEY);
+      if (saved !== null) return saved === "1";
+    } catch { /* ignore */ }
+    return typeof window === "undefined" || window.innerWidth >= 640;
+  });
+  useEffect(() => {
+    try { localStorage.setItem(RAIL_KEY, railOpen ? "1" : "0"); } catch { /* ignore */ }
+  }, [railOpen]);
+
+  const [visiblePage, setVisiblePage] = useState<string>("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteImpact, setDeleteImpact] = useState<AssignmentImpact | null>(null);
+  const [impactLoading, setImpactLoading] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  // Deep-link support: `?student=<id>` opens straight to that row, once.
+  const appliedStudentParam = useRef(false);
+  useEffect(() => {
+    if (appliedStudentParam.current || rows.length === 0) return;
+    appliedStudentParam.current = true;
+    const sid = searchParams.get("student");
+    if (!sid) return;
+    const idx = rows.findIndex((r) => r.student.id === sid);
+    if (idx >= 0) setStudentIdx(idx);
+  }, [rows, searchParams]);
+
   const current = rows[studentIdx];
   const studentId = current?.student.id;
+
+  // Keep the URL in sync with whichever student is on screen so it's shareable —
+  // but only write when it actually differs, to avoid a set/read loop.
+  useEffect(() => {
+    if (!studentId) return;
+    if (searchParams.get("student") === studentId) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("student", studentId);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [studentId, searchParams, setSearchParams]);
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.del(`/api/assignments/${assignmentId}`),
+    onSuccess: () => {
+      toast.success("Assignment deleted");
+      navigate(`/classes/${assignment.classId}?tab=assignments`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const openDeleteModal = async () => {
+    setMenuOpen(false);
+    setShowDeleteModal(true);
+    setImpactLoading(true);
+    try {
+      const impact = await api.get<AssignmentImpact>(`/api/assignments/${assignmentId}/impact`);
+      setDeleteImpact(impact);
+    } catch (e) {
+      toast.error((e as Error).message);
+      setShowDeleteModal(false);
+    } finally {
+      setImpactLoading(false);
+    }
+  };
 
   const work = useQuery({
     queryKey: ["work", assignment?.notebookId, studentId],
@@ -127,6 +321,15 @@ export default function Grading() {
   };
   const goPage = (delta: number) => {
     setPageIdx((i) => Math.max(0, Math.min(Math.max(0, assignedPages.length - 1), i + delta)));
+  };
+
+  const goToRailPage = (index: number, pageId: string) => {
+    if (pageLocked) {
+      setPageIdx(index);
+    } else {
+      setVisiblePage(pageId);
+      scrollRef.current?.querySelector(`[data-page-id="${pageId}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   useEffect(() => {
@@ -180,6 +383,15 @@ export default function Grading() {
         <button type="button" onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </button>
+        <button
+          type="button"
+          onClick={() => setRailOpen((v) => !v)}
+          className="hidden rounded-full p-2 text-slate-500 hover:bg-slate-100 sm:inline-flex"
+          aria-label={railOpen ? "Hide pages" : "Show pages"}
+          aria-pressed={railOpen}
+        >
+          <PanelLeft className="h-4 w-4" />
+        </button>
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{assignment.title}</div>
           <div className="truncate text-xs text-slate-500">
@@ -200,6 +412,39 @@ export default function Grading() {
           >
             <Send className="h-4 w-4" /> Return all graded
           </button>
+
+          {isTeacher && (
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((v) => !v)}
+                className="rounded-full p-2 text-slate-500 hover:bg-slate-100"
+                aria-label="Assignment options"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+                  <div className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                    <button
+                      onClick={() => { setMenuOpen(false); navigate(`/assignments/${assignmentId}/edit`); }}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      <Pencil className="h-4 w-4" /> Edit assignment
+                    </button>
+                    <button
+                      onClick={openDeleteModal}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-rose-600 hover:bg-rose-50"
+                    >
+                      <Trash2 className="h-4 w-4" /> Delete assignment
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
@@ -285,6 +530,19 @@ export default function Grading() {
       />
 
       <div className="flex min-h-0 flex-1">
+        {railOpen && (
+          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-2 py-3 sm:block">
+            <PageRail
+              pages={assignedPages}
+              pageNumbers={assignment.pageNumbers}
+              notebookId={assignment.notebookId}
+              pageLocked={pageLocked}
+              activeIndex={pageIdx}
+              activePageId={visiblePage}
+              onSelect={goToRailPage}
+            />
+          </aside>
+        )}
         {rosterOpen && (
           <aside className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
             {rows.map((r, i) => (
@@ -329,6 +587,8 @@ export default function Grading() {
               fieldsEditable={false}
               onLayerChange={notebookWork.setLayer}
               onFieldChange={() => {}}
+              onVisiblePageChange={setVisiblePage}
+              scrollRef={scrollRef}
             />
           )}
         </div>
@@ -341,6 +601,16 @@ export default function Grading() {
           saving={grade.isPending}
         />
       </div>
+
+      {showDeleteModal && (
+        <DeleteAssignmentModal
+          impact={deleteImpact}
+          loading={impactLoading}
+          deleting={deleteMutation.isPending}
+          onCancel={() => setShowDeleteModal(false)}
+          onConfirm={() => deleteMutation.mutate()}
+        />
+      )}
     </div>
   );
 }

@@ -235,3 +235,15 @@ migrate("002_page_groups", async () => {
     await db.prepare(`ALTER TABLE pages ADD COLUMN group_name TEXT NOT NULL DEFAULT ''`).run();
   }
 });
+
+/** Per-notebook cover styling: an accent colour and an optional uploaded image. */
+migrate("003_notebook_cover", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(notebooks)`).all<{ name: string }>();
+  const has = (name: string) => (cols.results ?? []).some((c) => c.name === name);
+  if (!has("accent_color")) {
+    await db.prepare(`ALTER TABLE notebooks ADD COLUMN accent_color TEXT NOT NULL DEFAULT '#1A73E8'`).run();
+  }
+  if (!has("cover_key")) {
+    await db.prepare(`ALTER TABLE notebooks ADD COLUMN cover_key TEXT`).run();
+  }
+});

@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
-  FolderPlus, ListChecks, Plus, RotateCcw, Send, Trash2, Type as TypeIcon, X,
+  FolderPlus, ImageOff, ListChecks, Loader2, Palette, Plus, RotateCcw, Send, Trash2,
+  Type as TypeIcon, Upload, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, type FieldRec, type PageRec } from "../lib/api";
@@ -26,11 +27,17 @@ interface NotebookResponse {
   notebook: {
     id: string; classId: string; title: string; status: string;
     pageCount: number; assetKey: string; lastPublishedAt: string | null;
+    accentColor: string; hasCover: boolean;
   };
   pages: EditorPage[];
   fields: FieldRec[];
   isTeacher: boolean;
 }
+
+const ACCENT_SWATCHES = [
+  "#1A73E8", "#34A853", "#EA4335", "#F9AB00", "#9334E6",
+  "#1E8E9C", "#D93025", "#E37400", "#202124", "#5F6368",
+];
 
 interface NotebookAssignment {
   id: string;
@@ -84,6 +91,9 @@ export default function NotebookEditor() {
   const [containerWidth, setContainerWidth] = useState(0);
   const addPagesRef = useRef<HTMLInputElement>(null);
   const [busyMessage, setBusyMessage] = useState("");
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [coverBump, setCoverBump] = useState(0);
+  const coverInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -167,6 +177,30 @@ export default function NotebookEditor() {
       setSelection(new Set());
       setPageIdx(0);
       toast.success("Page deleted");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const patchNotebook = useMutation({
+    mutationFn: (body: { accentColor?: string; clearCover?: boolean }) =>
+      api.patch(`/api/notebooks/${notebookId}`, body),
+    onSuccess: () => {
+      invalidate();
+      setCoverBump((n) => n + 1);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const uploadCover = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return api.upload(`/api/notebooks/${notebookId}/cover`, form);
+    },
+    onSuccess: () => {
+      invalidate();
+      setCoverBump((n) => n + 1);
+      toast.success("Cover updated");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -256,7 +290,8 @@ export default function NotebookEditor() {
 
   return (
     <div className="flex h-dvh flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
+      <div className="h-1 shrink-0" style={{ backgroundColor: notebook.accentColor || "#1A73E8" }} />
+      <header className="relative flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
         <button type="button" onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -276,6 +311,17 @@ export default function NotebookEditor() {
           )}>
             {notebook.status === "published" ? "Published" : "Draft"}
           </span>
+          <button
+            type="button"
+            onClick={() => setAppearanceOpen((v) => !v)}
+            aria-expanded={appearanceOpen}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-sm transition-colors",
+              appearanceOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-300 text-slate-700 hover:bg-slate-50",
+            )}
+          >
+            <Palette className="h-4 w-4" /> Appearance
+          </button>
           <button
             onClick={() => addPagesRef.current?.click()}
             disabled={!!busyMessage}
@@ -303,6 +349,21 @@ export default function NotebookEditor() {
             if (f) void addPages(f);
           }}
         />
+
+        {appearanceOpen && (
+          <AppearancePopover
+            notebookId={notebookId}
+            accentColor={notebook.accentColor || "#1A73E8"}
+            hasCover={notebook.hasCover}
+            coverBump={coverBump}
+            coverInputRef={coverInputRef}
+            onSetAccent={(color) => patchNotebook.mutate({ accentColor: color })}
+            onClearCover={() => patchNotebook.mutate({ clearCover: true })}
+            onUploadCover={(file) => uploadCover.mutate(file)}
+            uploading={uploadCover.isPending}
+            onClose={() => setAppearanceOpen(false)}
+          />
+        )}
       </header>
 
       <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
@@ -542,6 +603,127 @@ export default function NotebookEditor() {
             onDelete={() => deleteField.mutate(selectedField)}
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Small popover for customising the accent colour and cover image shown on the notebook's tile. */
+function AppearancePopover({
+  notebookId, accentColor, hasCover, coverBump, coverInputRef,
+  onSetAccent, onClearCover, onUploadCover, uploading, onClose,
+}: {
+  notebookId: string;
+  accentColor: string;
+  hasCover: boolean;
+  coverBump: number;
+  coverInputRef: React.RefObject<HTMLInputElement | null>;
+  onSetAccent: (color: string) => void;
+  onClearCover: () => void;
+  onUploadCover: (file: File) => void;
+  uploading: boolean;
+  onClose: () => void;
+}) {
+  const popRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={popRef}
+      className="absolute right-3 top-full z-30 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg"
+    >
+      <h3 className="text-sm font-semibold">Appearance</h3>
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+        The colour and cover image are how this notebook appears on its tile.
+      </p>
+
+      <div className="mt-3">
+        <label className="block text-xs font-medium text-slate-600">Colour</label>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {ACCENT_SWATCHES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-label={`Colour ${c}`}
+              onClick={() => onSetAccent(c)}
+              className={cn(
+                "h-8 w-8 rounded-full border-2 transition-transform",
+                accentColor.toLowerCase() === c.toLowerCase()
+                  ? "border-slate-900 scale-110"
+                  : "border-white shadow-sm hover:scale-105",
+              )}
+              style={{ background: c }}
+            />
+          ))}
+          <label
+            className="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-dashed border-slate-300 text-slate-400 hover:border-slate-400"
+            title="Custom colour"
+          >
+            <Palette className="h-3.5 w-3.5" />
+            <input
+              type="color"
+              value={accentColor}
+              onChange={(e) => onSetAccent(e.target.value)}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              aria-label="Custom colour"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <label className="block text-xs font-medium text-slate-600">Cover image</label>
+        <div className="mt-2 flex items-center gap-3">
+          <div className="flex h-14 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+            {hasCover ? (
+              <img
+                src={`/api/notebooks/${notebookId}/cover?v=${coverBump}`}
+                alt="Notebook cover"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <ImageOff className="h-4 w-4 text-slate-300" />
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={() => coverInputRef.current?.click()}
+              disabled={uploading}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-2.5 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {hasCover ? "Replace" : "Upload"}
+            </button>
+            {hasCover && (
+              <button
+                type="button"
+                onClick={onClearCover}
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                <X className="h-3.5 w-3.5" /> Remove cover
+              </button>
+            )}
+          </div>
+        </div>
+        <input
+          ref={coverInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) onUploadCover(f);
+          }}
+        />
       </div>
     </div>
   );
