@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  BookOpen, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus, RefreshCw, Upload, UserPlus, UserX, Users, X,
+  BookOpen, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus, RefreshCw, Upload, UserPlus, UserX, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import Gradebook from "./Gradebook";
 import PageThumb from "../components/PageThumb";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
+import { Button, ButtonLink, Card, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
 import { api, assetUrl, type AssignmentSummary } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime } from "../lib/utils";
 
@@ -158,50 +159,37 @@ function BackfillModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Backfill assignments</h2>
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="mb-4 text-sm text-slate-500">
-          Choose which assignments <span className="font-medium text-slate-700">{student.name}</span> should be held to.
-        </p>
+    <Modal onClose={onClose} title="Backfill assignments">
+      <p className="mb-4 text-[15px] text-pine/70">
+        Choose which assignments <span className="font-display text-pine">{student.name}</span> should be held to.
+      </p>
 
-        {assignments.length === 0 && <p className="py-4 text-sm text-slate-500">No active assignments in this class.</p>}
-        {assignments.length > 0 && (
-          <ul className="space-y-2">
-            {assignments.map((a) => (
-              <li key={a.id}>
-                <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-sm hover:bg-slate-50">
-                  <input
-                    type="checkbox"
-                    checked={checked.has(a.id)}
-                    onChange={() => toggle(a.id)}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="flex-1">
-                    <span className="block font-medium text-slate-800">{a.title}</span>
-                    <span className="block text-xs text-slate-500">{formatDue(a.due_at)}</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        )}
+      {assignments.length === 0 && <p className="py-4 text-[15px] text-pine/70">No active assignments in this class.</p>}
+      {assignments.length > 0 && (
+        <ul className="space-y-2">
+          {assignments.map((a) => (
+            <li key={a.id}>
+              <label className="flex items-center gap-3 rounded-[12px] border-[3px] border-pine px-3 py-2.5 text-[15px] hover:bg-oat">
+                <input
+                  type="checkbox"
+                  checked={checked.has(a.id)}
+                  onChange={() => toggle(a.id)}
+                  className="h-4 w-4 accent-mint"
+                />
+                <span className="flex-1">
+                  <span className="block font-display text-pine">{a.title}</span>
+                  <span className="block text-[13px] text-pine/70">{formatDue(a.due_at)}</span>
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
 
-        <button
-          type="button"
-          disabled={mutation.isPending}
-          onClick={() => mutation.mutate()}
-          className="mt-5 h-11 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-        >
-          {mutation.isPending ? "Saving…" : "Confirm"}
-        </button>
-      </div>
-    </div>
+      <Button type="button" variant="primary" disabled={mutation.isPending} onClick={() => mutation.mutate()} className="mt-5 w-full">
+        {mutation.isPending ? "Saving…" : "Confirm"}
+      </Button>
+    </Modal>
   );
 }
 
@@ -224,33 +212,26 @@ function InviteModal({ classId, onClose }: { classId: string; onClose: () => voi
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Invite by email</h2>
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <label className="mb-1 block text-xs font-medium text-slate-600">Emails (comma or newline separated)</label>
-        <textarea
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={5}
-          placeholder="ada@school.edu, grace@school.edu"
-          className="w-full rounded-lg border border-slate-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
-        />
-        <button
-          type="button"
-          disabled={!text.trim() || mutation.isPending}
-          onClick={() => mutation.mutate()}
-          className="mt-4 h-11 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-        >
-          {mutation.isPending ? "Inviting…" : "Send invites"}
-        </button>
-      </div>
-    </div>
+    <Modal onClose={onClose} title="Invite by email">
+      <Label>Emails (comma or newline separated)</Label>
+      <Textarea
+        autoFocus
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={5}
+        placeholder="ada@school.edu, grace@school.edu"
+        className="mt-1.5"
+      />
+      <Button
+        type="button"
+        variant="primary"
+        disabled={!text.trim() || mutation.isPending}
+        onClick={() => mutation.mutate()}
+        className="mt-4 w-full"
+      >
+        {mutation.isPending ? "Inviting…" : "Send invites"}
+      </Button>
+    </Modal>
   );
 }
 
@@ -276,39 +257,25 @@ function CoTeacherModal({ classId, onClose }: { classId: string; onClose: () => 
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">Add co-teachers</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Co-teachers can build notebooks, assign work and grade — the same as you. They can't remove the class owner.
-            </p>
-          </div>
-          <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <textarea
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={4}
-          placeholder="teacher@school.edu, another@school.edu"
-          className="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-        />
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="h-11 rounded-full px-4 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-          <button
-            onClick={() => add.mutate()}
-            disabled={!text.trim() || add.isPending}
-            className="h-11 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {add.isPending ? "Adding…" : "Add"}
-          </button>
-        </div>
+    <Modal onClose={onClose} title="Add co-teachers">
+      <p className="text-[13px] text-pine/70">
+        Co-teachers can build notebooks, assign work and grade — the same as you. They can't remove the class owner.
+      </p>
+      <Textarea
+        autoFocus
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={4}
+        placeholder="teacher@school.edu, another@school.edu"
+        className="mt-4"
+      />
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={() => add.mutate()} disabled={!text.trim() || add.isPending}>
+          {add.isPending ? "Adding…" : "Add"}
+        </Button>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -386,129 +353,115 @@ function CustomizeModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
-      <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Customize class</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="mb-5">
-          <label className="mb-1.5 block text-xs font-medium text-slate-600">Emoji</label>
-          <input
-            value={emoji}
-            onChange={(e) => setEmoji(Array.from(e.target.value).slice(0, 2).join(""))}
-            onBlur={() => saveEmoji.mutate(emoji)}
-            placeholder="📚"
-            className="h-11 w-20 rounded-lg border border-slate-300 px-3 text-center text-xl focus:border-blue-500 focus:outline-none"
-          />
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {QUICK_EMOJI.map((e) => (
-              <button
-                key={e}
-                type="button"
-                onClick={() => pickEmoji(e)}
-                className={cn(
-                  "flex h-11 w-11 items-center justify-center rounded-xl border text-xl hover:bg-slate-50",
-                  emoji === e ? "border-blue-500 bg-blue-50" : "border-slate-200",
-                )}
-              >
-                {e}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mb-5">
-          <label className="mb-1.5 block text-xs font-medium text-slate-600">Colour</label>
-          <div className="flex flex-wrap items-center gap-2">
-            {SWATCHES.map((c) => (
-              <button
-                key={c}
-                type="button"
-                title={c}
-                onClick={() => pickColor(c)}
-                className={cn(
-                  "h-9 w-9 shrink-0 rounded-full",
-                  color.toLowerCase() === c.toLowerCase() ? "ring-2 ring-slate-900 ring-offset-2" : "",
-                )}
-                style={{ backgroundColor: c }}
-              />
-            ))}
-            <label
-              title="Custom colour"
-              className="relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-dashed border-slate-300 text-slate-400 hover:bg-slate-50"
-            >
-              <Palette className="h-4 w-4" />
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => pickColor(e.target.value)}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              />
-            </label>
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-slate-600">Featured image</label>
-          {cls.hasCover ? (
-            <div className="space-y-2">
-              <img
-                src={`/api/classes/${classId}/cover?v=${coverVersion}`}
-                alt=""
-                className="h-28 w-full rounded-xl border border-slate-200 object-cover"
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={uploadCover.isPending}
-                  className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                >
-                  <Upload className="h-4 w-4" />
-                  {uploadCover.isPending ? "Uploading…" : "Replace"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => clearCover.mutate()}
-                  disabled={clearCover.isPending}
-                  className="flex h-11 flex-1 items-center justify-center rounded-full border border-slate-300 text-sm font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-60"
-                >
-                  Remove image
-                </button>
-              </div>
-            </div>
-          ) : (
+    <Modal onClose={onClose} title="Customize class">
+      <div className="mb-5">
+        <Label>Emoji</Label>
+        <Input
+          value={emoji}
+          onChange={(e) => setEmoji(Array.from(e.target.value).slice(0, 2).join(""))}
+          onBlur={() => saveEmoji.mutate(emoji)}
+          placeholder="📚"
+          className="mt-1.5 w-20 text-center text-xl"
+        />
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {QUICK_EMOJI.map((e) => (
             <button
+              key={e}
               type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploadCover.isPending}
-              className="flex h-24 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 text-sm text-slate-500 hover:bg-slate-50 disabled:opacity-60"
+              onClick={() => pickEmoji(e)}
+              className={cn(
+                "flex h-11 w-11 items-center justify-center rounded-xl border-[3px] text-xl hover:bg-oat",
+                emoji === e ? "border-pine bg-mint/30" : "border-pine/20",
+              )}
             >
-              <Upload className="h-4 w-4" />
-              {uploadCover.isPending ? "Uploading…" : "Upload an image"}
+              {e}
             </button>
-          )}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            className="hidden"
-            onChange={onFile}
-          />
+          ))}
         </div>
       </div>
-    </div>
+
+      <div className="mb-5">
+        <Label>Colour</Label>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          {SWATCHES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              title={c}
+              onClick={() => pickColor(c)}
+              className={cn(
+                "h-9 w-9 shrink-0 rounded-full border-2 border-pine",
+                color.toLowerCase() === c.toLowerCase() ? "ring-[3px] ring-pine ring-offset-2" : "",
+              )}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+          <label
+            title="Custom colour"
+            className="relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-pine/40 text-pine/60 hover:bg-oat"
+          >
+            <Palette className="h-4 w-4" strokeWidth={2.5} />
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => pickColor(e.target.value)}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <Label>Featured image</Label>
+        {cls.hasCover ? (
+          <div className="mt-1.5 space-y-2">
+            <img
+              src={`/api/classes/${classId}/cover?v=${coverVersion}`}
+              alt=""
+              className="h-28 w-full rounded-xl border-[3px] border-pine object-cover"
+            />
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploadCover.isPending}
+                className="flex-1"
+              >
+                <Upload className="h-4 w-4" strokeWidth={2.5} />
+                {uploadCover.isPending ? "Uploading…" : "Replace"}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => clearCover.mutate()}
+                disabled={clearCover.isPending}
+                className="flex-1"
+              >
+                Remove image
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploadCover.isPending}
+            className="mt-1.5 flex h-24 w-full items-center justify-center gap-2 rounded-xl border-[3px] border-dashed border-pine/40 text-[15px] text-pine/60 hover:bg-oat disabled:opacity-60"
+          >
+            <Upload className="h-4 w-4" strokeWidth={2.5} />
+            {uploadCover.isPending ? "Uploading…" : "Upload an image"}
+          </button>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={onFile}
+        />
+      </div>
+    </Modal>
   );
 }
 
@@ -626,26 +579,22 @@ export default function ClassView() {
   return (
     <Shell>
       {isTeacher && pendingStudents.length > 0 && (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
-          <div className="text-sm text-amber-900">
-            <span className="font-medium">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-4 py-3">
+          <div className="text-[15px] text-[#5c4611]">
+            <span className="font-display">
               {pendingStudents.length === 1
                 ? `${pendingStudents[0].name} joined recently`
                 : `${pendingStudents.length} students joined recently`}
             </span>{" "}
             — choose which assignments to backfill.
           </div>
-          <button
-            type="button"
-            onClick={() => setReviewingStudent(pendingStudents[0])}
-            className="h-9 shrink-0 rounded-full bg-amber-600 px-4 text-sm font-medium text-white hover:bg-amber-700"
-          >
+          <Button type="button" variant="secondary" size="sm" onClick={() => setReviewingStudent(pendingStudents[0])} className="shrink-0">
             Review
-          </button>
+          </Button>
         </div>
       )}
 
-      <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <Card className="mb-6">
         <div className="relative h-28 sm:h-36">
           {cls.hasCover ? (
             <img
@@ -661,73 +610,63 @@ export default function ClassView() {
           )}
           <div
             className="absolute inset-0"
-            style={{ background: "linear-gradient(to top, rgba(15,23,42,.55), rgba(15,23,42,0) 65%)" }}
+            style={{ background: "linear-gradient(to top, rgba(32,48,44,.6), rgba(32,48,44,0) 65%)" }}
           />
           <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 p-4">
             {cls.emoji && (
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/90 text-2xl shadow-sm">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-white/90 text-2xl">
                 {cls.emoji}
               </span>
             )}
-            <h1 className="truncate text-2xl font-semibold tracking-tight text-white drop-shadow-sm">{cls.name}</h1>
+            <h1 className="truncate font-display text-[24px] text-oat">{cls.name}</h1>
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div className="min-w-0">
-            {cls.section && <p className="truncate text-sm text-slate-500">{cls.section}</p>}
+            {cls.section && <p className="truncate text-[15px] text-pine/70">{cls.section}</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {isTeacher && (
-              <button
-                type="button"
-                onClick={() => setCustomizeOpen(true)}
-                className="flex h-11 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                <Palette className="h-4 w-4" />
+              <Button type="button" variant="secondary" onClick={() => setCustomizeOpen(true)}>
+                <Palette className="h-4 w-4" strokeWidth={2.5} />
                 Customize
-              </button>
+              </Button>
             )}
             {isTeacher && joinCode && (
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 font-mono text-lg tracking-[0.3em] text-slate-800">
+                <span className="flex items-center gap-2 rounded-full border-[3px] border-pine bg-oat px-4 py-2 font-display text-[17px] tracking-[0.3em] text-pine">
                   {joinCode}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => copyCode(joinCode)}
-                  title="Copy code"
-                  className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50"
-                >
-                  <Copy className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
+                <IconButton label="Copy code" variant="secondary" onClick={() => copyCode(joinCode)}>
+                  <Copy className="h-4 w-4" strokeWidth={2.5} />
+                </IconButton>
+                <IconButton
+                  label="Generate new code"
+                  variant="secondary"
                   onClick={() => rotateCodeMutation.mutate()}
                   disabled={rotateCodeMutation.isPending}
-                  title="Generate new code"
-                  className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-60"
                 >
-                  <RefreshCw className={cn("h-4 w-4", rotateCodeMutation.isPending && "animate-spin")} />
-                </button>
+                  <RefreshCw className={cn("h-4 w-4", rotateCodeMutation.isPending && "animate-spin")} strokeWidth={2.5} />
+                </IconButton>
               </div>
             )}
           </div>
         </div>
-      </div>
+      </Card>
 
       <div className="mb-5 flex items-center gap-3 overflow-x-auto">
-        <div className="flex gap-1 rounded-full border border-slate-200 bg-white p-1">
+        <div className="flex gap-1 rounded-full border-[3px] border-pine bg-white p-1">
           {TABS.filter((t) => t.key !== "roster" || isTeacher).map(({ key, label, studentLabel, icon: Icon }) => (
             <button
               key={key}
               type="button"
               onClick={() => setTab(key)}
               className={cn(
-                "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-medium transition-colors sm:px-4",
-                tab === key ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100",
+                "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 font-display text-[13px] transition-colors sm:px-4",
+                tab === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
               )}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-4 w-4" strokeWidth={2.5} />
               {!isTeacher && studentLabel ? studentLabel : label}
             </button>
           ))}
@@ -745,14 +684,10 @@ export default function ClassView() {
                 className="hidden"
                 onChange={onFileChosen}
               />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                <Upload className="h-4 w-4" />
+              <Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="h-4 w-4" strokeWidth={2.5} />
                 Upload notebook
-              </button>
+              </Button>
             </div>
           )}
           {classQ.data.notebooks.length === 0 && (
@@ -767,9 +702,9 @@ export default function ClassView() {
                   <Link
                     key={nb.id}
                     to={to}
-                    className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+                    className="group overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--color-pine)]"
                   >
-                    <div className="h-1.5" style={{ background: accent }} />
+                    <div className="h-2" style={{ background: accent }} />
                     <div className="flex gap-3 p-4">
                       {/* An uploaded cover wins; otherwise the first page stands in. */}
                       <div className="shrink-0">
@@ -777,7 +712,7 @@ export default function ClassView() {
                           <img
                             src={`/api/notebooks/${nb.id}/cover`}
                             alt=""
-                            className="h-[74px] w-14 rounded border border-slate-200 object-cover"
+                            className="h-[74px] w-14 rounded border-2 border-pine object-cover"
                           />
                         ) : nb.first_asset_key ? (
                           <PageThumb
@@ -789,24 +724,19 @@ export default function ClassView() {
                           />
                         ) : (
                           <div
-                            className="h-[74px] w-14 rounded border border-slate-200"
+                            className="h-[74px] w-14 rounded border-2 border-pine"
                             style={{ background: `linear-gradient(135deg, ${accent}22, ${accent}55)` }}
                           />
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-slate-900">{nb.title}</div>
-                        <div className="mt-0.5 text-xs text-slate-500">{nb.page_count} pages</div>
+                        <div className="truncate font-display text-[17px] text-pine">{nb.title}</div>
+                        <div className="mt-0.5 text-[13px] text-pine/70">{nb.page_count} pages</div>
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          <span
-                            className={cn(
-                              "rounded-full px-2 py-0.5 text-[11px] font-medium capitalize",
-                              nb.status === "published" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600",
-                            )}
-                          >
+                          <Chip tone={nb.status === "published" ? "mint" : "quiet"} className="capitalize">
                             {nb.status}
-                          </span>
-                          <span className="text-[11px] text-slate-400">{relativeTime(nb.updated_at)}</span>
+                          </Chip>
+                          <span className="text-[11px] text-pine/50">{relativeTime(nb.updated_at)}</span>
                         </div>
                       </div>
                     </div>
@@ -822,13 +752,10 @@ export default function ClassView() {
         <div>
           {isTeacher && (
             <div className="mb-4 flex justify-end">
-              <Link
-                to={`/classes/${id}/assignments/new`}
-                className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                <Plus className="h-4 w-4" />
+              <ButtonLink to={`/classes/${id}/assignments/new`} variant="primary">
+                <Plus className="h-4 w-4" strokeWidth={2.5} />
                 New assignment
-              </Link>
+              </ButtonLink>
             </div>
           )}
           {assignmentsQ.isLoading && <Spinner />}
@@ -844,29 +771,24 @@ export default function ClassView() {
             </div>
           )}
           {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length > 0 && !isTeacher && (
-            <ul className="divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <ul className="divide-y divide-pine/15 rounded-[22px] border-[3px] border-pine bg-white">
               {assignmentsQ.data.assignments.map((a) => (
                 <li key={a.id}>
-                  <Link to={`/assignments/${a.id}`} className="flex flex-wrap items-center gap-3 px-5 py-3.5 hover:bg-slate-50">
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">{a.title}</span>
-                    <span className="shrink-0 text-xs text-slate-500">{a.pageCount} pages</span>
+                  <Link to={`/assignments/${a.id}`} className="flex flex-wrap items-center gap-3 px-5 py-3.5 hover:bg-oat">
+                    <span className="min-w-0 flex-1 truncate font-display text-pine">{a.title}</span>
+                    <span className="shrink-0 text-[13px] text-pine/70">{a.pageCount} pages</span>
                     <span
                       className={cn(
-                        "shrink-0 text-xs",
-                        isOverdue(a.dueAt) ? "font-medium text-rose-600" : "text-slate-500",
+                        "shrink-0 text-[13px]",
+                        isOverdue(a.dueAt) ? "font-display text-[#a3341f]" : "text-pine/70",
                       )}
                     >
                       {formatDue(a.dueAt)}
                     </span>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium capitalize",
-                        a.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600",
-                      )}
-                    >
+                    <Chip tone={a.status === "active" ? "mint" : "quiet"} className="capitalize">
                       {a.status}
-                    </span>
-                    <span className="shrink-0 text-xs text-slate-500">
+                    </Chip>
+                    <span className="shrink-0 text-[13px] text-pine/70">
                       {a.complete ?? 0}/{a.pageCount} pages
                     </span>
                   </Link>
@@ -882,62 +804,54 @@ export default function ClassView() {
       {tab === "roster" && isTeacher && (
         <div>
           <div className="mb-4 flex flex-wrap justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setCoTeacherOpen(true)}
-              className="flex h-11 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <UserPlus className="h-4 w-4" />
+            <Button type="button" variant="secondary" onClick={() => setCoTeacherOpen(true)}>
+              <UserPlus className="h-4 w-4" strokeWidth={2.5} />
               Add co-teacher
-            </button>
-            <button
-              type="button"
-              onClick={() => setInviteOpen(true)}
-              className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4" />
+            </Button>
+            <Button type="button" variant="primary" onClick={() => setInviteOpen(true)}>
+              <Plus className="h-4 w-4" strokeWidth={2.5} />
               Invite students
-            </button>
+            </Button>
           </div>
 
           {/* Teaching team */}
-          <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Teaching team</h3>
-            <ul className="mt-2 divide-y divide-slate-100">
+          <Card className="mb-5 p-4">
+            <h3 className="label-caps text-pine/60">Teaching team</h3>
+            <ul className="mt-2 divide-y divide-pine/10">
               {(classQ.data.teachers ?? []).map((t) => (
                 <li key={t.id} className="flex items-center gap-3 py-2">
                   <Avatar name={t.name} picture={t.picture} size={30} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-900">{t.name}</span>
-                    <span className="block truncate text-xs text-slate-500">{t.email}</span>
+                    <span className="block truncate font-display text-pine">{t.name}</span>
+                    <span className="block truncate text-[13px] text-pine/70">{t.email}</span>
                   </span>
                   {t.is_owner ? (
-                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">Owner</span>
+                    <Chip tone="quiet" className="shrink-0">Owner</Chip>
                   ) : (
-                    <button
-                      type="button"
+                    <IconButton
+                      label="Remove co-teacher"
+                      variant="ghost"
+                      className="h-8 w-8 hover:bg-[#a3341f]/10 hover:text-[#a3341f]"
                       onClick={() => {
                         if (confirm(`Remove ${t.name} as a co-teacher? They keep their account but lose access to this class.`)) {
                           removeTeacherMutation.mutate(t.id);
                         }
                       }}
-                      title="Remove co-teacher"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                     >
-                      <UserX className="h-4 w-4" />
-                    </button>
+                      <UserX className="h-4 w-4" strokeWidth={2.5} />
+                    </IconButton>
                   )}
                 </li>
               ))}
             </ul>
-          </div>
+          </Card>
           {classQ.data.roster.length === 0 && <EmptyState title="No students yet" body="Share the join code or invite students by email." />}
           {classQ.data.roster.length > 0 && (
-            <ul className="divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <ul className="divide-y divide-pine/15 rounded-[22px] border-[3px] border-pine bg-white">
               {classQ.data.roster
                 .filter((r) => r.role === "student")
                 .map((r) => (
-                  <li key={r.id} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50">
+                  <li key={r.id} className="flex items-center gap-3 px-5 py-3 hover:bg-oat">
                     <Link
                       to={`/classes/${id}/students/${r.id}`}
                       className="flex min-w-0 flex-1 items-center gap-3"
@@ -945,26 +859,26 @@ export default function ClassView() {
                     >
                       <Avatar name={r.name} picture={r.picture} size={32} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-slate-900">{r.name}</span>
-                        <span className="block truncate text-xs text-slate-500">{r.email}</span>
+                        <span className="block truncate font-display text-pine">{r.name}</span>
+                        <span className="block truncate text-[13px] text-pine/70">{r.email}</span>
                       </span>
                     </Link>
-                    <span className="hidden shrink-0 text-xs text-slate-400 sm:block">Joined {relativeTime(r.joined_at)}</span>
+                    <span className="hidden shrink-0 text-[13px] text-pine/50 sm:block">Joined {relativeTime(r.joined_at)}</span>
                     <Link
                       to={`/classes/${id}/students/${r.id}`}
                       title="Browse notebooks"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-pine/50 hover:bg-mint/30 hover:text-pine"
                     >
-                      <Eye className="h-4 w-4" />
+                      <Eye className="h-4 w-4" strokeWidth={2.5} />
                     </Link>
                     <button
                       type="button"
                       onClick={() => removeStudentMutation.mutate(r.id)}
                       disabled={removeStudentMutation.isPending}
                       title="Remove student"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-60"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-pine/50 hover:bg-[#a3341f]/10 hover:text-[#a3341f] disabled:opacity-60"
                     >
-                      <UserX className="h-4 w-4" />
+                      <UserX className="h-4 w-4" strokeWidth={2.5} />
                     </button>
                   </li>
                 ))}

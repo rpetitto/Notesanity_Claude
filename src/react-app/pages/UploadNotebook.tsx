@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { convertToPdf, hasGoogleClientId, needsConversion } from "../lib/google";
 import { readPageSizes } from "../lib/pdf";
 import Shell, { ErrorNote } from "../components/Shell";
+import { Button, Card, Input, Label } from "../components/ui";
 import { cn } from "../lib/utils";
 
 type Phase = "idle" | "converting" | "uploading" | "reading" | "creating" | "done";
@@ -90,22 +91,23 @@ export default function UploadNotebook() {
   return (
     <Shell>
       <div className="mx-auto max-w-xl">
-        <h1 className="text-xl font-semibold">New notebook</h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <h1 className="text-xl text-pine">New notebook</h1>
+        <p className="measure mt-1 text-sm text-pine/70">
           Upload a PDF, Word document, or PowerPoint. Notesanity keeps the original layout exactly as it is and
           turns each page into a workspace your students can write on.
         </p>
 
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
+        <Card className="mt-6 p-6">
           {error && <div className="mb-4"><ErrorNote error={error} /></div>}
 
-          <label className="block text-sm font-medium text-slate-700">Title</label>
-          <input
+          <Label htmlFor="notebook-title">Title</Label>
+          <Input
+            id="notebook-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="e.g. Unit 3 — Cell Structure"
             disabled={busy}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            className="mt-1"
           />
 
           <button
@@ -113,15 +115,15 @@ export default function UploadNotebook() {
             disabled={busy}
             onClick={() => inputRef.current?.click()}
             className={cn(
-              "mt-4 flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 transition-colors",
-              busy ? "border-slate-200 bg-slate-50" : "border-slate-300 hover:border-blue-400 hover:bg-blue-50/40",
+              "mt-4 flex w-full flex-col items-center gap-2 rounded-[22px] border-[3px] border-dashed px-6 py-10 transition-colors",
+              busy ? "border-pine/30 bg-oat" : "border-pine/40 hover:border-pine hover:bg-oat",
             )}
           >
-            {busy ? <Loader2 className="h-7 w-7 animate-spin text-blue-600" /> : <FileUp className="h-7 w-7 text-slate-400" />}
-            <span className="text-sm font-medium text-slate-700">
+            {busy ? <Loader2 className="h-7 w-7 animate-spin text-pine" /> : <FileUp className="h-7 w-7 text-pine/50" strokeWidth={2.5} />}
+            <span className="text-sm font-bold text-pine">
               {busy ? message || "Working…" : file ? file.name : "Choose a file"}
             </span>
-            {!busy && <span className="text-xs text-slate-500">PDF, DOCX, or PPTX · up to 25MB</span>}
+            {!busy && <span className="text-xs text-pine/70">PDF, DOCX, or PPTX · up to 25MB</span>}
           </button>
 
           <input
@@ -138,31 +140,32 @@ export default function UploadNotebook() {
           />
 
           {needsConversion(file ?? new File([], "x.pdf")) && !busy && (
-            <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            <p className="mt-3 rounded-[12px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-3 py-2 text-xs text-[#5c4611]">
               Office files are converted to PDF through your own Google Drive. You'll be asked to grant access once —
               the temporary file is deleted straight after conversion.
             </p>
           )}
 
           <div className="mt-5 flex gap-2">
-            <button
+            <Button
               type="button"
+              variant="primary"
               disabled={!file || busy}
               onClick={() => file && run(file, title)}
-              className="flex-1 rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex-1"
             >
               {busy ? "Working…" : "Create notebook"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
               disabled={busy}
               onClick={() => navigate(`/classes/${classId}`)}
-              className="rounded-full border border-slate-300 px-4 py-2.5 text-sm hover:bg-slate-50 disabled:opacity-50"
             >
               Cancel
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       </div>
     </Shell>
   );

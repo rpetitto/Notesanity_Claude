@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
-import { KeyRound, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Check, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
+import { Button, Card, CardLink, Chip, Input, Modal } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { cn, formatDue, isOverdue } from "../lib/utils";
 
@@ -48,11 +49,11 @@ const STATUS_LABEL: Record<MyAssignment["status"], string> = {
   returned: "Returned",
 };
 
-const STATUS_CLASS: Record<MyAssignment["status"], string> = {
-  not_started: "bg-slate-100 text-slate-600",
-  in_progress: "bg-blue-50 text-blue-700",
-  submitted: "bg-amber-50 text-amber-700",
-  returned: "bg-emerald-50 text-emerald-700",
+const STATUS_TONE: Record<MyAssignment["status"], "quiet" | "default" | "warn" | "mint"> = {
+  not_started: "quiet",
+  in_progress: "default",
+  submitted: "warn",
+  returned: "mint",
 };
 
 function gradeLabel(a: MyAssignment): string | null {
@@ -65,13 +66,10 @@ function gradeLabel(a: MyAssignment): string | null {
 
 function ClassCard({ cls }: { cls: ClassRow }) {
   const [coverFailed, setCoverFailed] = useState(false);
-  const accent = cls.accent_color || "#1A73E8";
+  const accent = cls.accent_color || "#20302C";
   return (
-    <Link
-      to={`/classes/${cls.id}`}
-      className="block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
-    >
-      <div className="relative h-20 w-full overflow-hidden">
+    <CardLink to={`/classes/${cls.id}`}>
+      <div className="relative h-20 w-full overflow-hidden border-b-[3px] border-pine">
         <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}, ${accent}99)` }} />
         {!coverFailed && (
           <img
@@ -85,20 +83,20 @@ function ClassCard({ cls }: { cls: ClassRow }) {
       <div className="p-4">
         <div className="flex items-center gap-2.5">
           {cls.emoji && (
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-oat text-base">
               {cls.emoji}
             </span>
           )}
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-slate-900">{cls.name}</div>
-            <div className="truncate text-xs text-slate-500">{cls.section || " "}</div>
+            <div className="truncate font-display text-sm font-bold text-pine">{cls.name}</div>
+            <div className="truncate text-xs text-pine/70">{cls.section || " "}</div>
           </div>
         </div>
-        <div className="mt-3 text-xs text-slate-500">
+        <div className="mt-3 text-xs text-pine/70">
           {cls.notebook_count} notebook{cls.notebook_count === 1 ? "" : "s"}
         </div>
       </div>
-    </Link>
+    </CardLink>
   );
 }
 
@@ -112,26 +110,26 @@ function AssignmentRow({ a }: { a: MyAssignment }) {
     <button
       type="button"
       onClick={() => navigate(`/notebooks/${a.notebookId}?assignment=${a.id}`)}
-      className="flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-shadow hover:shadow-md"
+      className="flex w-full items-center gap-4 rounded-[22px] border-[3px] border-pine bg-white px-4 py-3.5 text-left transition-[transform,box-shadow] hover:-translate-y-0.5"
     >
-      <span className="mt-0.5 h-9 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: a.accentColor || "#1A73E8" }} />
+      <span className="mt-0.5 h-9 w-1.5 shrink-0 rounded-full border border-pine/30" style={{ backgroundColor: a.accentColor || "#20302C" }} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-slate-900">{a.title}</span>
-        <span className="block truncate text-xs text-slate-500">
+        <span className="block truncate text-sm font-bold text-pine">{a.title}</span>
+        <span className="block truncate text-xs text-pine/70">
           {a.className} &middot; {a.notebookTitle}
         </span>
       </span>
-      <span className="hidden shrink-0 text-xs text-slate-500 sm:block">
+      <span className="hidden shrink-0 text-xs text-pine/70 sm:block">
         {a.complete}/{a.total} pages
       </span>
-      <span className={cn("shrink-0 text-xs", overdue ? "font-medium text-rose-600" : "text-slate-500")}>
+      <span className={cn("shrink-0 text-xs", overdue ? "font-bold text-[#a3341f]" : "text-pine/70")}>
         {formatDue(a.dueAt)}
       </span>
-      <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_CLASS[a.status])}>
+      <Chip tone={STATUS_TONE[a.status]} icon={a.status === "returned" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}>
         {STATUS_LABEL[a.status]}
-      </span>
+      </Chip>
       {grade && (
-        <span className="shrink-0 rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white">{grade}</span>
+        <Chip tone="mint" icon={<Check className="h-3 w-3" strokeWidth={2.5} />}>{grade}</Chip>
       )}
     </button>
   );
@@ -164,40 +162,28 @@ function JoinClassModal({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Join a class</h2>
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (code.length !== 6) return;
-            mutation.mutate();
-          }}
-        >
-          <label className="mb-1 block text-xs font-medium text-slate-600">Class code</label>
-          <input
-            autoFocus
-            value={code}
-            maxLength={6}
-            onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
-            placeholder="ABC123"
-            className="h-14 w-full rounded-lg border border-slate-300 text-center font-mono text-2xl tracking-[0.5em] focus:border-blue-500 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={code.length !== 6 || mutation.isPending}
-            className="mt-4 h-11 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            {mutation.isPending ? "Joining…" : "Join class"}
-          </button>
-        </form>
-      </div>
-    </div>
+    <Modal onClose={onClose} title="Join a class">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (code.length !== 6) return;
+          mutation.mutate();
+        }}
+      >
+        <label className="label-caps mb-1 block text-pine/70">Class code</label>
+        <Input
+          autoFocus
+          value={code}
+          maxLength={6}
+          onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+          placeholder="ABC123"
+          className="h-14 text-center font-mono text-2xl tracking-[0.5em]"
+        />
+        <Button type="submit" variant="primary" disabled={code.length !== 6 || mutation.isPending} className="mt-4 w-full">
+          {mutation.isPending ? "Joining…" : "Join class"}
+        </Button>
+      </form>
+    </Modal>
   );
 }
 
@@ -220,19 +206,15 @@ export default function StudentHome() {
   return (
     <Shell>
       <div className="mb-6 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">My work</h1>
-        <button
-          type="button"
-          onClick={() => setJoinOpen(true)}
-          className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          <KeyRound className="h-4 w-4" />
+        <h1 className="text-2xl text-pine">My work</h1>
+        <Button variant="primary" onClick={() => setJoinOpen(true)}>
+          <KeyRound className="h-4 w-4" strokeWidth={2.5} />
           Join a class
-        </button>
+        </Button>
       </div>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">My classes</h2>
+        <h2 className="label-caps mb-3 text-pine/70">My classes</h2>
         {classesQ.isLoading && <Spinner />}
         {classesQ.error && <ErrorNote error={classesQ.error as Error} />}
         {!classesQ.isLoading && !classesQ.error && classesQ.data && classesQ.data.classes.length === 0 && (
@@ -240,14 +222,10 @@ export default function StudentHome() {
             title="You haven't joined a class yet"
             body="Ask your teacher for a class code, then use Join a class above to get started."
             action={
-              <button
-                type="button"
-                onClick={() => setJoinOpen(true)}
-                className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                <KeyRound className="h-4 w-4" />
+              <Button variant="primary" onClick={() => setJoinOpen(true)}>
+                <KeyRound className="h-4 w-4" strokeWidth={2.5} />
                 Join a class
-              </button>
+              </Button>
             }
           />
         )}
@@ -261,7 +239,7 @@ export default function StudentHome() {
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Assignments</h2>
+        <h2 className="label-caps mb-3 text-pine/70">Assignments</h2>
         {assignmentsQ.isLoading && <Spinner />}
         {assignmentsQ.error && <ErrorNote error={assignmentsQ.error as Error} />}
         {!assignmentsQ.isLoading && !assignmentsQ.error && assignmentsQ.data && assignmentsQ.data.assignments.length === 0 && (
@@ -277,7 +255,7 @@ export default function StudentHome() {
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">My notebooks</h2>
+        <h2 className="label-caps mb-3 text-pine/70">My notebooks</h2>
         {notebooksQ.isLoading && <Spinner />}
         {notebooksQ.error && <ErrorNote error={notebooksQ.error as Error} />}
         {!notebooksQ.isLoading && !notebooksQ.error && notebooksQ.data && notebooksQ.data.notebooks.length === 0 && (
@@ -286,19 +264,14 @@ export default function StudentHome() {
         {!notebooksQ.isLoading && !notebooksQ.error && notebooksQ.data && notebooksQ.data.notebooks.length > 0 && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {notebooksQ.data.notebooks.map((nb) => (
-              <button
-                key={nb.id}
-                type="button"
-                onClick={() => navigate(`/notebooks/${nb.id}`)}
-                className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition-shadow hover:shadow-md"
-              >
-                <div className="h-1.5 w-full" style={{ backgroundColor: nb.accent_color || "#1A73E8" }} />
-                <div className="p-4">
-                  <div className="truncate text-sm font-semibold text-slate-900">{nb.title}</div>
-                  <div className="truncate text-xs text-slate-500">{nb.class_name}</div>
-                  <div className="mt-3 text-xs text-slate-500">{nb.page_count} pages</div>
+              <Card key={nb.id} pressable className="cursor-pointer" onClick={() => navigate(`/notebooks/${nb.id}`)}>
+                <div className="h-1.5 w-full border-b-[3px] border-pine" style={{ backgroundColor: nb.accent_color || "#20302C" }} />
+                <div className="p-4 text-left">
+                  <div className="truncate font-display text-sm font-bold text-pine">{nb.title}</div>
+                  <div className="truncate text-xs text-pine/70">{nb.class_name}</div>
+                  <div className="mt-3 text-xs text-pine/70">{nb.page_count} pages</div>
                 </div>
-              </button>
+              </Card>
             ))}
           </div>
         )}

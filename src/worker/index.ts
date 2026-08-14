@@ -13,6 +13,7 @@
 import { app, auth } from "flingit";
 
 import "./schema";
+import "./routes/auth";
 import "./routes/me";
 import "./routes/classes";
 import "./routes/notebooks";

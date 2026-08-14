@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Trash2, X } from "lucide-react";
-import { api, type PageRec } from "../lib/api";
+import { AlertTriangle, Check, Trash2 } from "lucide-react";
+import { api, assetUrl, type PageRec } from "../lib/api";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
+import PageThumb from "../components/PageThumb";
+import { Button, Card, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import { cn, toIso, toLocalInput } from "../lib/utils";
 
 type Grading = "none" | "complete" | "points" | "letter";
@@ -43,52 +45,34 @@ function DeleteAssignmentModal({
   onConfirm: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-        <div className="flex items-start justify-between">
-          <h3 className="text-base font-semibold text-slate-900">Delete assignment?</h3>
-          <button onClick={onCancel} className="rounded-full p-1 text-slate-400 hover:bg-slate-100" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {loading || !impact ? (
-          <div className="py-8"><Spinner label="Checking impact…" /></div>
-        ) : (
-          <>
-            <div className="mt-3 space-y-1.5 text-sm text-slate-700">
-              {impact.submitted > 0 && (
-                <p>{impact.submitted} of {impact.total} students have turned this in.</p>
-              )}
-              {impact.graded > 0 && <p>{impact.graded} have been graded.</p>}
-              {impact.submitted === 0 && impact.graded === 0 && (
-                <p>No one has turned this in yet.</p>
-              )}
-            </div>
-            <p className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-              Deleting removes the assignment and all of its grades and submission records.
-              It does <strong>not</strong> delete the pages or anything students wrote on them —
-              that work stays in the notebook.
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                onClick={onCancel}
-                className="rounded-full px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={onConfirm}
-                disabled={deleting}
-                className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
-              >
-                <Trash2 className="h-4 w-4" /> Delete assignment
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+    <Modal onClose={onCancel} title="Delete assignment?">
+      {loading || !impact ? (
+        <div className="py-8"><Spinner label="Checking impact…" /></div>
+      ) : (
+        <>
+          <div className="mt-1 space-y-1.5 text-[15px] text-pine/80">
+            {impact.submitted > 0 && (
+              <p>{impact.submitted} of {impact.total} students have turned this in.</p>
+            )}
+            {impact.graded > 0 && <p>{impact.graded} have been graded.</p>}
+            {impact.submitted === 0 && impact.graded === 0 && (
+              <p>No one has turned this in yet.</p>
+            )}
+          </div>
+          <p className="mt-3 rounded-[12px] bg-oat p-3 text-[13px] leading-relaxed text-pine/80">
+            Deleting removes the assignment and all of its grades and submission records.
+            It does <strong>not</strong> delete the pages or anything students wrote on them —
+            that work stays in the notebook.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+            <Button variant="danger" onClick={onConfirm} disabled={deleting}>
+              <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete assignment
+            </Button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -202,15 +186,15 @@ export default function AssignmentEditor() {
   return (
     <Shell>
       <div className="mx-auto max-w-2xl">
-        <h1 className="text-xl font-semibold">{editing ? "Edit assignment" : "New assignment"}</h1>
+        <h1 className="font-display text-[32px] text-pine">{editing ? "Edit assignment" : "New assignment"}</h1>
         {classQuery.error && <div className="mt-4"><ErrorNote error={classQuery.error as Error} /></div>}
 
         {editing && hasImpact && impact && (
-          <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="mt-4 rounded-[12px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[15px] text-[#5c4611]">
             <div className="flex items-start gap-2">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={2.5} />
               <div className="space-y-1.5">
-                <p className="font-medium">Students have already started this assignment</p>
+                <p className="font-display">Students have already started this assignment</p>
                 {(impact.submitted > 0 || impact.started > 0) && (
                   <p>
                     Removing pages from the selection below hides that page from the assignment —
@@ -236,41 +220,41 @@ export default function AssignmentEditor() {
           </div>
         )}
 
-        <div className="mt-6 space-y-5 rounded-2xl border border-slate-200 bg-white p-6">
+        <Card className="mt-6 space-y-5 p-6">
           <div>
-            <label className="block text-sm font-medium text-slate-700">Title</label>
-            <input
+            <Label>Title</Label>
+            <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Unit 3 practice problems"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              className="mt-1.5"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700">Instructions</label>
-            <textarea
+            <Label>Instructions</Label>
+            <Textarea
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
               rows={3}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              className="mt-1.5"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700">Notebook</label>
-            <select
+            <Label>Notebook</Label>
+            <Select
               value={notebookId}
               onChange={(e) => { setNotebookId(e.target.value); setPageIds([]); }}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              className="mt-1.5"
             >
               <option value="">Choose a notebook…</option>
               {notebooks.map((n: any) => (
                 <option key={n.id} value={n.id}>{n.title} ({n.page_count} pages)</option>
               ))}
-            </select>
+            </Select>
             {notebooks.length === 0 && (
-              <p className="mt-1 text-xs text-amber-700">
+              <p className="mt-1.5 text-[13px] text-[#8a6a1f]">
                 No published notebooks yet — publish one first, then create the assignment.
               </p>
             )}
@@ -279,15 +263,13 @@ export default function AssignmentEditor() {
           {notebookId && (
             <div>
               <div className="flex items-center justify-between">
-                <label className="block text-sm font-medium text-slate-700">
-                  Pages ({pageIds.length} selected)
-                </label>
-                <button type="button" onClick={toggleAll} className="text-xs text-blue-600 hover:underline">
+                <Label>Pages ({pageIds.length} selected)</Label>
+                <button type="button" onClick={toggleAll} className="font-display text-[13px] text-pine hover:underline">
                   {pageIds.length === pages.length ? "Clear all" : "Select all"}
                 </button>
               </div>
-              <p className="mt-0.5 text-xs text-slate-500">Pages don't have to be next to each other.</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <p className="mt-0.5 text-[13px] text-pine/70">Pages don't have to be next to each other.</p>
+              <div className="mt-2 grid grid-cols-3 gap-2.5 sm:grid-cols-5 lg:grid-cols-7">
                 {pages.map((p, i) => {
                   const on = pageIds.includes(p.id);
                   return (
@@ -297,13 +279,27 @@ export default function AssignmentEditor() {
                       onClick={() =>
                         setPageIds((prev) => (on ? prev.filter((x) => x !== p.id) : [...prev, p.id]))
                       }
-                      className={cn(
-                        "h-10 min-w-10 rounded-lg border px-2 text-sm transition-colors",
-                        on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50",
-                      )}
                       title={p.label || `Page ${i + 1}`}
+                      className={cn(
+                        "relative flex flex-col items-center rounded-[12px] p-1.5 transition-colors",
+                        on ? "ring-[3px] ring-pine bg-oat" : "border-2 border-pine/20 hover:bg-oat",
+                      )}
                     >
-                      {i + 1}
+                      <PageThumb
+                        pdfUrl={assetUrl(notebookId, p.asset_key)}
+                        sourceIndex={p.source_index}
+                        pageWidth={p.width}
+                        pageHeight={p.height}
+                        width={72}
+                      />
+                      <span className="absolute bottom-1.5 left-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-pine bg-white px-1 font-display text-[10px] text-pine">
+                        {i + 1}
+                      </span>
+                      {on && (
+                        <span className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-pine bg-mint text-pine">
+                          <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -313,89 +309,70 @@ export default function AssignmentEditor() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Release</label>
-              <input
+              <Label>Release</Label>
+              <Input
                 type="datetime-local"
                 value={releaseAt}
                 onChange={(e) => setReleaseAt(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                className="mt-1.5"
               />
-              <p className="mt-1 text-xs text-slate-500">Leave blank to release immediately.</p>
+              <p className="mt-1 text-[13px] text-pine/70">Leave blank to release immediately.</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">Due</label>
-              <input
+              <Label>Due</Label>
+              <Input
                 type="datetime-local"
                 value={dueAt}
                 onChange={(e) => setDueAt(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                className="mt-1.5"
               />
             </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Grading</label>
-              <select
-                value={grading}
-                onChange={(e) => setGrading(e.target.value as Grading)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-              >
+              <Label>Grading</Label>
+              <Select value={grading} onChange={(e) => setGrading(e.target.value as Grading)} className="mt-1.5">
                 <option value="points">Points</option>
                 <option value="letter">Letter grade</option>
                 <option value="complete">Complete / Incomplete</option>
                 <option value="none">Ungraded</option>
-              </select>
+              </Select>
             </div>
             {grading === "points" && (
               <div>
-                <label className="block text-sm font-medium text-slate-700">Points possible</label>
-                <input
+                <Label>Points possible</Label>
+                <Input
                   type="number"
                   min={1}
                   value={pointsMax}
                   onChange={(e) => setPointsMax(Number(e.target.value))}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                  className="mt-1.5"
                 />
               </div>
             )}
           </div>
 
           <div className="flex flex-wrap gap-2 pt-2">
-            <button
-              disabled={!canSave || save.isPending}
-              onClick={() => save.mutate("active")}
-              className="rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
+            <Button variant="primary" disabled={!canSave || save.isPending} onClick={() => save.mutate("active")}>
               {editing ? "Save changes" : "Assign to class"}
-            </button>
-            <button
-              disabled={!canSave || save.isPending}
-              onClick={() => save.mutate("draft")}
-              className="rounded-full border border-slate-300 px-4 py-2.5 text-sm hover:bg-slate-50 disabled:opacity-50"
-            >
+            </Button>
+            <Button variant="secondary" disabled={!canSave || save.isPending} onClick={() => save.mutate("draft")}>
               Save as draft
-            </button>
-            <button
-              onClick={() => navigate(`/classes/${classId}`)}
-              className="rounded-full px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-100"
-            >
+            </Button>
+            <Button variant="ghost" onClick={() => navigate(`/classes/${classId}`)}>
               Cancel
-            </button>
+            </Button>
           </div>
 
           {editing && (
-            <div className="border-t border-slate-200 pt-5">
-              <button
-                type="button"
-                onClick={openDeleteModal}
-                className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 px-4 py-2.5 text-sm font-medium text-rose-600 hover:bg-rose-50"
-              >
-                <Trash2 className="h-4 w-4" /> Delete assignment
-              </button>
+            <div className="border-t-[3px] border-pine/15 pt-5">
+              <Button type="button" variant="danger" onClick={openDeleteModal}>
+                <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete assignment
+              </Button>
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {showDeleteModal && (

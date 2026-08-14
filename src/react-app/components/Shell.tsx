@@ -13,14 +13,14 @@ export function Avatar({ name, picture, size = 32 }: { name: string; picture?: s
         width={size}
         height={size}
         referrerPolicy="no-referrer"
-        className="shrink-0 rounded-full object-cover"
+        className="shrink-0 rounded-full border-2 border-pine object-cover"
         style={{ width: size, height: size }}
       />
     );
   }
   return (
     <div
-      className="flex shrink-0 items-center justify-center rounded-full bg-blue-600 font-medium text-white"
+      className="flex shrink-0 items-center justify-center rounded-full border-2 border-pine bg-mint font-display font-bold text-pine"
       style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
       {initials(name || "?")}
@@ -30,28 +30,18 @@ export function Avatar({ name, picture, size = 32 }: { name: string; picture?: s
 
 export function Logo({ size = 28 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden>
-      <rect x="9" y="6" width="46" height="52" rx="7" fill="#1A73E8" />
-      <rect x="15" y="6" width="5" height="52" fill="#0B4EA2" />
-      <rect x="26" y="19" width="22" height="3.5" rx="1.75" fill="#fff" />
-      <rect x="26" y="29" width="22" height="3.5" rx="1.75" fill="#fff" />
-      <rect x="26" y="39" width="14" height="3.5" rx="1.75" fill="#fff" />
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden>
+      <g stroke="#20302C" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <rect x="10" y="12" width="40" height="40" rx="10" fill="#F4EFE6" transform="rotate(-10 30 32)" />
+        <rect x="18" y="14" width="38" height="40" rx="10" fill="#7FD1AE" />
+        <path d="M27 34.5 33 40.5 46 27" strokeWidth={4} />
+      </g>
     </svg>
   );
 }
 
 export function FlingBadge() {
-  return (
-    <a
-      href="https://flingit.io"
-      target="_blank"
-      rel="noopener noreferrer"
-      className="fixed bottom-16 left-3 z-40 hidden items-center gap-1.5 sm:bottom-3 sm:flex rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-500 shadow-sm hover:text-slate-800"
-    >
-      <span className="inline-block h-3 w-3 rounded-sm bg-blue-600" />
-      Made with Fling
-    </a>
-  );
+  return null;
 }
 
 export default function Shell({ children, wide }: { children: ReactNode; wide?: boolean }) {
@@ -71,11 +61,11 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
 
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b-[3px] border-pine bg-oat/95 backdrop-blur">
         <div className={cn("mx-auto flex h-14 items-center gap-4 px-4", wide ? "max-w-none" : "max-w-6xl")}>
           <Link to={user?.role === "teacher" ? "/classes" : "/work"} className="flex items-center gap-2">
             <Logo size={26} />
-            <span className="text-lg font-semibold tracking-tight">Notesanity</span>
+            <span className="wordmark text-[22px]">Notesanity</span>
           </Link>
 
           <nav className="ml-2 hidden items-center gap-1 sm:flex">
@@ -84,8 +74,10 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
                 key={to}
                 to={to}
                 className={cn(
-                  "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
-                  pathname.startsWith(to) ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100",
+                  "flex min-h-[44px] items-center gap-2 rounded-full border-[3px] px-4 font-display text-[15px] font-bold transition-colors",
+                  pathname.startsWith(to)
+                    ? "border-pine bg-pine text-oat"
+                    : "border-transparent text-pine hover:bg-pine/8",
                 )}
               >
                 <Icon className="h-4 w-4" />
@@ -96,13 +88,13 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
 
           <div className="ml-auto flex items-center gap-3">
             {user && (
-              <span className="hidden items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600 sm:flex">
+              <span className="label-caps hidden items-center gap-1.5 rounded-full border-2 border-pine/25 px-2.5 py-1 text-pine/70 sm:flex">
                 <GraduationCap className="h-3.5 w-3.5" />
                 {user.role === "teacher" ? "Teacher" : "Student"}
               </span>
             )}
             {user && <Avatar name={user.name} picture={user.picture} size={30} />}
-            <a href={signOutHref} title="Sign out" className="rounded-full p-2 text-slate-500 hover:bg-slate-100">
+            <a href={signOutHref} title="Sign out" className="flex h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8">
               <LogOut className="h-4 w-4" />
             </a>
           </div>
@@ -113,7 +105,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
       {/* Phone navigation. The header row collapses below sm:, so without this
           there is no way to move between sections on a handset. */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-slate-200 bg-white/95 backdrop-blur sm:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 flex border-t-[3px] border-pine bg-oat/97 backdrop-blur sm:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {nav.map(({ to, label, icon: Icon }) => {
@@ -123,27 +115,26 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
               key={to}
               to={to}
               className={cn(
-                "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium",
-                active ? "text-blue-700" : "text-slate-500",
+                "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 font-display text-[12px] font-bold",
+                active ? "text-pine" : "text-pine/55",
               )}
             >
-              <Icon className={cn("h-5 w-5", active && "text-blue-600")} />
+              <Icon className="h-6 w-6" strokeWidth={2.5} />
               {label}
             </Link>
           );
         })}
       </nav>
 
-      <FlingBadge />
     </div>
   );
 }
 
 export function EmptyState({ title, body, action }: { title: string; body?: string; action?: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-14 text-center">
-      <div className="text-base font-medium text-slate-800">{title}</div>
-      {body && <p className="mx-auto mt-1.5 max-w-md text-sm text-slate-500">{body}</p>}
+    <div className="rounded-[22px] border-[3px] border-dashed border-pine/40 bg-white/60 px-6 py-14 text-center">
+      <div className="font-display text-[22px] text-pine">{title}</div>
+      {body && <p className="measure mx-auto mt-2 text-pine/70">{body}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
   );
@@ -151,8 +142,8 @@ export function EmptyState({ title, body, action }: { title: string; body?: stri
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-3 py-16 text-sm text-slate-500">
-      <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+    <div className="flex items-center justify-center gap-3 py-16 text-pine/70">
+      <span className="h-5 w-5 animate-spin rounded-full border-[3px] border-pine/25 border-t-pine" />
       {label ?? "Loading…"}
     </div>
   );
@@ -160,7 +151,7 @@ export function Spinner({ label }: { label?: string }) {
 
 export function ErrorNote({ error }: { error: Error }) {
   return (
-    <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+    <div className="rounded-[12px] border-[3px] border-[#a3341f] bg-[#fbe9e4] px-4 py-3 text-[#7d2716]">
       {error.message}
     </div>
   );

@@ -292,6 +292,50 @@ migrate("006_master_annotations", async () => {
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_page_annotations_nb ON page_annotations(notebook_id)`).run();
 });
 
+/**
+ * Sign-in beyond Google.
+ *
+ * `credentials` holds a PBKDF2 hash + per-user salt (never a raw password).
+ * `auth_tokens` backs magic links and password resets: only a hash of the token
+ * is stored, so a leaked database still can't be used to sign in as anyone.
+ * `sessions` is a plain opaque-token table — the cookie value is a random id
+ * looked up here, which needs no signing secret to be unforgeable.
+ */
+migrate("007_local_auth", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS credentials (
+      user_id TEXT PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      salt TEXT NOT NULL,
+      iterations INTEGER NOT NULL DEFAULT 210000,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS auth_tokens (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      purpose TEXT NOT NULL DEFAULT 'magic',
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_auth_tokens_email ON auth_tokens(email)`).run();
+
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`).run();
+});
+
 /** Class identity: an emoji badge and an optional featured image. */
 migrate("004_class_identity", async () => {
   const cols = await db.prepare(`PRAGMA table_info(classes)`).all<{ name: string }>();

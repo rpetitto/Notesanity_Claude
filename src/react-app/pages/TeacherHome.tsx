@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Plus, Users, BookOpen, X, Import } from "lucide-react";
+import { Plus, Users, BookOpen, Import } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
+import { Button, Input, Label, Modal } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
 
@@ -32,7 +33,7 @@ function ClassCard({ cls }: { cls: ClassRow }) {
   return (
     <Link
       to={`/classes/${cls.id}`}
-      className="block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+      className="block overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--color-pine)]"
     >
       <div className="relative h-20 w-full overflow-hidden">
         <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}, ${accent}99)` }} />
@@ -48,22 +49,22 @@ function ClassCard({ cls }: { cls: ClassRow }) {
       <div className="p-4">
         <div className="flex items-center gap-2.5">
           {cls.emoji && (
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-oat text-base">
               {cls.emoji}
             </span>
           )}
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-slate-900">{cls.name}</div>
-            <div className="truncate text-xs text-slate-500">{cls.section || " "}</div>
+            <div className="truncate font-display text-[17px] text-pine">{cls.name}</div>
+            <div className="truncate text-[13px] text-pine/70">{cls.section || " "}</div>
           </div>
         </div>
-        <div className="mt-4 flex items-center gap-4 text-xs text-slate-500">
+        <div className="mt-4 flex items-center gap-4 text-[13px] text-pine/70">
           <span className="flex items-center gap-1.5">
-            <Users className="h-3.5 w-3.5" />
+            <Users className="h-3.5 w-3.5" strokeWidth={2.5} />
             {cls.student_count} student{cls.student_count === 1 ? "" : "s"}
           </span>
           <span className="flex items-center gap-1.5">
-            <BookOpen className="h-3.5 w-3.5" />
+            <BookOpen className="h-3.5 w-3.5" strokeWidth={2.5} />
             {cls.notebook_count} notebook{cls.notebook_count === 1 ? "" : "s"}
           </span>
         </div>
@@ -89,57 +90,39 @@ function NewClassModal({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
+    <Modal onClose={onClose} title="New class">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim()) return;
+          mutation.mutate();
+        }}
+        className="space-y-4"
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">New class</h2>
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100">
-            <X className="h-4 w-4" />
-          </button>
+        <div>
+          <Label>Class name</Label>
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Period 3 Biology"
+            className="mt-1.5"
+          />
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!name.trim()) return;
-            mutation.mutate();
-          }}
-          className="space-y-3"
-        >
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Class name</label>
-            <input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Period 3 Biology"
-              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm focus:border-blue-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Section (optional)</label>
-            <input
-              value={section}
-              onChange={(e) => setSection(e.target.value)}
-              placeholder="Room 204"
-              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm focus:border-blue-500 focus:outline-none"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={!name.trim() || mutation.isPending}
-            className="mt-2 h-11 w-full rounded-full bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            {mutation.isPending ? "Creating…" : "Create class"}
-          </button>
-        </form>
-      </div>
-    </div>
+        <div>
+          <Label>Section (optional)</Label>
+          <Input
+            value={section}
+            onChange={(e) => setSection(e.target.value)}
+            placeholder="Room 204"
+            className="mt-1.5"
+          />
+        </div>
+        <Button type="submit" variant="primary" disabled={!name.trim() || mutation.isPending} className="w-full">
+          {mutation.isPending ? "Creating…" : "Create class"}
+        </Button>
+      </form>
+    </Modal>
   );
 }
 
@@ -189,50 +172,35 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Import from Google Classroom</h2>
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {loading && <Spinner label="Loading your courses…" />}
-        {!loading && error && <ErrorNote error={new Error(error)} />}
-        {!loading && !error && courses && courses.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-500">No active courses found in Google Classroom.</p>
-        )}
-        {!loading && !error && courses && courses.length > 0 && (
-          <ul className="space-y-2">
-            {courses.map((course) => (
-              <li key={course.id}>
-                <button
-                  type="button"
-                  disabled={importingId !== null}
-                  onClick={() => importCourse(course)}
-                  className="flex w-full items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-left text-sm hover:border-blue-300 hover:bg-blue-50/50 disabled:opacity-60"
-                >
-                  <span>
-                    <span className="block font-medium text-slate-900">{course.name}</span>
-                    {course.section && <span className="block text-xs text-slate-500">{course.section}</span>}
-                  </span>
-                  {importingId === course.id && (
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
+    <Modal onClose={onClose} title="Import from Google Classroom">
+      {loading && <Spinner label="Loading your courses…" />}
+      {!loading && error && <ErrorNote error={new Error(error)} />}
+      {!loading && !error && courses && courses.length === 0 && (
+        <p className="py-6 text-center text-[15px] text-pine/70">No active courses found in Google Classroom.</p>
+      )}
+      {!loading && !error && courses && courses.length > 0 && (
+        <ul className="space-y-2">
+          {courses.map((course) => (
+            <li key={course.id}>
+              <button
+                type="button"
+                disabled={importingId !== null}
+                onClick={() => importCourse(course)}
+                className="flex w-full items-center justify-between rounded-[12px] border-[3px] border-pine px-4 py-3 text-left text-[15px] hover:bg-oat disabled:opacity-60"
+              >
+                <span>
+                  <span className="block font-display text-pine">{course.name}</span>
+                  {course.section && <span className="block text-[13px] text-pine/70">{course.section}</span>}
+                </span>
+                {importingId === course.id && (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-pine/25 border-t-pine" />
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   );
 }
 
@@ -247,26 +215,18 @@ export default function TeacherHome() {
   return (
     <Shell>
       <div className="mb-6 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Classes</h1>
+        <h1 className="font-display text-[32px] text-pine">Classes</h1>
         <div className="flex items-center gap-2">
           {hasGoogleClientId && (
-            <button
-              type="button"
-              onClick={() => setImportOpen(true)}
-              className="flex h-11 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Import className="h-4 w-4" />
+            <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>
+              <Import className="h-4 w-4" strokeWidth={2.5} />
               Import from Classroom
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            onClick={() => setNewClassOpen(true)}
-            className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4" />
+          <Button type="button" variant="primary" onClick={() => setNewClassOpen(true)}>
+            <Plus className="h-4 w-4" strokeWidth={2.5} />
             New class
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -277,14 +237,10 @@ export default function TeacherHome() {
           title="No classes yet"
           body="Create your first class to start building notebooks for your students."
           action={
-            <button
-              type="button"
-              onClick={() => setNewClassOpen(true)}
-              className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4" />
+            <Button type="button" variant="primary" onClick={() => setNewClassOpen(true)}>
+              <Plus className="h-4 w-4" strokeWidth={2.5} />
               New class
-            </button>
+            </Button>
           }
         />
       )}

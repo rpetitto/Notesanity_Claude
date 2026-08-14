@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
+import { ButtonLink, Card, Chip } from "../components/ui";
 import { api, assetUrl, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue } from "../lib/utils";
 
@@ -111,11 +112,11 @@ function formatPageNumbers(numbers: number[]): string {
   return parts.join(", ");
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  not_started: "bg-slate-100 text-slate-600",
-  in_progress: "bg-amber-50 text-amber-700",
-  submitted: "bg-blue-50 text-blue-700",
-  returned: "bg-emerald-50 text-emerald-700",
+const STATUS_TONE: Record<string, "quiet" | "warn" | "default" | "mint"> = {
+  not_started: "quiet",
+  in_progress: "warn",
+  submitted: "default",
+  returned: "mint",
 };
 const STATUS_LABELS: Record<string, string> = {
   not_started: "Not started",
@@ -140,8 +141,8 @@ function gradeLabel(
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col">
-      <span className="text-2xl font-semibold leading-none text-slate-900">{value}</span>
-      <span className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="font-display text-[32px] leading-none text-pine">{value}</span>
+      <span className="label-caps mt-1.5 text-pine/50">{label}</span>
     </div>
   );
 }
@@ -155,28 +156,28 @@ function StudentRows({
   grading: "none" | "complete" | "points" | "letter";
   pointsMax: number;
 }) {
-  if (rows.length === 0) return <p className="py-3 text-sm text-slate-500">No students enrolled.</p>;
+  if (rows.length === 0) return <p className="py-3 text-[15px] text-pine/70">No students enrolled.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[420px] text-sm">
-        <tbody className="divide-y divide-slate-100">
+      <table className="w-full min-w-[420px] text-[15px]">
+        <tbody className="divide-y divide-pine/10">
           {rows.map((r) => (
             <tr key={r.student.id}>
               <td className="py-2 pr-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <Avatar name={r.student.name} picture={r.student.picture} size={24} />
-                  <span className="truncate text-slate-800">{r.student.name}</span>
+                  <span className="truncate text-pine">{r.student.name}</span>
                 </div>
               </td>
               <td className="py-2 pr-3">
-                <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_STYLES[r.status] ?? "bg-slate-100 text-slate-600")}>
+                <Chip tone={STATUS_TONE[r.status] ?? "quiet"} className="text-[11px]">
                   {STATUS_LABELS[r.status] ?? r.status}
-                </span>
+                </Chip>
               </td>
-              <td className="whitespace-nowrap py-2 pr-3 text-xs text-slate-500">
+              <td className="whitespace-nowrap py-2 pr-3 text-[13px] text-pine/70">
                 {r.complete}/{r.total} pages
               </td>
-              <td className="whitespace-nowrap py-2 text-right text-sm font-medium text-slate-800">
+              <td className="whitespace-nowrap py-2 text-right font-display text-pine">
                 {gradeLabel(grading, pointsMax, r.grade, r.graded)}
               </td>
             </tr>
@@ -229,15 +230,15 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
   const accent = a.notebookColor || "#1A73E8";
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="h-1.5" style={{ backgroundColor: accent }} />
+    <Card>
+      <div className="h-2" style={{ backgroundColor: accent }} />
       <div className="p-4">
         <div className="flex gap-4">
           <div
             className="relative hidden h-[92px] w-[76px] shrink-0 rounded-lg sm:block"
             style={{ backgroundColor: `${accent}14` }}
           >
-            {stackPages.length === 0 && <div className="h-full w-full animate-pulse rounded-lg bg-slate-100" />}
+            {stackPages.length === 0 && <div className="h-full w-full animate-pulse rounded-lg bg-oat" />}
             {stackPages.map((p, i) => (
               <div
                 key={p.id}
@@ -259,7 +260,7 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
               </div>
             ))}
             {extra > 0 && (
-              <span className="absolute -bottom-1 -right-1 z-20 flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-800 px-1 text-[10px] font-semibold text-white ring-2 ring-white">
+              <span className="absolute -bottom-1 -right-1 z-20 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-pine px-1 font-display text-[10px] text-oat">
                 +{extra}
               </span>
             )}
@@ -268,33 +269,25 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <Link to={`/assignments/${a.id}`} className="block truncate text-sm font-semibold text-slate-900 hover:text-blue-700">
+                <Link to={`/assignments/${a.id}`} className="block truncate font-display text-[17px] text-pine hover:underline">
                   {a.title}
                 </Link>
-                <div className="mt-0.5 truncate text-xs text-slate-500">
+                <div className="mt-0.5 truncate text-[13px] text-pine/70">
                   {a.notebookTitle} &middot; {pageNumbersLabel}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                      a.status === "draft" ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700",
-                    )}
-                  >
+                  <Chip tone={a.status === "draft" ? "quiet" : "default"}>
                     {a.status === "draft" ? "Draft" : "Active"}
-                  </span>
-                  <span className={cn("text-xs", overdue ? "font-medium text-rose-600" : "text-slate-500")}>
+                  </Chip>
+                  <span className={cn("text-[13px]", overdue ? "font-display text-[#a3341f]" : "text-pine/70")}>
                     Due {formatDue(a.dueAt)}
                   </span>
                 </div>
               </div>
 
-              <Link
-                to={`/assignments/${a.id}`}
-                className="flex h-11 shrink-0 items-center rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-              >
+              <ButtonLink to={`/assignments/${a.id}`} variant="secondary" size="sm">
                 Grade
-              </Link>
+              </ButtonLink>
             </div>
 
             <div className="mt-3 flex flex-wrap items-end gap-6 sm:mt-4">
@@ -302,23 +295,23 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
               {graded !== undefined && <Stat label="Graded" value={String(graded)} />}
               <Stat label="Returned" value={String(returned)} />
             </div>
-            <div className="mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-slate-100">
+            <div className="mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-oat">
               <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: accent }} />
             </div>
 
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="mt-3 flex h-9 items-center gap-1 rounded-full px-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+              className="mt-3 flex h-9 items-center gap-1 rounded-full px-2 font-display text-[13px] text-pine/70 hover:bg-pine/8"
             >
-              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} strokeWidth={2.5} />
               {expanded ? "Hide students" : "Show students"}
             </button>
           </div>
         </div>
 
         {expanded && (
-          <div className="mt-3 border-t border-slate-100 pt-3">
+          <div className="mt-3 border-t border-pine/15 pt-3">
             {detailQ.isLoading && <Spinner label="Loading students…" />}
             {detailQ.error && <ErrorNote error={detailQ.error as Error} />}
             {detailQ.data?.rows && (
@@ -327,7 +320,7 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -360,9 +353,9 @@ export default function TeacherAssignments() {
   return (
     <Shell>
       <div className="mb-1 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Assignments</h1>
+        <h1 className="font-display text-[32px] text-pine">Assignments</h1>
       </div>
-      <p className="mb-6 text-sm text-slate-500">Every assignment across every class you teach.</p>
+      <p className="mb-6 text-[15px] text-pine/70">Every assignment across every class you teach.</p>
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
         {FILTERS.map((f) => (
@@ -371,8 +364,8 @@ export default function TeacherAssignments() {
             type="button"
             onClick={() => setFilter(f.key)}
             className={cn(
-              "flex h-9 items-center rounded-full px-3.5 text-sm font-medium transition-colors",
-              filter === f.key ? "bg-blue-600 text-white" : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+              "flex h-9 items-center rounded-full border-2 px-3.5 font-display text-[13px] transition-colors",
+              filter === f.key ? "border-pine bg-pine text-oat" : "border-pine/25 bg-white text-pine hover:bg-oat",
             )}
           >
             {f.label}
@@ -387,12 +380,9 @@ export default function TeacherAssignments() {
           title="No assignments yet"
           body="Create a class and publish a notebook assignment to see it here."
           action={
-            <Link
-              to="/classes"
-              className="flex h-11 items-center gap-1.5 rounded-full bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
-            >
+            <ButtonLink to="/classes" variant="primary">
               Go to classes
-            </Link>
+            </ButtonLink>
           }
         />
       )}
@@ -405,7 +395,7 @@ export default function TeacherAssignments() {
             <div key={g.className}>
               <div className="mb-3 flex items-center gap-2">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: g.accentColor || "#1A73E8" }} />
-                <h2 className="text-sm font-semibold text-slate-700">{g.className}</h2>
+                <h2 className="font-display text-[15px] text-pine">{g.className}</h2>
               </div>
               <div className="space-y-3">
                 {g.items.map((a) => (

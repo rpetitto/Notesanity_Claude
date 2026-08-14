@@ -1,68 +1,241 @@
-import { Logo, FlingBadge } from "../components/Shell";
-import { signInHref, signOutHref } from "../lib/session";
-
 /**
- * `error` is set when the account is signed in to Google but Notesanity refused
- * it — almost always a domain outside the school. Without showing it, sign-in
- * silently bounces back here and looks like the app is broken.
+ * Sign-in. Three ways in: Google, a password, or a one-time link by email.
+ *
+ * The copy follows the brand's voice rule — say what happens, in a sentence you
+ * would actually say out loud to a colleague.
  */
+
+import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
+import { Mail, KeyRound, ArrowRight, Check } from "lucide-react";
+import { toast } from "sonner";
+import { api } from "../lib/api";
+import { signInHref, signOutHref } from "../lib/session";
+import { Logo } from "../components/Shell";
+import { Button, Input, Label } from "../components/ui";
+import { cn } from "../lib/utils";
+
+type Method = "link" | "password";
+
 export default function Landing({ error }: { error?: Error | null }) {
+  const [params] = useSearchParams();
+  const [method, setMethod] = useState<Method>("link");
+  const [register, setRegister] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [linkSent, setLinkSent] = useState(false);
+
   const blocked = Boolean(error);
+  const linkProblem = params.get("auth_error");
+
+  const sendLink = useMutation({
+    mutationFn: () => api.post("/api/auth/magic/request", { email }),
+    onSuccess: () => setLinkSent(true),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const withPassword = useMutation({
+    mutationFn: () =>
+      register
+        ? api.post("/api/auth/password/register", { email, password, name })
+        : api.post("/api/auth/password/login", { email, password }),
+    onSuccess: () => { window.location.href = "/"; },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   return (
-    <div className="flex min-h-dvh items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <div className="flex justify-center">
-          <Logo size={48} />
+    <div className="flex min-h-dvh flex-col items-center justify-center bg-oat px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex items-center justify-center gap-3">
+          <Logo size={44} />
+          <span className="wordmark text-[34px] text-pine">Notesanity</span>
         </div>
-        <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">Notesanity</h1>
-        <p className="mt-2 text-sm text-slate-600">Interactive notebooks for your classroom.</p>
+        <p className="measure mx-auto mb-7 text-center text-pine/75">
+          Every notebook a teacher has, every page a student needs — and nothing else in the way.
+        </p>
 
         {blocked && (
-          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-left">
-            <div className="text-sm font-medium text-amber-900">Can't sign you in</div>
-            <p className="mt-1 text-xs leading-relaxed text-amber-800">{error?.message}</p>
-            <a
-              href={signOutHref}
-              className="mt-3 inline-flex h-9 items-center justify-center rounded-full border border-amber-300 bg-white px-3 text-xs font-medium text-amber-900 hover:bg-amber-100"
-            >
-              Sign out and use a different account
+          <div className="mb-5 rounded-[22px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[#5c4611]">
+            <div className="font-display text-[17px]">We can't sign you in</div>
+            <p className="mt-1 text-[15px] leading-relaxed">{error?.message}</p>
+            <a href={signOutHref} className="mt-3 inline-block font-display text-[15px] underline">
+              Sign out and use another account
             </a>
           </div>
         )}
 
-        <a
-          href={signInHref("/")}
-          className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
-        >
-          <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden>
-            <path
-              fill="#FFC107"
-              d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.7-5.7C34.5 6 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"
-            />
-            <path
-              fill="#FF3D00"
-              d="M6.3 14.7l6.6 4.8C14.6 16 18.9 13 24 13c3.1 0 5.8 1.1 8 3l5.7-5.7C34.5 6.9 29.5 5 24 5 16 5 9.1 9.5 6.3 14.7z"
-            />
-            <path
-              fill="#4CAF50"
-              d="M24 44c5.4 0 10.3-1.8 14.1-5l-6.5-5.5C29.6 35.3 26.9 36 24 36c-5.2 0-9.6-3.3-11.2-7.9l-6.5 5C9 39.4 15.9 44 24 44z"
-            />
-            <path
-              fill="#1976D2"
-              d="M43.6 20.5H42V20H24v8h11.3c-1 3-3.2 5.4-6 6.8l6.5 5.5C39.8 37.3 44 31.4 44 24c0-1.3-.1-2.7-.4-3.5z"
-            />
-          </svg>
-          {blocked ? "Try signing in again" : "Sign in with Google"}
-        </a>
+        {linkProblem === "link_expired" && (
+          <div className="mb-5 rounded-[22px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[#5c4611]">
+            <div className="font-display text-[17px]">That link has expired</div>
+            <p className="mt-1 text-[15px]">Links last 20 minutes and work once. Ask for a fresh one below.</p>
+          </div>
+        )}
 
-        <p className="mt-4 text-xs text-slate-400">
-          {blocked
-            ? "An admin can add your domain under Settings → School settings."
-            : "First person to sign in becomes the school admin."}
+        <div className="rounded-[22px] border-[3px] border-pine bg-white p-5 shadow-[6px_6px_0_0_var(--color-pine)]">
+          {linkSent ? (
+            <div className="py-4 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border-[3px] border-pine bg-mint">
+                <Check className="h-7 w-7 text-pine" strokeWidth={2.5} />
+              </div>
+              <h1 className="mt-4 text-[22px]">Check your email</h1>
+              <p className="measure mx-auto mt-2 text-pine/75">
+                If <span className="font-bold">{email}</span> can sign in, there's a link waiting. It works once and
+                expires in 20 minutes.
+              </p>
+              <Button className="mt-5" onClick={() => { setLinkSent(false); sendLink.reset(); }}>
+                Use a different address
+              </Button>
+            </div>
+          ) : (
+            <>
+              {/* Method switch — neither option is the mint action; the submit button is. */}
+              <div className="mb-5 flex gap-1 rounded-full border-[3px] border-pine p-1">
+                {([
+                  { key: "link" as Method, label: "Email me a link", icon: Mail },
+                  { key: "password" as Method, label: "Use a password", icon: KeyRound },
+                ]).map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setMethod(key)}
+                    className={cn(
+                      "flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full font-display text-[14px] transition-colors",
+                      method === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" strokeWidth={2.5} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (method === "link") sendLink.mutate();
+                  else withPassword.mutate();
+                }}
+              >
+                <Label htmlFor="email">School email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@school.edu"
+                  className="mt-1.5"
+                />
+
+                {method === "password" && (
+                  <>
+                    {register && (
+                      <>
+                        <Label htmlFor="name" className="mt-4">Your name</Label>
+                        <Input
+                          id="name"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          placeholder="Alex Rivera"
+                          autoComplete="name"
+                          className="mt-1.5"
+                        />
+                      </>
+                    )}
+                    <Label htmlFor="password" className="mt-4">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      required
+                      minLength={register ? 10 : undefined}
+                      autoComplete={register ? "new-password" : "current-password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="mt-1.5"
+                    />
+                    {register && <p className="mt-1.5 text-[14px] text-pine/70">At least 10 characters.</p>}
+                  </>
+                )}
+
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="lg"
+                  className="mt-5 w-full"
+                  disabled={sendLink.isPending || withPassword.isPending}
+                >
+                  {method === "link"
+                    ? sendLink.isPending ? "Sending…" : "Email me a sign-in link"
+                    : withPassword.isPending
+                      ? "One moment…"
+                      : register ? "Create account" : "Sign in"}
+                  <ArrowRight className="h-5 w-5" strokeWidth={2.5} />
+                </Button>
+              </form>
+
+              {method === "password" && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[15px]">
+                  <button
+                    type="button"
+                    onClick={() => setRegister((v) => !v)}
+                    className="font-display underline underline-offset-2"
+                  >
+                    {register ? "I already have an account" : "Set up a password"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!email) return toast.error("Enter your email first.");
+                      api.post("/api/auth/magic/request", { email, purpose: "reset" })
+                        .then(() => setLinkSent(true))
+                        .catch((e: Error) => toast.error(e.message));
+                    }}
+                    className="text-pine/70 underline underline-offset-2"
+                  >
+                    Forgotten it?
+                  </button>
+                </div>
+              )}
+
+              <div className="my-5 flex items-center gap-3 text-pine/50">
+                <span className="h-[3px] flex-1 rounded-full bg-pine/15" />
+                <span className="label-caps">or</span>
+                <span className="h-[3px] flex-1 rounded-full bg-pine/15" />
+              </div>
+
+              <a
+                href={signInHref("/")}
+                className={cn(
+                  "flex min-h-[52px] w-full items-center justify-center gap-3 rounded-full border-[3px] border-pine",
+                  "bg-white font-display text-[17px] text-pine shadow-[4px_4px_0_0_var(--color-pine)]",
+                  "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none",
+                )}
+              >
+                <GoogleG />
+                Continue with Google
+              </a>
+            </>
+          )}
+        </div>
+
+        <p className="mx-auto mt-5 max-w-sm text-center text-[14px] text-pine/60">
+          The first person to sign in sets up the school.
         </p>
       </div>
-      <FlingBadge />
     </div>
+  );
+}
+
+function GoogleG() {
+  return (
+    <svg viewBox="0 0 48 48" className="h-5 w-5" aria-hidden>
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.7-5.7C34.5 6 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z" />
+      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 18.9 13 24 13c3.1 0 5.8 1.1 8 3l5.7-5.7C34.5 6.9 29.5 5 24 5 16 5 9.1 9.5 6.3 14.7z" />
+      <path fill="#4CAF50" d="M24 44c5.4 0 10.3-1.8 14.1-5l-6.5-5.5C29.6 35.3 26.9 36 24 36c-5.2 0-9.6-3.3-11.2-7.9l-6.5 5C9 39.4 15.9 44 24 44z" />
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1 3-3.2 5.4-6 6.8l6.5 5.5C39.8 37.3 44 31.4 44 24c0-1.3-.1-2.7-.4-3.5z" />
+    </svg>
   );
 }

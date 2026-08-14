@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, ChevronRight, Lock, PanelLeft, Send } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, Lock, PanelLeft, Send } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
@@ -13,6 +13,7 @@ import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { ErrorNote, Spinner, FlingBadge } from "../components/Shell";
+import { Button, Chip, IconButton } from "../components/ui";
 import { cn, formatDue, isOverdue } from "../lib/utils";
 
 const FINGER_KEY = "notesanity:fingerDraw";
@@ -160,7 +161,7 @@ export default function Workspace() {
     return (
       <div className="mx-auto max-w-2xl p-6">
         <ErrorNote error={workQuery.error as Error} />
-        <button onClick={() => navigate(-1)} className="mt-4 text-sm text-blue-600 hover:underline">Go back</button>
+        <button onClick={() => navigate(-1)} className="mt-4 text-sm font-bold text-pine underline">Go back</button>
       </div>
     );
   }
@@ -169,34 +170,31 @@ export default function Workspace() {
   const pageIndex = pages.findIndex((p) => p.id === visiblePage);
 
   return (
-    <div className="flex h-dvh flex-col">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200 bg-white px-3 py-2">
-        <button
-          type="button"
-          onClick={goBack}
-          className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
+    <div className="flex h-dvh flex-col bg-oat">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b-[3px] border-pine bg-white px-3 py-2">
+        <IconButton label="Back" onClick={goBack}>
+          <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
+        </IconButton>
         <button
           type="button"
           onClick={() => setRailOpen((v) => !v)}
-          className="hidden rounded-full p-2 text-slate-500 hover:bg-slate-100 sm:inline-flex"
+          className="hidden h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8 sm:inline-flex"
           aria-label={railOpen ? "Hide pages" : "Show pages"}
           aria-pressed={railOpen}
         >
-          <PanelLeft className="h-4 w-4" />
+          <PanelLeft className="h-4 w-4" strokeWidth={2.5} />
         </button>
         <button
           type="button"
           onClick={() => setMobileRailOpen(true)}
-          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 sm:hidden"
+          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-[3px] border-pine px-3 py-2 text-xs font-display font-bold text-pine hover:bg-oat sm:hidden"
           aria-label="Show pages"
         >
-          <PanelLeft className="h-4 w-4" /> Pages
+          <PanelLeft className="h-4 w-4" strokeWidth={2.5} /> Pages
         </button>
         <div className="min-w-0 flex-1 sm:flex-initial">
-          <div className="truncate text-sm font-semibold">{data.notebook.title}</div>
-          <div className="truncate text-xs text-slate-500">
+          <div className="truncate font-display text-sm font-bold text-pine">{data.notebook.title}</div>
+          <div className="truncate text-xs text-pine/70">
             {assignment ? assignment.title : "Notebook"}
             {pages.length > 0 && ` · Page ${Math.max(1, pageIndex + 1)} of ${pages.length}`}
           </div>
@@ -204,53 +202,48 @@ export default function Workspace() {
 
         <div className="ml-auto flex items-center gap-2">
           {assignment && (
-            <span className={cn(
-              "hidden rounded-full px-2.5 py-1 text-xs sm:inline",
-              isOverdue(assignment.dueAt) && !locked ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600",
-            )}>
-              Due {formatDue(assignment.dueAt)}
+            <span className="hidden sm:inline">
+              <Chip tone={isOverdue(assignment.dueAt) && !locked ? "warn" : "quiet"}>
+                Due {formatDue(assignment.dueAt)}
+              </Chip>
             </span>
           )}
           {assignment && !locked && (
-            <button
+            <Button
+              variant="primary"
               onClick={() => {
                 if (confirm("Turn in this assignment? These pages will lock until your teacher returns them.")) {
                   submit.mutate();
                 }
               }}
               disabled={submit.isPending}
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
             >
-              <Send className="h-4 w-4" /> Turn in
-            </button>
+              <Send className="h-4 w-4" strokeWidth={2.5} /> Turn in
+            </Button>
           )}
           {assignment && locked && (
-            <button
-              onClick={() => unsubmit.mutate()}
-              disabled={unsubmit.isPending}
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-slate-300 px-3.5 py-2 text-sm hover:bg-slate-50"
-            >
-              <Lock className="h-4 w-4" /> Unsubmit
-            </button>
+            <Button variant="secondary" onClick={() => unsubmit.mutate()} disabled={unsubmit.isPending}>
+              <Lock className="h-4 w-4" strokeWidth={2.5} /> Unsubmit
+            </Button>
           )}
         </div>
       </header>
 
       {locked && (
-        <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-          <CheckCircle2 className="h-4 w-4" />
+        <div className="flex items-center gap-2 border-b-[3px] border-[#8a6a1f] bg-[#f7e6bf] px-4 py-2 text-sm text-[#5c4611]">
+          <Check className="h-4 w-4" strokeWidth={2.5} />
           Turned in{submission?.submittedAt ? ` ${formatDue(submission.submittedAt)}` : ""} — locked until your teacher returns it.
         </div>
       )}
 
       {submission?.grade && (
-        <div className="border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-900">
-          <span className="font-medium">Grade: </span>
+        <div className="border-b-[3px] border-pine bg-mint/40 px-4 py-2 text-sm text-pine">
+          <span className="font-display font-bold">Grade: </span>
           {assignment?.grading === "points" && `${submission.grade.points ?? "—"} / ${assignment.pointsMax}`}
           {assignment?.grading === "letter" && (submission.grade.letter ?? "—")}
           {assignment?.grading === "complete" &&
             (submission.grade.complete ? "Complete" : "Incomplete")}
-          {submission.grade.feedback && <span className="ml-2 text-emerald-800">— {submission.grade.feedback}</span>}
+          {submission.grade.feedback && <span className="ml-2 text-pine/80">— {submission.grade.feedback}</span>}
         </div>
       )}
 
@@ -275,20 +268,20 @@ export default function Workspace() {
       {mobileRailOpen && (
         <div className="fixed inset-0 z-40 flex sm:hidden">
           <div
-            className="absolute inset-0 bg-slate-900/40"
+            className="absolute inset-0 bg-pine/40"
             onClick={() => setMobileRailOpen(false)}
             aria-hidden
           />
-          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r border-slate-200 bg-white px-2 py-3 shadow-xl">
+          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r-[3px] border-pine bg-white px-2 py-3 shadow-xl">
             <div className="mb-2 flex items-center justify-between px-1">
-              <span className="text-xs font-semibold text-slate-500">Pages</span>
+              <span className="label-caps text-pine/70">Pages</span>
               <button
                 type="button"
                 onClick={() => setMobileRailOpen(false)}
-                className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100"
+                className="rounded-full p-1.5 text-pine hover:bg-pine/8"
                 aria-label="Close pages"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
               </button>
             </div>
             <div className="flex flex-col gap-3">
@@ -298,8 +291,8 @@ export default function Workspace() {
                   type="button"
                   onClick={() => goToPage(page.id)}
                   className={cn(
-                    "flex flex-col items-center gap-1 rounded-lg p-1.5 text-left transition-colors",
-                    visiblePage === page.id ? "bg-blue-50 ring-2 ring-blue-500" : "hover:bg-slate-100",
+                    "flex flex-col items-center gap-1 rounded-[12px] border-2 p-1.5 text-left transition-colors",
+                    visiblePage === page.id ? "border-pine bg-mint/40" : "border-transparent hover:bg-oat",
                   )}
                 >
                   <PageThumb
@@ -309,7 +302,7 @@ export default function Workspace() {
                     pageHeight={page.height}
                     width={64}
                   />
-                  <span className="w-full truncate text-center text-[11px] text-slate-600">
+                  <span className="w-full truncate text-center text-[11px] text-pine/70">
                     {i + 1}{page.label ? ` · ${page.label}` : ""}
                   </span>
                 </button>
@@ -321,7 +314,7 @@ export default function Workspace() {
 
       <div className="relative flex min-h-0 flex-1">
         {railOpen && (
-          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-2 py-3 sm:block">
+          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r-[3px] border-pine bg-white px-2 py-3 sm:block">
             <div className="flex flex-col gap-3">
               {pages.map((page, i) => (
                 <button
@@ -329,8 +322,8 @@ export default function Workspace() {
                   type="button"
                   onClick={() => goToPage(page.id)}
                   className={cn(
-                    "flex flex-col items-center gap-1 rounded-lg p-1.5 text-left transition-colors",
-                    visiblePage === page.id ? "bg-blue-50 ring-2 ring-blue-500" : "hover:bg-slate-100",
+                    "flex flex-col items-center gap-1 rounded-[12px] border-2 p-1.5 text-left transition-colors",
+                    visiblePage === page.id ? "border-pine bg-mint/40" : "border-transparent hover:bg-oat",
                   )}
                 >
                   <PageThumb
@@ -340,7 +333,7 @@ export default function Workspace() {
                     pageHeight={page.height}
                     width={64}
                   />
-                  <span className="w-full truncate text-center text-[11px] text-slate-600">
+                  <span className="w-full truncate text-center text-[11px] text-pine/70">
                     {i + 1}{page.label ? ` · ${page.label}` : ""}
                   </span>
                 </button>
@@ -352,10 +345,10 @@ export default function Workspace() {
           <button
             type="button"
             onClick={() => setRailOpen(true)}
-            className="absolute bottom-20 left-3 z-20 hidden items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:flex"
+            className="absolute bottom-20 left-3 z-20 hidden items-center gap-1 rounded-full border-[3px] border-pine bg-white px-3 py-2 text-xs font-display font-bold text-pine shadow-[3px_3px_0_0_var(--color-pine)] hover:bg-oat sm:flex"
             aria-label="Show pages"
           >
-            <ChevronRight className="h-3.5 w-3.5" /> Pages
+            <ChevronRight className="h-3.5 w-3.5" strokeWidth={2.5} /> Pages
           </button>
         )}
         <div className="min-w-0 flex-1">

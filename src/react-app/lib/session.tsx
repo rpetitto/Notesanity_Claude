@@ -24,4 +24,5 @@ export function useSession() {
 
 export const signInHref = (redirect?: string) =>
   `/api/auth/signin/google${redirect ? `?redirect=${encodeURIComponent(redirect)}` : ""}`;
-export const signOutHref = "/api/auth/signout";
+// Clears the local session first, then hands off to Google sign-out.
+export const signOutHref = "/api/auth/leave";

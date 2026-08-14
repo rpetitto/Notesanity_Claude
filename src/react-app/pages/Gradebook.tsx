@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, MessageSquare } from "lucide-react";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
+import { Chip, IconButton, ButtonLink } from "../components/ui";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
@@ -85,11 +86,12 @@ const STATUS_LABEL: Record<MyGradeAssignment["status"], string> = {
   returned: "Returned",
 };
 
-const STATUS_CLASS: Record<MyGradeAssignment["status"], string> = {
-  not_started: "bg-slate-100 text-slate-600",
-  in_progress: "bg-blue-50 text-blue-700",
-  submitted: "bg-amber-50 text-amber-700",
-  returned: "bg-emerald-50 text-emerald-700",
+/** "Returned" is the one status that's actually done — it's the only one that gets Mint, and it's paired with the word itself. */
+const STATUS_TONE: Record<MyGradeAssignment["status"], "quiet" | "default" | "warn" | "mint"> = {
+  not_started: "quiet",
+  in_progress: "default",
+  submitted: "warn",
+  returned: "mint",
 };
 
 function gradeText(a: MyGradeAssignment): string {
@@ -110,11 +112,11 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
 
   return (
     <Frame embedded={embedded}>
-      <button hidden={embedded} onClick={goBack}
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back
-      </button>
+      {!embedded && (
+        <button onClick={goBack} className="mb-4 inline-flex items-center gap-1.5 text-[15px] text-pine/70 hover:text-pine">
+          <ArrowLeft className="h-4 w-4" strokeWidth={2.5} /> Back
+        </button>
+      )}
 
       {isLoading && <Spinner />}
       {error && <ErrorNote error={error as Error} />}
@@ -122,17 +124,16 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
       {!isLoading && !error && data && (
         <>
           <div
-            className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-            style={{ borderTopColor: data.accentColor, borderTopWidth: 4 }}
+            className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-[22px] border-[3px] border-pine bg-white p-6"
           >
             <div>
-              <h1 className="text-xl font-semibold tracking-tight text-slate-900">{data.className}</h1>
-              <p className="text-sm text-slate-500">My grades</p>
+              <h1 className="font-display text-[22px] text-pine">{data.className}</h1>
+              <p className="text-[15px] text-pine/70">My grades</p>
             </div>
             {data.totals && (
               <div className="text-right">
-                <div className="text-3xl font-semibold tracking-tight text-slate-900">{data.totals.percent}%</div>
-                <div className="text-xs text-slate-500">
+                <div className="font-display text-[32px] leading-none text-pine">{data.totals.percent}%</div>
+                <div className="mt-1 text-[13px] text-pine/70">
                   {data.totals.earned} / {data.totals.possible} points
                 </div>
               </div>
@@ -147,25 +148,23 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
                 <Link
                   key={a.id}
                   to={`/notebooks/${a.notebookId}?assignment=${a.id}`}
-                  className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-slate-300"
+                  className="block rounded-[22px] border-[3px] border-pine bg-white p-4 transition-colors hover:bg-oat"
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium text-slate-900">{a.title}</div>
-                      <div className="text-xs text-slate-500">Due {formatDue(a.dueAt)}</div>
+                      <div className="truncate font-display text-pine">{a.title}</div>
+                      <div className="text-[13px] text-pine/70">Due {formatDue(a.dueAt)}</div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", STATUS_CLASS[a.status])}>
-                        {STATUS_LABEL[a.status]}
-                      </span>
-                      <div className={cn("text-sm font-medium", a.grade ? "text-slate-900" : "text-slate-400")}>
+                      <Chip tone={STATUS_TONE[a.status]}>{STATUS_LABEL[a.status]}</Chip>
+                      <div className={cn("text-[15px] font-display", a.grade ? "text-pine" : "text-pine/45")}>
                         {gradeText(a)}
                       </div>
                     </div>
                   </div>
                   {a.grade?.feedback && (
-                    <div className="mt-3 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm italic text-slate-600">
-                      <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <div className="mt-3 flex items-start gap-2 rounded-[12px] bg-oat px-3 py-2 text-[15px] italic text-pine/80">
+                      <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-pine/50" strokeWidth={2.5} />
                       <span>&ldquo;{a.grade.feedback}&rdquo;</span>
                     </div>
                   )}
@@ -193,45 +192,44 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
     <Frame embedded={embedded} wide>
       <div className="mb-6 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <button hidden={embedded} onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
-            <ArrowLeft className="h-4 w-4" />
-          </button>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Gradebook</h1>
+          {!embedded && (
+            <IconButton label="Back" onClick={goBack}>
+              <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
+            </IconButton>
+          )}
+          <h1 className="font-display text-[32px] text-pine">Gradebook</h1>
         </div>
-        <a
-          href={`/api/classes/${classId}/gradebook.csv`}
-          className="flex h-10 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          <Download className="h-4 w-4" />
+        <ButtonLink href={`/api/classes/${classId}/gradebook.csv`} variant="secondary" size="sm">
+          <Download className="h-4 w-4" strokeWidth={2.5} />
           Download CSV
-        </a>
+        </ButtonLink>
       </div>
 
       {isLoading && <Spinner />}
       {error && <ErrorNote error={error as Error} />}
 
       {!isLoading && !error && data && (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full border-collapse text-sm">
+        <div className="overflow-x-auto rounded-[22px] border-[3px] border-pine bg-white">
+          <table className="w-full border-collapse text-[15px]">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="sticky left-0 z-10 min-w-[180px] bg-slate-50 px-4 py-3 text-left font-medium text-slate-600">
+              <tr className="border-b-[3px] border-pine bg-oat">
+                <th className="sticky left-0 z-10 min-w-[180px] bg-oat px-4 py-3 text-left font-display text-pine">
                   Student
                 </th>
                 {data.assignments.map((a) => (
-                  <th key={a.id} className="min-w-[130px] whitespace-nowrap px-4 py-3 text-left font-medium text-slate-600">
+                  <th key={a.id} className="min-w-[130px] whitespace-nowrap px-4 py-3 text-left font-display text-pine">
                     {a.title}
-                    {a.grading === "points" && <span className="ml-1 font-normal text-slate-400">/{a.points_max}</span>}
+                    {a.grading === "points" && <span className="ml-1 font-sans font-normal text-pine/50">/{a.points_max}</span>}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {data.students.map((st) => (
-                <tr key={st.id} className="border-b border-slate-100 last:border-0">
+                <tr key={st.id} className="border-b border-pine/15 last:border-0">
                   <td className="sticky left-0 z-10 bg-white px-4 py-3">
-                    <div className="font-medium text-slate-900">{st.name}</div>
-                    <div className="text-xs text-slate-500">{st.email}</div>
+                    <div className="font-display text-pine">{st.name}</div>
+                    <div className="text-[13px] text-pine/70">{st.email}</div>
                   </td>
                   {data.assignments.map((a) => {
                     const sub = data.submissions.find((s) => s.assignment_id === a.id && s.student_id === st.id);
@@ -239,7 +237,7 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
                     return (
                       <td
                         key={a.id}
-                        className={cn("px-4 py-3", ungraded ? "text-amber-600" : "text-slate-700")}
+                        className={cn("px-4 py-3", ungraded ? "font-display text-[#8a6a1f]" : "text-pine/80")}
                       >
                         {text}
                       </td>
@@ -250,7 +248,7 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
             </tbody>
           </table>
           {data.students.length === 0 && (
-            <div className="px-4 py-10 text-center text-sm text-slate-500">No students enrolled yet.</div>
+            <div className="px-4 py-10 text-center text-[15px] text-pine/70">No students enrolled yet.</div>
           )}
         </div>
       )}

@@ -2,6 +2,16 @@ import { auth, db } from "flingit";
 import type { Context } from "hono";
 
 export const uid = () => crypto.randomUUID();
+
+/**
+ * Injected by routes/auth.ts at import time. Keeping it as a hook rather than a
+ * direct import avoids a cycle: auth.ts already depends on this module.
+ */
+let localSessionResolver: ((c: Context) => Promise<string | null>) | null = null;
+export function setLocalSessionResolver(fn: (c: Context) => Promise<string | null>) {
+  localSessionResolver = fn;
+}
+const resolveLocalSession = (c: Context) => (localSessionResolver ? localSessionResolver(c) : Promise.resolve(null));
 export const now = () => new Date().toISOString();
 
 export interface AppUser {
@@ -48,6 +58,17 @@ const csv = (s: string) =>
  * single school without any manual provisioning step.
  */
 export async function currentUser(c: Context): Promise<AppUser | null> {
+  // A local session (email/password or magic link) is authoritative on its own;
+  // Google sign-in remains available alongside it.
+  const localId = await resolveLocalSession(c);
+  if (localId) {
+    const row = await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(localId).first<AppUser>();
+    if (row) {
+      await db.prepare(`UPDATE users SET last_seen_at = ? WHERE id = ?`).bind(now(), row.id).run();
+      return row;
+    }
+  }
+
   const account = await auth.user(c);
   if (!account?.email) return null;
 

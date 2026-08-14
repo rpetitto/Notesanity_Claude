@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck, Lock, MoreVertical, PanelLeft,
+  ArrowLeft, Check, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck, Lock, MoreVertical, PanelLeft,
   Pencil, Pin, PinOff, Send, Trash2, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
+import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
 import { cn, formatDue, relativeTime } from "../lib/utils";
 
 const RAIL_KEY = "notesanity:gradeRail";
@@ -58,52 +59,43 @@ export function DeleteAssignmentModal({
   onConfirm: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-        <div className="flex items-start justify-between">
-          <h3 className="text-base font-semibold text-slate-900">Delete assignment?</h3>
-          <button onClick={onCancel} className="rounded-full p-1 text-slate-400 hover:bg-slate-100" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {loading || !impact ? (
-          <div className="py-8"><Spinner label="Checking impact…" /></div>
-        ) : (
-          <>
-            <div className="mt-3 space-y-1.5 text-sm text-slate-700">
-              {impact.submitted > 0 && (
-                <p>{impact.submitted} of {impact.total} students have turned this in.</p>
-              )}
-              {impact.graded > 0 && <p>{impact.graded} have been graded.</p>}
-              {impact.submitted === 0 && impact.graded === 0 && (
-                <p>No one has turned this in yet.</p>
-              )}
-            </div>
-            <p className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-              Deleting removes the assignment and all of its grades and submission records.
-              It does <strong>not</strong> delete the pages or anything students wrote on them —
-              that work stays in the notebook.
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                onClick={onCancel}
-                className="rounded-full px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={onConfirm}
-                disabled={deleting}
-                className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
-              >
-                <Trash2 className="h-4 w-4" /> Delete assignment
-              </button>
-            </div>
-          </>
-        )}
+    <Modal onClose={onCancel}>
+      <div className="flex items-start justify-between">
+        <h3 className="text-base text-pine">Delete assignment?</h3>
+        <button onClick={onCancel} className="rounded-full p-1 text-pine/50 hover:bg-pine/8" aria-label="Close">
+          <X className="h-4 w-4" strokeWidth={2.5} />
+        </button>
       </div>
-    </div>
+
+      {loading || !impact ? (
+        <div className="py-8"><Spinner label="Checking impact…" /></div>
+      ) : (
+        <>
+          <div className="mt-3 space-y-1.5 text-sm text-pine/80">
+            {impact.submitted > 0 && (
+              <p>{impact.submitted} of {impact.total} students have turned this in.</p>
+            )}
+            {impact.graded > 0 && <p>{impact.graded} have been graded.</p>}
+            {impact.submitted === 0 && impact.graded === 0 && (
+              <p>No one has turned this in yet.</p>
+            )}
+          </div>
+          <p className="mt-3 rounded-[12px] border-[3px] border-pine/20 bg-oat p-3 text-xs leading-relaxed text-pine/70">
+            Deleting removes the assignment and all of its grades and submission records.
+            It does <strong>not</strong> delete the pages or anything students wrote on them —
+            that work stays in the notebook.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={onConfirm} disabled={deleting}>
+              <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete assignment
+            </Button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -128,8 +120,8 @@ function PageRail({
             type="button"
             onClick={() => onSelect(i, page.id)}
             className={cn(
-              "flex flex-col items-center gap-1 rounded-lg p-1.5 text-left transition-colors",
-              active ? "bg-blue-50 ring-2 ring-blue-500" : "hover:bg-slate-100",
+              "flex flex-col items-center gap-1 rounded-[12px] border-2 p-1.5 text-left transition-colors",
+              active ? "border-pine bg-mint/40" : "border-transparent hover:bg-oat",
             )}
           >
             <PageThumb
@@ -139,7 +131,7 @@ function PageRail({
               pageHeight={page.height}
               width={64}
             />
-            <span className="w-full truncate text-center text-[11px] text-slate-600">
+            <span className="w-full truncate text-center text-[11px] text-pine/70">
               Page {pageNumbers?.[i] ?? i + 1}
             </span>
           </button>
@@ -387,85 +379,78 @@ export default function Grading() {
   if (rows.length === 0) {
     return (
       <div className="p-6">
-        <Link to={`/classes/${assignment.classId}`} className="text-sm text-blue-600 hover:underline">← Back to class</Link>
-        <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
-          <div className="font-medium">No students yet</div>
-          <p className="mt-1 text-sm text-slate-500">Add students to this class and they'll show up here.</p>
+        <Link to={`/classes/${assignment.classId}`} className="text-sm font-bold text-pine underline">← Back to class</Link>
+        <div className="mt-6 rounded-[22px] border-[3px] border-dashed border-pine/40 bg-white p-10 text-center">
+          <div className="font-display font-bold text-pine">No students yet</div>
+          <p className="mt-1 text-sm text-pine/70">Add students to this class and they'll show up here.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-dvh flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
-        <button type="button" onClick={goBack} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Back">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
+    <div className="flex h-dvh flex-col bg-oat">
+      <header className="flex flex-wrap items-center gap-3 border-b-[3px] border-pine bg-white px-3 py-2">
+        <IconButton label="Back" onClick={goBack}>
+          <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
+        </IconButton>
         <button
           type="button"
           onClick={() => setRailOpen((v) => !v)}
-          className="hidden rounded-full p-2 text-slate-500 hover:bg-slate-100 sm:inline-flex"
+          className="hidden h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8 sm:inline-flex"
           aria-label={railOpen ? "Hide pages" : "Show pages"}
           aria-pressed={railOpen}
         >
-          <PanelLeft className="h-4 w-4" />
+          <PanelLeft className="h-4 w-4" strokeWidth={2.5} />
         </button>
         <button
           type="button"
           onClick={() => setRailMobileOpen(true)}
-          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 sm:hidden"
+          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-[3px] border-pine px-3 py-2 text-xs font-display font-bold text-pine hover:bg-oat sm:hidden"
           aria-label="Show pages"
         >
-          <PanelLeft className="h-4 w-4" /> Pages
+          <PanelLeft className="h-4 w-4" strokeWidth={2.5} /> Pages
         </button>
         <div className="min-w-0 flex-1 sm:flex-initial">
-          <div className="truncate text-sm font-semibold">{assignment.title}</div>
-          <div className="truncate text-xs text-slate-500">
+          <div className="truncate font-display text-sm font-bold text-pine">{assignment.title}</div>
+          <div className="truncate text-xs text-pine/70">
             {formatPageNumbers(assignment.pageNumbers)} · Due {formatDue(assignment.dueAt)}
           </div>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setRosterOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
-          >
-            <Users className="h-4 w-4" /> Roster
-          </button>
-          <button
-            onClick={() => returnWork.mutate({ all: true })}
-            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            <Send className="h-4 w-4" /> Return all graded
-          </button>
+          <Button variant="secondary" size="sm" onClick={() => setRosterOpen((v) => !v)}>
+            <Users className="h-4 w-4" strokeWidth={2.5} /> Roster
+          </Button>
+          <Button variant="primary" onClick={() => returnWork.mutate({ all: true })}>
+            <Send className="h-4 w-4" strokeWidth={2.5} /> Return all graded
+          </Button>
 
           {isTeacher && (
             <div className="relative">
-              <button
+              <IconButton
+                label="Assignment options"
                 onClick={() => setMenuOpen((v) => !v)}
-                className="rounded-full p-2 text-slate-500 hover:bg-slate-100"
-                aria-label="Assignment options"
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
               >
-                <MoreVertical className="h-4 w-4" />
-              </button>
+                <MoreVertical className="h-4 w-4" strokeWidth={2.5} />
+              </IconButton>
               {menuOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                  <div className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-[12px] border-[3px] border-pine bg-white py-1 shadow-[4px_4px_0_0_var(--color-pine)]">
                     <button
                       onClick={() => { setMenuOpen(false); navigate(`/assignments/${assignmentId}/edit`); }}
-                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-pine hover:bg-oat"
                     >
-                      <Pencil className="h-4 w-4" /> Edit assignment
+                      <Pencil className="h-4 w-4" strokeWidth={2.5} /> Edit assignment
                     </button>
                     <button
                       onClick={openDeleteModal}
-                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-rose-600 hover:bg-rose-50"
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#a3341f] hover:bg-[#a3341f]/8"
                     >
-                      <Trash2 className="h-4 w-4" /> Delete assignment
+                      <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete assignment
                     </button>
                   </div>
                 </>
@@ -476,32 +461,32 @@ export default function Grading() {
       </header>
 
       {/* Navigation bar — the two axes */}
-      <div className="flex items-center gap-3 overflow-x-auto border-b border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="flex items-center gap-3 overflow-x-auto border-b-[3px] border-pine bg-oat px-3 py-2">
         <div className="flex shrink-0 items-center gap-1">
           <button onClick={() => setStudentIdx(0)} disabled={studentIdx === 0}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="First student">
-            <ChevronsLeft className="h-4 w-4" />
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="First student">
+            <ChevronsLeft className="h-4 w-4" strokeWidth={2.5} />
           </button>
           <button onClick={() => goStudent(-1)} disabled={studentIdx === 0}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Previous student (←)">
-            <ChevronLeft className="h-4 w-4" />
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Previous student (←)">
+            <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
           </button>
 
-          <div className="flex shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5">
+          <div className="flex shrink-0 items-center gap-2 rounded-full border-[3px] border-pine bg-white px-3 py-1.5">
             <Avatar name={current?.student.name ?? ""} picture={current?.student.picture} size={24} />
             <div className="min-w-0">
-              <div className="max-w-[120px] truncate text-sm font-medium">{current?.student.name}</div>
+              <div className="max-w-[120px] truncate text-sm font-bold text-pine">{current?.student.name}</div>
             </div>
-            <span className="ml-1 text-xs tabular-nums text-slate-400">{studentIdx + 1}/{rows.length}</span>
+            <span className="ml-1 text-xs tabular-nums text-pine/50">{studentIdx + 1}/{rows.length}</span>
           </div>
 
           <button onClick={() => goStudent(1)} disabled={studentIdx >= rows.length - 1}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Next student (→)">
-            <ChevronRight className="h-4 w-4" />
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Next student (→)">
+            <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
           <button onClick={() => setStudentIdx(rows.length - 1)} disabled={studentIdx >= rows.length - 1}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Last student">
-            <ChevronsRight className="h-4 w-4" />
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Last student">
+            <ChevronsRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
         </div>
 
@@ -509,27 +494,27 @@ export default function Grading() {
           <button
             onClick={() => setPageLocked((v) => !v)}
             className={cn(
-              "inline-flex min-h-[44px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-colors",
-              pageLocked ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600",
+              "inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-[3px] px-3 py-1.5 text-xs font-display font-bold whitespace-nowrap transition-colors",
+              pageLocked ? "border-pine bg-mint/40 text-pine" : "border-pine/20 bg-white text-pine/70",
             )}
             title={pageLocked ? "Page is pinned while you move across students" : "Scroll through every assigned page"}
           >
-            {pageLocked ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
+            {pageLocked ? <Pin className="h-3.5 w-3.5" strokeWidth={2.5} /> : <PinOff className="h-3.5 w-3.5" strokeWidth={2.5} />}
             {pageLocked ? "Page pinned" : "All pages"}
           </button>
 
           {pageLocked && (
             <>
               <button onClick={() => goPage(-1)} disabled={pageIdx === 0}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Previous page (↑)">
-                <ChevronLeft className="h-4 w-4" />
+                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Previous page (↑)">
+                <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
               </button>
-              <span className="whitespace-nowrap text-xs tabular-nums text-slate-600">
+              <span className="whitespace-nowrap text-xs tabular-nums text-pine/70">
                 Page {Math.min(pageIdx + 1, assignedPages.length || 1)} of {assignedPages.length || 1}
               </span>
               <button onClick={() => goPage(1)} disabled={pageIdx >= assignedPages.length - 1}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30" title="Next page (↓)">
-                <ChevronRight className="h-4 w-4" />
+                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Next page (↓)">
+                <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
               </button>
             </>
           )}
@@ -561,17 +546,17 @@ export default function Grading() {
       {/* Mobile page rail drawer */}
       {railMobileOpen && (
         <div className="fixed inset-0 z-40 flex sm:hidden">
-          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setRailMobileOpen(false)} aria-hidden />
-          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r border-slate-200 bg-white px-2 py-3 shadow-xl">
+          <div className="absolute inset-0 bg-pine/40" onClick={() => setRailMobileOpen(false)} aria-hidden />
+          <aside className="relative flex h-full w-[200px] max-w-[85vw] flex-col overflow-y-auto border-r-[3px] border-pine bg-white px-2 py-3 shadow-xl">
             <div className="mb-2 flex items-center justify-between px-1">
-              <span className="text-xs font-semibold text-slate-500">Pages</span>
+              <span className="label-caps text-pine/70">Pages</span>
               <button
                 type="button"
                 onClick={() => setRailMobileOpen(false)}
-                className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100"
+                className="rounded-full p-1.5 text-pine hover:bg-pine/8"
                 aria-label="Close pages"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
               </button>
             </div>
             <PageRail
@@ -589,7 +574,7 @@ export default function Grading() {
 
       <div className="flex min-h-0 flex-1">
         {railOpen && (
-          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-2 py-3 sm:block">
+          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r-[3px] border-pine bg-white px-2 py-3 sm:block">
             <PageRail
               pages={assignedPages}
               pageNumbers={assignment.pageNumbers}
@@ -602,24 +587,28 @@ export default function Grading() {
           </aside>
         )}
         {rosterOpen && (
-          <aside className="w-64 max-w-[85vw] shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
+          <aside className="w-64 max-w-[85vw] shrink-0 overflow-y-auto border-r-[3px] border-pine bg-white">
             {rows.map((r, i) => (
               <button
                 key={r.student.id}
                 onClick={() => { setStudentIdx(i); setRosterOpen(false); }}
                 className={cn(
-                  "flex w-full items-center gap-2.5 border-l-2 px-3 py-2.5 text-left hover:bg-slate-50",
-                  i === studentIdx ? "border-blue-600 bg-blue-50" : "border-transparent",
+                  "flex w-full items-center gap-2.5 border-l-[3px] px-3 py-2.5 text-left hover:bg-oat",
+                  i === studentIdx ? "border-pine bg-mint/30" : "border-transparent",
                 )}
               >
                 <Avatar name={r.student.name} picture={r.student.picture} size={32} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{r.student.name}</div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="truncate text-sm font-bold text-pine">{r.student.name}</div>
+                  <div className="text-[11px] text-pine/70">
                     {r.complete}/{r.total} pages · {r.status.replace("_", " ")}
                   </div>
                 </div>
-                {r.graded && <span className="h-2 w-2 rounded-full bg-emerald-500" title="Graded" />}
+                {r.graded && (
+                  <span title="Graded">
+                    <Check className="h-4 w-4 text-pine" strokeWidth={2.5} />
+                  </span>
+                )}
               </button>
             ))}
           </aside>
@@ -669,11 +658,11 @@ export default function Grading() {
       <button
         type="button"
         onClick={() => setGradeSheetOpen(true)}
-        className="fixed bottom-4 right-4 z-30 inline-flex min-h-[52px] items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-medium text-white shadow-lg lg:hidden"
+        className="fixed bottom-4 right-4 z-30 inline-flex min-h-[52px] items-center gap-2 rounded-full border-[3px] border-pine bg-pine px-5 font-display text-sm font-bold text-oat shadow-[4px_4px_0_0_var(--color-pine)] lg:hidden"
         style={{ marginBottom: "env(safe-area-inset-bottom)" }}
       >
-        <ClipboardCheck className="h-4 w-4" /> Grade
-        {current?.graded && <span className="h-2 w-2 rounded-full bg-emerald-400" />}
+        <ClipboardCheck className="h-4 w-4" strokeWidth={2.5} /> Grade
+        {current?.graded && <Check className="h-4 w-4 text-mint" strokeWidth={2.5} />}
       </button>
 
       {showDeleteModal && (
@@ -691,19 +680,22 @@ export default function Grading() {
 
 function StatusPill({ row }: { row?: GradeRow }) {
   if (!row) return null;
-  const map: Record<string, string> = {
-    not_started: "bg-slate-100 text-slate-600",
-    in_progress: "bg-amber-50 text-amber-700",
-    submitted: "bg-blue-50 text-blue-700",
-    returned: "bg-emerald-50 text-emerald-700",
+  const tone: Record<string, "quiet" | "warn" | "default" | "mint"> = {
+    not_started: "quiet",
+    in_progress: "warn",
+    submitted: "default",
+    returned: "mint",
   };
   return (
-    <span className={cn("rounded-full px-2.5 py-1", map[row.status] ?? map.not_started)}>
+    <Chip
+      tone={tone[row.status] ?? "quiet"}
+      icon={row.status === "returned" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}
+    >
       {row.status.replace("_", " ")}
       {row.submittedAt && ` · ${relativeTime(row.submittedAt)}`}
       {" · "}
       {row.complete}/{row.total} pages
-    </span>
+    </Chip>
   );
 }
 
@@ -744,7 +736,7 @@ function GradePanel({
     <>
       {assignment.grading === "points" && (
         <div className="mt-4">
-          <label className="block text-xs font-medium text-slate-600">Points</label>
+          <label className="label-caps block text-pine/70">Points</label>
           <div className="mt-1 flex items-center gap-2">
             <input
               type="number"
@@ -752,24 +744,24 @@ function GradePanel({
               onChange={(e) => setPoints(e.target.value)}
               min={0}
               max={assignment.pointsMax}
-              className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-blue-500"
+              className="w-20 rounded-[12px] border-[3px] border-pine px-2 py-1.5 text-sm outline-none focus:ring-[3px] focus:ring-mint"
             />
-            <span className="text-sm text-slate-500">/ {assignment.pointsMax}</span>
+            <span className="text-sm text-pine/70">/ {assignment.pointsMax}</span>
           </div>
         </div>
       )}
 
       {assignment.grading === "letter" && (
         <div className="mt-4">
-          <label className="block text-xs font-medium text-slate-600">Letter</label>
+          <label className="label-caps block text-pine/70">Letter</label>
           <div className="mt-1 flex gap-1">
             {LETTERS.map((l) => (
               <button
                 key={l}
                 onClick={() => setLetter(l)}
                 className={cn(
-                  "h-10 flex-1 rounded-lg border text-sm",
-                  letter === l ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 hover:bg-slate-50",
+                  "h-10 flex-1 rounded-[12px] border-[3px] text-sm font-bold",
+                  letter === l ? "border-pine bg-mint text-pine" : "border-pine/20 text-pine/70 hover:bg-oat",
                 )}
               >
                 {l}
@@ -783,47 +775,40 @@ function GradePanel({
         <div className="mt-4 flex gap-2">
           <button
             onClick={() => setComplete(true)}
-            className={cn("h-10 flex-1 rounded-lg border text-sm",
-              complete === true ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 hover:bg-slate-50")}
+            className={cn("h-10 flex-1 rounded-[12px] border-[3px] text-sm font-bold",
+              complete === true ? "border-pine bg-mint text-pine" : "border-pine/20 text-pine/70 hover:bg-oat")}
           >
             Complete
           </button>
           <button
             onClick={() => setComplete(false)}
-            className={cn("h-10 flex-1 rounded-lg border text-sm",
-              complete === false ? "border-rose-400 bg-rose-50 text-rose-700" : "border-slate-200 hover:bg-slate-50")}
+            className={cn("h-10 flex-1 rounded-[12px] border-[3px] text-sm font-bold",
+              complete === false ? "border-[#a3341f] bg-[#a3341f]/10 text-[#a3341f]" : "border-pine/20 text-pine/70 hover:bg-oat")}
           >
             Incomplete
           </button>
         </div>
       )}
 
-      <label className="mt-4 block text-xs font-medium text-slate-600">Comment</label>
-      <textarea
+      <label className="label-caps mt-4 block text-pine/70">Comment</label>
+      <Textarea
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
         rows={4}
         placeholder="Nice work on question 3…"
-        className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-blue-500"
+        className="mt-1 text-sm"
       />
 
-      <button
-        onClick={submit}
-        disabled={saving}
-        className="mt-3 min-h-[44px] rounded-full bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-      >
+      <Button variant="secondary" onClick={submit} disabled={saving} className="mt-3 w-full">
         Save grade
-      </button>
-      <button
-        onClick={() => { submit(); onReturn(); }}
-        className="mt-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100"
-      >
-        <Send className="h-4 w-4" /> Save &amp; return
-      </button>
+      </Button>
+      <Button variant="primary" onClick={() => { submit(); onReturn(); }} className="mt-2 w-full">
+        <Send className="h-4 w-4" strokeWidth={2.5} /> Save &amp; return
+      </Button>
 
       {row.returnedAt && (
-        <p className="mt-3 flex items-center gap-1.5 text-xs text-emerald-700">
-          <Lock className="h-3 w-3" /> Returned {relativeTime(row.returnedAt)}
+        <p className="mt-3 flex items-center gap-1.5 text-xs text-pine/70">
+          <Lock className="h-3 w-3" strokeWidth={2.5} /> Returned {relativeTime(row.returnedAt)}
         </p>
       )}
     </>
@@ -831,30 +816,30 @@ function GradePanel({
 
   return (
     <>
-      <aside className="hidden w-64 shrink-0 flex-col border-l border-slate-200 bg-white p-4 lg:flex">
-        <h3 className="text-sm font-semibold">Grade</h3>
-        <p className="mt-0.5 text-xs text-slate-500">Saved privately until you return it.</p>
+      <aside className="hidden w-64 shrink-0 flex-col border-l-[3px] border-pine bg-white p-4 lg:flex">
+        <h3 className="font-display text-sm font-bold text-pine">Grade</h3>
+        <p className="mt-0.5 text-xs text-pine/70">Saved privately until you return it.</p>
         {fields}
       </aside>
 
       {mobileOpen && (
         <div className="fixed inset-0 z-40 flex items-end lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/40" onClick={onMobileClose} aria-hidden />
+          <div className="absolute inset-0 bg-pine/40" onClick={onMobileClose} aria-hidden />
           <div
-            className="relative flex max-h-[80vh] w-full flex-col overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl"
+            className="relative flex max-h-[80vh] w-full flex-col overflow-y-auto rounded-t-[22px] border-[3px] border-pine bg-white p-4 shadow-xl"
             style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
           >
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="text-sm font-semibold">Grade — {row.student.name}</h3>
-                <p className="mt-0.5 text-xs text-slate-500">Saved privately until you return it.</p>
+                <h3 className="font-display text-sm font-bold text-pine">Grade — {row.student.name}</h3>
+                <p className="mt-0.5 text-xs text-pine/70">Saved privately until you return it.</p>
               </div>
               <button
                 onClick={onMobileClose}
-                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                className="rounded-full p-1.5 text-pine/50 hover:bg-pine/8"
                 aria-label="Close grade panel"
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4" strokeWidth={2.5} />
               </button>
             </div>
             {fields}
