@@ -72,6 +72,12 @@ export interface PageRec {
   height: number;
   label: string;
   archived?: number;
+  /**
+   * Set on teacher-inserted blank pages: the ruling to draw instead of a PDF.
+   * Empty on every page that came from a source document.
+   */
+  pattern?: string;
+  pattern_color?: string;
 }
 
 export interface FieldRec {
@@ -143,3 +149,24 @@ export interface AssignmentSummary {
 
 export const assetUrl = (notebookId: string, key?: string) =>
   `/api/notebooks/${notebookId}/asset${key ? `?key=${encodeURIComponent(key)}` : ""}`;
+
+/**
+ * The props any page-rendering component needs, gathered from a page record.
+ *
+ * Pages come in two kinds — PDF-backed and generated — and every renderer has
+ * to be told which it's looking at. Spreading this keeps that decision in one
+ * place instead of at each of the dozen call sites.
+ */
+export function pageSource(
+  notebookId: string,
+  p: Pick<PageRec, "asset_key" | "source_index" | "width" | "height" | "pattern" | "pattern_color">,
+) {
+  return {
+    pdfUrl: assetUrl(notebookId, p.asset_key),
+    sourceIndex: p.source_index,
+    pageWidth: p.width,
+    pageHeight: p.height,
+    pattern: p.pattern,
+    patternColor: p.pattern_color,
+  };
+}

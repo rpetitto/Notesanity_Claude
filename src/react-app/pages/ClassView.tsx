@@ -13,7 +13,7 @@ import StudentAssignmentNav, {
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
-import { api, assetUrl, type AssignmentSummary, type PageRec } from "../lib/api";
+import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
 import { cn, formatDue, formatProgress, isOverdue, relativeTime, DEFAULT_ACCENT, type ProgressUnit } from "../lib/utils";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
@@ -64,6 +64,8 @@ interface ClassNotebook {
   first_source_index?: number | null;
   first_width?: number | null;
   first_height?: number | null;
+  first_pattern?: string | null;
+  first_pattern_color?: string | null;
 }
 
 interface TeacherRow {
@@ -596,10 +598,7 @@ export function StudentAssignmentCard({ a }: { a: StudentAssignmentData }) {
               }}
             >
               <PageThumb
-                pdfUrl={assetUrl(a.notebookId, p.asset_key)}
-                sourceIndex={p.source_index}
-                pageWidth={p.width}
-                pageHeight={p.height}
+                {...pageSource(a.notebookId, p)}
                 width={56}
               />
             </div>
@@ -913,12 +912,14 @@ export default function ClassView() {
                             alt=""
                             className="h-[74px] w-14 rounded border-2 border-pine object-cover"
                           />
-                        ) : nb.first_asset_key ? (
+                        ) : nb.first_asset_key || nb.first_pattern ? (
                           <PageThumb
-                            pdfUrl={assetUrl(nb.id, nb.first_asset_key)}
+                            pdfUrl={assetUrl(nb.id, nb.first_asset_key ?? undefined)}
                             sourceIndex={nb.first_source_index ?? 0}
                             pageWidth={nb.first_width ?? 612}
                             pageHeight={nb.first_height ?? 792}
+                            pattern={nb.first_pattern ?? undefined}
+                            patternColor={nb.first_pattern_color ?? undefined}
                             width={56}
                           />
                         ) : (

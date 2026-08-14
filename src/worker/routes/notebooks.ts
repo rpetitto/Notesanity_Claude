@@ -80,7 +80,8 @@ app.get("/api/notebooks/:id", handler(async (c) => {
   const includeArchived = isTeacher && c.req.query("archived") === "1";
   const pages = await db
     .prepare(
-      `SELECT id, seq, asset_key, source_index, width, height, label, group_name, archived
+      `SELECT id, seq, asset_key, source_index, width, height, label, group_name, archived,
+              pattern, pattern_color
          FROM pages WHERE notebook_id = ? ${includeArchived ? "" : "AND archived = 0"}
         ORDER BY seq`,
     )
@@ -104,6 +105,46 @@ app.get("/api/notebooks/:id", handler(async (c) => {
 }));
 
 /**
+ * Where a run of `count` new pages should sit in the ordering.
+ *
+ * `seq` is a real number precisely so pages can be slotted between two
+ * existing ones without renumbering the notebook: the run is spread evenly
+ * across the gap after the anchor. With no anchor the run goes on the end.
+ */
+async function seqWindow(notebookId: string, insertAfterPageId: string | null | undefined, count: number) {
+  if (insertAfterPageId) {
+    const anchor = await db
+      .prepare(`SELECT seq FROM pages WHERE id = ? AND notebook_id = ?`)
+      .bind(insertAfterPageId, notebookId)
+      .first<{ seq: number }>();
+    if (!anchor) throw new HttpError(404, "Anchor page not found");
+    const next = await db
+      .prepare(`SELECT seq FROM pages WHERE notebook_id = ? AND seq > ? ORDER BY seq LIMIT 1`)
+      .bind(notebookId, anchor.seq)
+      .first<{ seq: number }>();
+    const gap = (next ? next.seq : anchor.seq + 1) - anchor.seq;
+    return { start: anchor.seq, step: gap / (count + 1) };
+  }
+  const last = await db
+    .prepare(`SELECT MAX(seq) AS m FROM pages WHERE notebook_id = ?`)
+    .bind(notebookId)
+    .first<{ m: number | null }>();
+  return { start: last?.m ?? 0, step: 1 };
+}
+
+/** Keep `notebooks.page_count` in step after pages are added or removed. */
+async function syncPageCount(notebookId: string) {
+  const count = await db
+    .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 0`)
+    .bind(notebookId)
+    .first<{ n: number }>();
+  await db
+    .prepare(`UPDATE notebooks SET page_count = ?, updated_at = ? WHERE id = ?`)
+    .bind(count?.n ?? 0, now(), notebookId)
+    .run();
+}
+
+/**
  * Append pages. The client parses the PDF with pdf.js and reports each page's
  * index and dimensions. New pages always get fresh UUIDs, so existing student
  * work is never re-anchored.
@@ -119,29 +160,7 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
   const assetKey = body.assetKey || nb.asset_key;
   if (!assetKey) throw new HttpError(400, "No asset to draw pages from");
 
-  // Work out the seq window we're inserting into.
-  let start: number, step: number;
-  if (body.insertAfterPageId) {
-    const anchor = await db
-      .prepare(`SELECT seq FROM pages WHERE id = ? AND notebook_id = ?`)
-      .bind(body.insertAfterPageId, nb.id)
-      .first<{ seq: number }>();
-    if (!anchor) throw new HttpError(404, "Anchor page not found");
-    const next = await db
-      .prepare(`SELECT seq FROM pages WHERE notebook_id = ? AND seq > ? ORDER BY seq LIMIT 1`)
-      .bind(nb.id, anchor.seq)
-      .first<{ seq: number }>();
-    start = anchor.seq;
-    const gap = (next ? next.seq : anchor.seq + 1) - anchor.seq;
-    step = gap / ((body.pages?.length ?? 1) + 1);
-  } else {
-    const last = await db
-      .prepare(`SELECT MAX(seq) AS m FROM pages WHERE notebook_id = ?`)
-      .bind(nb.id)
-      .first<{ m: number | null }>();
-    start = last?.m ?? 0;
-    step = 1;
-  }
+  const { start, step } = await seqWindow(nb.id, body.insertAfterPageId, body.pages?.length ?? 1);
 
   const created: string[] = [];
   let i = 1;
@@ -157,14 +176,72 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
     created.push(id);
     i++;
   }
-  const count = await db
-    .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 0`)
-    .bind(nb.id)
-    .first<{ n: number }>();
-  await db
-    .prepare(`UPDATE notebooks SET page_count = ?, updated_at = ? WHERE id = ?`)
-    .bind(count?.n ?? 0, now(), nb.id)
-    .run();
+  await syncPageCount(nb.id);
+  return c.json({ created });
+}));
+
+/** Rulings a blank page may carry — mirrored from the client's `PatternKey`. */
+const PAGE_PATTERNS = [
+  "blank", "lined-wide", "lined-college", "dot", "graph",
+  "music", "engineering", "isometric", "coordinate",
+];
+const MAX_BLANK_PAGES = 50;
+
+/**
+ * Insert blank pages carrying a drawn ruling rather than a source document.
+ *
+ * There's no asset and no upload: the page stores the pattern name and rule
+ * colour, and the client draws it. Size is taken from the notebook's existing
+ * pages so an inserted sheet lines up with the ones around it, falling back to
+ * US Letter for a notebook that has none yet.
+ */
+app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const body = await c.req.json<{
+    pattern?: string;
+    color?: string;
+    count?: number;
+    insertAfterPageId?: string | null;
+  }>();
+
+  const pattern = body.pattern ?? "";
+  if (!PAGE_PATTERNS.includes(pattern)) throw new HttpError(400, "Unknown page pattern");
+  const color = (body.color ?? "").trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule colour must be a hex value");
+  const count = Math.floor(body.count ?? 1);
+  if (!Number.isFinite(count) || count < 1) throw new HttpError(400, "Add at least one page");
+  if (count > MAX_BLANK_PAGES) throw new HttpError(400, `Add at most ${MAX_BLANK_PAGES} pages at a time`);
+
+  // Match the notebook's own paper. The anchor page wins when there is one, so
+  // a page inserted into a run of A4 doesn't come out Letter-sized.
+  const sizeSource = body.insertAfterPageId
+    ? await db
+        .prepare(`SELECT width, height FROM pages WHERE id = ? AND notebook_id = ?`)
+        .bind(body.insertAfterPageId, nb.id)
+        .first<{ width: number; height: number }>()
+    : await db
+        .prepare(`SELECT width, height FROM pages WHERE notebook_id = ? AND archived = 0 ORDER BY seq LIMIT 1`)
+        .bind(nb.id)
+        .first<{ width: number; height: number }>();
+  const width = sizeSource?.width ?? 612;
+  const height = sizeSource?.height ?? 792;
+
+  const { start, step } = await seqWindow(nb.id, body.insertAfterPageId, count);
+
+  const created: string[] = [];
+  for (let i = 1; i <= count; i++) {
+    const id = uid();
+    await db
+      .prepare(
+        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, pattern, pattern_color, created_at)
+         VALUES (?, ?, ?, '', -1, ?, ?, ?, ?, ?)`,
+      )
+      .bind(id, nb.id, start + step * i, width, height, pattern, color, now())
+      .run();
+    created.push(id);
+  }
+  await syncPageCount(nb.id);
   return c.json({ created });
 }));
 

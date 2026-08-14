@@ -35,6 +35,7 @@ import {
   type LayerData, type Stroke, type ToolKind, drawLayer, drawStroke, hitStroke, straightenHighlight,
 } from "../lib/ink";
 import { renderPageToCanvas } from "../lib/pdf";
+import { isPattern, renderPatternToCanvas, DEFAULT_PATTERN_COLOR } from "../lib/patterns";
 import { cn } from "../lib/utils";
 
 /**
@@ -71,6 +72,9 @@ interface Props {
   sourceIndex: number;
   pageWidth: number;
   pageHeight: number;
+  /** Set on a teacher-inserted blank page: draw this ruling instead of a PDF. */
+  pattern?: string;
+  patternColor?: string;
   scale: number;
   fields: FieldRec[];
   fieldValues: Record<string, FieldValue>;
@@ -109,7 +113,7 @@ const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
 const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "text", "comment"];
 
 export default function PageCanvas({
-  pdfUrl, sourceIndex, pageWidth, pageHeight, scale,
+  pdfUrl, sourceIndex, pageWidth, pageHeight, pattern, patternColor, scale,
   fields, fieldValues, onFieldChange,
   studentLayer, teacherLayer, masterLayer, onLayerChange,
   writeTarget, tool, fingerDraw, fieldsEditable, authorName, className,
@@ -128,17 +132,25 @@ export default function PageCanvas({
   const cssW = pageWidth * scale;
   const cssH = pageHeight * scale;
 
-  // ---- Layer 1: the PDF page ----
+  // ---- Layer 1: the page itself, from a PDF or drawn ----
   useEffect(() => {
     const canvas = baseRef.current;
     if (!canvas) return;
     const signal = { cancelled: false };
     setBaseReady(false);
+    if (isPattern(pattern)) {
+      renderPatternToCanvas(
+        pattern, patternColor || DEFAULT_PATTERN_COLOR,
+        pageWidth, pageHeight, canvas, scale, DPR(),
+      );
+      setBaseReady(true);
+      return;
+    }
     renderPageToCanvas(pdfUrl, sourceIndex, canvas, scale, DPR(), signal)
       .then(() => { if (!signal.cancelled) setBaseReady(true); })
       .catch((err) => console.error("PDF render failed", err));
     return () => { signal.cancelled = true; };
-  }, [pdfUrl, sourceIndex, scale]);
+  }, [pdfUrl, sourceIndex, scale, pattern, patternColor, pageWidth, pageHeight]);
 
   // ---- Layer 3: committed ink ----
   const paint = useCallback((canvas: HTMLCanvasElement | null, layer: LayerData) => {

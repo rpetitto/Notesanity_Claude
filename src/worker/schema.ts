@@ -425,3 +425,23 @@ migrate("010_submission_lock", async () => {
   // Anything already handed in stays that way.
   await db.prepare(`UPDATE submissions SET locked = 1 WHERE submitted_at IS NOT NULL`).run();
 });
+
+/**
+ * Teacher-inserted blank pages.
+ *
+ * A blank page has no source document: `asset_key` stays empty and `pattern`
+ * names the ruling to draw instead. The client renders it from those two
+ * columns, so the page costs nothing in storage and stays sharp at any zoom.
+ * An empty `pattern` means the page is PDF-backed, which is every page that
+ * existed before this.
+ */
+migrate("011_blank_pages", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(pages)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("pattern")) {
+    await db.prepare(`ALTER TABLE pages ADD COLUMN pattern TEXT NOT NULL DEFAULT ''`).run();
+  }
+  if (!has("pattern_color")) {
+    await db.prepare(`ALTER TABLE pages ADD COLUMN pattern_color TEXT NOT NULL DEFAULT ''`).run();
+  }
+});

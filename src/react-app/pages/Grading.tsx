@@ -19,7 +19,7 @@ import {
   Undo2, Unlock, Upload, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, assetUrl, type PageRec, type WorkResponse } from "../lib/api";
+import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { parseLayer } from "../lib/ink";
 import { useBackTo } from "../lib/useBackTo";
@@ -132,10 +132,7 @@ function PageRail({
             )}
           >
             <PageThumb
-              pdfUrl={assetUrl(notebookId, page.asset_key)}
-              sourceIndex={page.source_index}
-              pageWidth={page.width}
-              pageHeight={page.height}
+              {...pageSource(notebookId, page)}
               width={64}
             />
             <span className="w-full truncate text-center text-[16px] text-pine/70">

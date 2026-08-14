@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { renderPageToCanvas } from "../lib/pdf";
+import { isPattern, renderPatternToCanvas, DEFAULT_PATTERN_COLOR } from "../lib/patterns";
 import { cn } from "../lib/utils";
 
 /**
@@ -11,12 +12,15 @@ import { cn } from "../lib/utils";
  * from the same source costs almost nothing.
  */
 export default function PageThumb({
-  pdfUrl, sourceIndex, pageWidth, pageHeight, width = 96, className, dimmed,
+  pdfUrl, sourceIndex, pageWidth, pageHeight, pattern, patternColor, width = 96, className, dimmed,
 }: {
   pdfUrl: string;
   sourceIndex: number;
   pageWidth: number;
   pageHeight: number;
+  /** Set on a generated page: draw this ruling instead of fetching a PDF. */
+  pattern?: string;
+  patternColor?: string;
   width?: number;
   className?: string;
   dimmed?: boolean;
@@ -53,11 +57,19 @@ export default function PageThumb({
     const signal = { cancelled: false };
     setReady(false);
     // Thumbnails render at 1x DPR; they're decorative and this halves the work.
+    if (isPattern(pattern)) {
+      renderPatternToCanvas(
+        pattern, patternColor || DEFAULT_PATTERN_COLOR,
+        pageWidth, pageHeight, canvasRef.current, width / pageWidth, 1,
+      );
+      setReady(true);
+      return;
+    }
     renderPageToCanvas(pdfUrl, sourceIndex, canvasRef.current, width / pageWidth, 1, signal)
       .then(() => { if (!signal.cancelled) setReady(true); })
       .catch(() => { /* a broken preview shouldn't break the list */ });
     return () => { signal.cancelled = true; };
-  }, [visible, pdfUrl, sourceIndex, width, pageWidth]);
+  }, [visible, pdfUrl, sourceIndex, width, pageWidth, pageHeight, pattern, patternColor]);
 
   return (
     <div

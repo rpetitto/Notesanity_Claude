@@ -5,7 +5,7 @@ import { ChevronDown } from "lucide-react";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
 import { ButtonLink, Card, Chip } from "../components/ui";
-import { api, assetUrl, type PageRec } from "../lib/api";
+import { api, pageSource, type PageRec } from "../lib/api";
 import { cn, formatDue, formatProgress, isOverdue, DEFAULT_ACCENT, type ProgressUnit } from "../lib/utils";
 
 interface TeachingAssignment {
@@ -258,10 +258,7 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
                 }}
               >
                 <PageThumb
-                  pdfUrl={assetUrl(a.notebookId, p.asset_key)}
-                  sourceIndex={p.source_index}
-                  pageWidth={p.width}
-                  pageHeight={p.height}
+                  {...pageSource(a.notebookId, p)}
                   width={56}
                 />
               </div>

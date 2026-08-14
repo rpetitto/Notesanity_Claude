@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronRight, ImageOff, PanelLeft } from "lucide-react";
-import { api, assetUrl, type WorkResponse } from "../lib/api";
+import { api, assetUrl, pageSource, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { parseLayer } from "../lib/ink";
 import { useSession } from "../lib/session";
@@ -41,6 +41,8 @@ interface StudentNotebookCard {
   first_source_index: number | null;
   first_width: number | null;
   first_height: number | null;
+  first_pattern: string | null;
+  first_pattern_color: string | null;
   pages_worked: number;
   last_worked_at: string | null;
 }
@@ -106,12 +108,14 @@ export function StudentNotebookList() {
                     alt=""
                     className="h-full w-full object-cover"
                   />
-                ) : nb.first_asset_key && nb.first_width && nb.first_height ? (
+                ) : (nb.first_asset_key || nb.first_pattern) && nb.first_width && nb.first_height ? (
                   <PageThumb
-                    pdfUrl={assetUrl(nb.id, nb.first_asset_key)}
+                    pdfUrl={assetUrl(nb.id, nb.first_asset_key ?? undefined)}
                     sourceIndex={nb.first_source_index ?? 0}
                     pageWidth={nb.first_width}
                     pageHeight={nb.first_height}
+                    pattern={nb.first_pattern ?? undefined}
+                    patternColor={nb.first_pattern_color ?? undefined}
                     width={96}
                   />
                 ) : (
@@ -298,10 +302,7 @@ export default function StudentNotebook() {
                   )}
                 >
                   <PageThumb
-                    pdfUrl={assetUrl(notebookId, page.asset_key)}
-                    sourceIndex={page.source_index}
-                    pageWidth={page.width}
-                    pageHeight={page.height}
+                    {...pageSource(notebookId, page)}
                     width={64}
                   />
                   <span className="w-full truncate text-center text-[16px] text-pine/70">
@@ -329,10 +330,7 @@ export default function StudentNotebook() {
                   )}
                 >
                   <PageThumb
-                    pdfUrl={assetUrl(notebookId, page.asset_key)}
-                    sourceIndex={page.source_index}
-                    pageWidth={page.width}
-                    pageHeight={page.height}
+                    {...pageSource(notebookId, page)}
                     width={64}
                   />
                   <span className="w-full truncate text-center text-[16px] text-pine/70">

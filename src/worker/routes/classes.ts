@@ -174,7 +174,8 @@ app.get("/api/classes/:id", handler(async (c) => {
       `SELECT n.id, n.title, n.status, n.page_count, n.updated_at,
               n.accent_color, n.cover_key IS NOT NULL AS has_cover,
               p.id AS first_page_id, p.asset_key AS first_asset_key,
-              p.source_index AS first_source_index, p.width AS first_width, p.height AS first_height
+              p.source_index AS first_source_index, p.width AS first_width, p.height AS first_height,
+              p.pattern AS first_pattern, p.pattern_color AS first_pattern_color
          FROM notebooks n
          LEFT JOIN pages p ON p.id = (
            SELECT id FROM pages WHERE notebook_id = n.id AND archived = 0 ORDER BY seq LIMIT 1
@@ -433,6 +434,7 @@ app.get("/api/classes/:id/students/:studentId/notebooks", handler(async (c) => {
               n.cover_key IS NOT NULL AS has_cover,
               p.asset_key AS first_asset_key, p.source_index AS first_source_index,
               p.width AS first_width, p.height AS first_height,
+              p.pattern AS first_pattern, p.pattern_color AS first_pattern_color,
               (SELECT COUNT(DISTINCT l.page_id) FROM layers l
                  JOIN instances i ON i.id = l.instance_id
                 WHERE i.notebook_id = n.id AND i.student_id = ?

@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Check, Trash2 } from "lucide-react";
-import { api, assetUrl, type PageRec } from "../lib/api";
+import { api, pageSource, type PageRec } from "../lib/api";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
 import { Button, Card, Input, Label, Modal, Select, Textarea } from "../components/ui";
@@ -286,10 +286,7 @@ export default function AssignmentEditor() {
                       )}
                     >
                       <PageThumb
-                        pdfUrl={assetUrl(notebookId, p.asset_key)}
-                        sourceIndex={p.source_index}
-                        pageWidth={p.width}
-                        pageHeight={p.height}
+                        {...pageSource(notebookId, p)}
                         width={72}
                       />
                       <span className="absolute bottom-1.5 left-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-pine bg-white px-1 font-display text-[16px] text-pine">

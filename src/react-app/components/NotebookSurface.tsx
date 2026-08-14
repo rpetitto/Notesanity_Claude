@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assetUrl, type FieldRec, type LayerRec, type PageRec } from "../lib/api";
+import { pageSource, type FieldRec, type LayerRec, type PageRec } from "../lib/api";
 import { type LayerData, emptyLayer, parseLayer } from "../lib/ink";
 import PageCanvas, { type FieldValue, type ToolState } from "./PageCanvas";
 import LazyPage from "./LazyPage";
@@ -150,10 +150,7 @@ export default function NotebookSurface({
             </div>
             <LazyPage width={page.width * scale} height={page.height * scale}>
               <PageCanvas
-                pdfUrl={assetUrl(notebookId, page.asset_key)}
-                sourceIndex={page.source_index}
-                pageWidth={page.width}
-                pageHeight={page.height}
+                {...pageSource(notebookId, page)}
                 scale={scale}
                 fields={fieldsByPage[page.id] ?? []}
                 fieldValues={fieldValues}

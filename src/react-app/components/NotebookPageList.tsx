@@ -16,7 +16,7 @@ import {
   ChevronDown, ChevronRight, EyeOff, GripVertical, Pencil, RotateCcw, Trash2,
 } from "lucide-react";
 import PageThumb from "./PageThumb";
-import { assetUrl, type PageRec } from "../lib/api";
+import { pageSource, type PageRec } from "../lib/api";
 import { cn } from "../lib/utils";
 
 export interface ListPage extends PageRec {
@@ -215,10 +215,7 @@ export default function NotebookPageList({
 
                     <div className="relative">
                       <PageThumb
-                        pdfUrl={assetUrl(notebookId, p.asset_key)}
-                        sourceIndex={p.source_index}
-                        pageWidth={p.width}
-                        pageHeight={p.height}
+                        {...pageSource(notebookId, p)}
                         width={52}
                         dimmed={!!p.archived}
                       />

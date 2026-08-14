@@ -4,19 +4,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   FolderPlus, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
-  Plus, RotateCcw, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
+  Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, assetUrl, type FieldRec, type PageRec } from "../lib/api";
+import { api, pageSource, type FieldRec, type PageRec } from "../lib/api";
 import { readPageSizes } from "../lib/pdf";
 import { convertToPdf, needsConversion } from "../lib/google";
+import {
+  PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
+  renderPatternToCanvas, type PatternKey,
+} from "../lib/patterns";
 import PageCanvas, { type ToolState } from "../components/PageCanvas";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
 import InkToolbar from "../components/InkToolbar";
 import { emptyLayer, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData } from "../lib/ink";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
-import { Button, Chip, IconButton, Input, Textarea } from "../components/ui";
+import { Button, Chip, IconButton, Input, Modal, Select, Textarea } from "../components/ui";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
 
@@ -127,6 +131,7 @@ export default function NotebookEditor() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const addPagesRef = useRef<HTMLInputElement>(null);
+  const [blankOpen, setBlankOpen] = useState(false);
   const [busyMessage, setBusyMessage] = useState("");
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [coverBump, setCoverBump] = useState(0);
@@ -234,6 +239,17 @@ export default function NotebookEditor() {
   const createField = useMutation({
     mutationFn: (body: any) => api.post(`/api/notebooks/${notebookId}/fields`, body),
     onSuccess: () => invalidate(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const addBlankPages = useMutation({
+    mutationFn: (body: { pattern: string; color: string; count: number; insertAfterPageId: string | null }) =>
+      api.post<{ created: string[] }>(`/api/notebooks/${notebookId}/pages/blank`, body),
+    onSuccess: (res) => {
+      const n = res.created.length;
+      toast.success(`Added ${n} blank page${n === 1 ? "" : "s"}`);
+      setBlankOpen(false);
+      invalidate();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const updateField = useMutation({
@@ -516,6 +532,9 @@ export default function NotebookEditor() {
           <Button variant="secondary" onClick={() => addPagesRef.current?.click()} disabled={!!busyMessage}>
             <Plus className="h-5 w-5" strokeWidth={2.5} /> {busyMessage || "Add pages"}
           </Button>
+          <Button variant="secondary" onClick={() => setBlankOpen(true)} disabled={!!busyMessage}>
+            <Rows3 className="h-5 w-5" strokeWidth={2.5} /> Blank pages
+          </Button>
           {hasUnpublishedAnnotations && (
             <Chip tone="warn" icon={<Pen className="h-4 w-4" strokeWidth={2.5} />}>
               Unpublished annotations
@@ -553,6 +572,15 @@ export default function NotebookEditor() {
           />
         )}
       </header>
+
+      {blankOpen && (
+        <BlankPagesModal
+          pages={allPages}
+          busy={addBlankPages.isPending}
+          onClose={() => setBlankOpen(false)}
+          onInsert={(body) => addBlankPages.mutate(body)}
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-2 border-b-2 border-pine/12 bg-white px-3 py-2">
         <span className="label-caps text-pine/60">Add field:</span>
@@ -673,10 +701,7 @@ export default function NotebookEditor() {
                 {annotateMode ? (
                   <PageCanvas
                     key={page.id}
-                    pdfUrl={assetUrl(notebookId, page.asset_key)}
-                    sourceIndex={page.source_index}
-                    pageWidth={page.width}
-                    pageHeight={page.height}
+                    {...pageSource(notebookId, page)}
                     scale={scale}
                     fields={[]}
                     fieldValues={{}}
@@ -691,10 +716,7 @@ export default function NotebookEditor() {
                 ) : (
                   <>
                     <PageCanvas
-                      pdfUrl={assetUrl(notebookId, page.asset_key)}
-                      sourceIndex={page.source_index}
-                      pageWidth={page.width}
-                      pageHeight={page.height}
+                      {...pageSource(notebookId, page)}
                       scale={scale}
                       fields={[]}
                       fieldValues={{}}
@@ -804,6 +826,129 @@ export default function NotebookEditor() {
 }
 
 /** Small popover for customising the accent colour and cover image shown on the notebook's tile. */
+/** A live sample of one ruling, drawn with the same code that paints the page. */
+function PatternPreview({
+  pattern, color, width = 64, ratio = 792 / 612,
+}: { pattern: PatternKey; color: string; width?: number; ratio?: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const height = Math.round(width * ratio);
+  useEffect(() => {
+    if (ref.current) {
+      // Previewed at 2x so the fine rulings don't alias away at thumbnail size.
+      renderPatternToCanvas(pattern, color, 612, 612 * ratio, ref.current, width / 612, 2);
+    }
+  }, [pattern, color, width, ratio]);
+  return <canvas ref={ref} style={{ width, height }} className="block rounded-[4px]" />;
+}
+
+/**
+ * Insert blank pages.
+ *
+ * The pages are generated rather than uploaded, so the only choices are the
+ * ruling, its colour, how many, and where they go. Size isn't offered: an
+ * inserted sheet always takes the dimensions of the notebook it joins, which
+ * is the only thing that keeps a notebook printable.
+ */
+function BlankPagesModal({
+  pages, busy, onClose, onInsert,
+}: {
+  pages: PageRec[];
+  busy: boolean;
+  onClose: () => void;
+  onInsert: (body: { pattern: PatternKey; color: string; count: number; insertAfterPageId: string | null }) => void;
+}) {
+  const [pattern, setPattern] = useState<PatternKey>(DEFAULT_PATTERN);
+  const [color, setColor] = useState(DEFAULT_PATTERN_COLOR);
+  const [count, setCount] = useState(1);
+  const [after, setAfter] = useState<string>("");
+
+  const live = pages.filter((p) => !p.archived);
+  // Preview at the notebook's own proportions, so what's shown is the shape
+  // the teacher will actually get.
+  const ratio = live[0] ? live[0].height / live[0].width : 792 / 612;
+
+  return (
+    <Modal onClose={onClose} title="Add blank pages" className="sm:max-w-2xl">
+      <label className="label-caps mb-2 block text-pine/70">Pattern</label>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+        {PATTERNS.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => setPattern(p.key)}
+            aria-pressed={pattern === p.key}
+            title={p.hint}
+            className={cn(
+              "flex flex-col items-center gap-1.5 rounded-[12px] border-2 p-2 transition-colors",
+              pattern === p.key ? "border-pine bg-mint/25" : "border-pine/20 hover:bg-oat",
+            )}
+          >
+            <span className="overflow-hidden rounded-[4px] border border-pine/25">
+              <PatternPreview pattern={p.key} color={color} width={52} ratio={ratio} />
+            </span>
+            <span className="text-center text-[14px] font-bold leading-tight text-pine">{p.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule colour</label>
+      <div className="flex flex-wrap gap-2">
+        {PATTERN_COLORS.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setColor(c.value)}
+            aria-pressed={color === c.value}
+            title={c.label}
+            className={cn(
+              "flex h-11 w-11 items-center justify-center rounded-full border-2 transition-transform",
+              color === c.value ? "border-pine scale-105" : "border-pine/25 hover:border-pine/50",
+            )}
+          >
+            <span className="h-7 w-7 rounded-full border border-pine/20" style={{ background: c.value }} />
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="label-caps mb-1 block text-pine/70" htmlFor="blank-count">How many</label>
+          <Input
+            id="blank-count"
+            type="number"
+            min={1}
+            max={50}
+            value={count}
+            onChange={(e) => setCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+          />
+        </div>
+        <div>
+          <label className="label-caps mb-1 block text-pine/70" htmlFor="blank-after">Where</label>
+          <Select id="blank-after" value={after} onChange={(e) => setAfter(e.target.value)}>
+            <option value="">At the end</option>
+            {live.map((p, i) => (
+              <option key={p.id} value={p.id}>
+                After page {i + 1}{p.label ? ` — ${p.label}` : ""}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button
+          variant="primary"
+          disabled={busy}
+          onClick={() => onInsert({ pattern, color, count, insertAfterPageId: after || null })}
+        >
+          {busy ? "Adding…" : `Add ${count} page${count === 1 ? "" : "s"}`}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 function AppearancePopover({
   notebookId, accentColor, hasCover, coverBump, coverInputRef,
   onSetAccent, onClearCover, onUploadCover, uploading, onClose,

@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, CheckCheck, ChevronRight, PanelLeft, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, assetUrl, type WorkResponse } from "../lib/api";
+import { api, pageSource, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { parseLayer } from "../lib/ink";
 import { useSession } from "../lib/session";
@@ -328,10 +328,7 @@ export default function Workspace() {
                   )}
                 >
                   <PageThumb
-                    pdfUrl={assetUrl(notebookId, page.asset_key)}
-                    sourceIndex={page.source_index}
-                    pageWidth={page.width}
-                    pageHeight={page.height}
+                    {...pageSource(notebookId, page)}
                     width={64}
                   />
                   <span className="w-full truncate text-center text-[16px] text-pine/70">
@@ -359,10 +356,7 @@ export default function Workspace() {
                   )}
                 >
                   <PageThumb
-                    pdfUrl={assetUrl(notebookId, page.asset_key)}
-                    sourceIndex={page.source_index}
-                    pageWidth={page.width}
-                    pageHeight={page.height}
+                    {...pageSource(notebookId, page)}
                     width={64}
                   />
                   <span className="w-full truncate text-center text-[16px] text-pine/70">
