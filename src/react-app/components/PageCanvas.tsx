@@ -810,12 +810,17 @@ function ResponseImageField({
         credentials: "same-origin",
         body: form,
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => "Upload failed"));
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        let reason = "";
+        try { reason = JSON.parse(body)?.error ?? ""; } catch { reason = body.slice(0, 140); }
+        throw new Error(reason || `Upload failed (${res.status})`);
+      }
       setExists(true);
       setCacheBust((n) => n + 1);
       onResponseUploaded?.(field.id);
-    } catch {
-      toast.error("Couldn't upload that image");
+    } catch (err) {
+      toast.error((err as Error).message || "Couldn't upload that image");
     } finally {
       setUploading(false);
     }
@@ -945,12 +950,17 @@ function ResponseAudioField({
         credentials: "same-origin",
         body: form,
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => "Upload failed"));
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        let reason = "";
+        try { reason = JSON.parse(body)?.error ?? ""; } catch { reason = body.slice(0, 140); }
+        throw new Error(reason || `Upload failed (${res.status})`);
+      }
       setExists(true);
       setCacheBust((n) => n + 1);
       onResponseUploaded?.(field.id);
-    } catch {
-      toast.error("Couldn't upload that recording");
+    } catch (err) {
+      toast.error((err as Error).message || "Couldn't upload that recording");
     } finally {
       setUploading(false);
     }

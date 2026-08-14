@@ -180,8 +180,15 @@ const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 // audio clip dropped into an image box would render as a broken picture.
 const ACCEPTED: Record<string, RegExp> = {
   image: /^image\/(png|jpe?g|webp|gif|heic|heif)$/,
-  audio: /^audio\/(webm|mpeg|mp3|mp4|ogg|wav|x-wav|x-m4a|m4a|aac)$/,
+  audio: /^audio\/(webm|mpeg|mp3|mp4|ogg|wav|x-wav|x-m4a|m4a|aac|3gpp|flac)$/,
 };
+
+/**
+ * A browser recording arrives as `audio/webm;codecs=opus`, not `audio/webm` —
+ * MediaRecorder always names the codec. Compare on the bare type so a perfectly
+ * good recording isn't refused over a parameter.
+ */
+const bareType = (value: string) => (value || "").split(";")[0].trim().toLowerCase();
 
 /**
  * Upload a student's image or audio response into an `image` / `audio` field.
@@ -210,12 +217,12 @@ app.post("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   const file = form["file"] as File | undefined;
   if (!file) throw new HttpError(400, "No file uploaded");
   const accepted = ACCEPTED[field.type];
-  if (!accepted.test(file.type)) {
+  if (!accepted.test(bareType(file.type))) {
     throw new HttpError(
       400,
       field.type === "image"
-        ? `That's a ${file.type || "file"} — this box takes an image.`
-        : `That's a ${file.type || "file"} — this box takes an audio recording.`,
+        ? `That's a ${bareType(file.type) || "file"} — this box takes an image.`
+        : `That's a ${bareType(file.type) || "file"} — this box takes an audio recording.`,
     );
   }
   if (file.size > MAX_RESPONSE_BYTES) throw new HttpError(413, "Uploads are limited to 10MB");
