@@ -652,6 +652,7 @@ function FieldControl({
           />
         )}
         <textarea
+          {...(typeable ? { "data-typeable": "1" } : {})}
           disabled={!editable}
           value={fieldText(value)}
           onChange={(e) => onChange(e.target.value)}
@@ -675,6 +676,7 @@ function FieldControl({
         notebookId={notebookId}
         studentId={studentId}
         onResponseUploaded={onResponseUploaded}
+        typeable={typeable}
       />
     );
   }
@@ -688,6 +690,7 @@ function FieldControl({
         notebookId={notebookId}
         studentId={studentId}
         onResponseUploaded={onResponseUploaded}
+        typeable={typeable}
       />
     );
   }
@@ -784,7 +787,7 @@ function useResponseProbe(url: string, nonce: number) {
 }
 
 function ResponseImageField({
-  field, style, editable, notebookId, studentId, onResponseUploaded,
+  field, style, editable, notebookId, studentId, onResponseUploaded, typeable,
 }: {
   field: FieldLike;
   style: { left: number; top: number; width: number; height: number };
@@ -792,7 +795,9 @@ function ResponseImageField({
   notebookId: string;
   studentId?: string;
   onResponseUploaded?: (fieldId: string) => void;
+  typeable?: boolean;
 }) {
+  const tap = typeable ? { "data-typeable": "1" } : {};
   const [cacheBust, setCacheBust] = useState(0);
   const url = responseUrl(notebookId, field.id, studentId, cacheBust);
   const [exists, setExists] = useResponseProbe(url, 0);
@@ -866,6 +871,7 @@ function ResponseImageField({
           {editable && (
             <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-black/40 to-transparent p-1 opacity-0 transition-opacity group-hover:opacity-100">
               <button
+                {...tap}
                 type="button"
                 onClick={() => inputRef.current?.click()}
                 title="Replace image"
@@ -874,6 +880,7 @@ function ResponseImageField({
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
               <button
+                {...tap}
                 type="button"
                 onClick={() => void remove()}
                 title="Remove image"
@@ -886,6 +893,7 @@ function ResponseImageField({
         </div>
       ) : editable ? (
         <button
+          {...tap}
           type="button"
           onClick={() => inputRef.current?.click()}
           className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-pine/35 bg-oat/70 text-pine/70 hover:border-pine hover:text-pine"
@@ -903,7 +911,7 @@ function ResponseImageField({
 const MAX_RECORDING_SECONDS = 180;
 
 function ResponseAudioField({
-  field, style, editable, notebookId, studentId, onResponseUploaded,
+  field, style, editable, notebookId, studentId, onResponseUploaded, typeable,
 }: {
   field: FieldLike;
   style: { left: number; top: number; width: number; height: number };
@@ -911,7 +919,9 @@ function ResponseAudioField({
   notebookId: string;
   studentId?: string;
   onResponseUploaded?: (fieldId: string) => void;
+  typeable?: boolean;
 }) {
+  const tap = typeable ? { "data-typeable": "1" } : {};
   const [cacheBust, setCacheBust] = useState(0);
   const url = responseUrl(notebookId, field.id, studentId, cacheBust);
   const [exists, setExists] = useResponseProbe(url, 0);
@@ -1063,13 +1073,13 @@ function ResponseAudioField({
         </div>
       ) : exists ? (
         <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1.5">
-          <audio controls src={url} className="w-full shrink-0" style={{ height: 36, minHeight: 36 }} />
+          <audio {...tap} controls src={url} className="w-full shrink-0" style={{ height: 36, minHeight: 36 }} />
           {editable && (
             <div className="flex gap-3">
-              <button type="button" onClick={() => inputRef.current?.click()} className="text-[14px] font-bold text-pine hover:underline">
+              <button {...tap} type="button" onClick={() => inputRef.current?.click()} className="text-[14px] font-bold text-pine hover:underline">
                 Replace
               </button>
-              <button type="button" onClick={() => void remove()} className="text-[14px] font-bold text-[#a3341f] hover:underline">
+              <button {...tap} type="button" onClick={() => void remove()} className="text-[14px] font-bold text-[#a3341f] hover:underline">
                 Remove
               </button>
             </div>
@@ -1079,6 +1089,7 @@ function ResponseAudioField({
         recording ? (
           <div className="flex h-full w-full items-center justify-center gap-2 px-2 text-pine/75">
             <button
+              {...tap}
               type="button"
               onClick={stopRecording}
               title="Stop recording"
@@ -1092,6 +1103,7 @@ function ResponseAudioField({
           <div className="flex h-full w-full items-center justify-center gap-1.5 border-2 border-dashed border-pine/35 bg-oat/70 px-1.5 text-pine/70">
             {canRecord && (
               <button
+                {...tap}
                 type="button"
                 onClick={() => void startRecording()}
                 title="Record audio"
@@ -1101,6 +1113,7 @@ function ResponseAudioField({
               </button>
             )}
             <button
+              {...tap}
               type="button"
               onClick={() => inputRef.current?.click()}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-pine/45 bg-white text-pine hover:border-pine"
