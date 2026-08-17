@@ -1058,8 +1058,11 @@ export default function ClassView() {
             </ul>
           </Card>
           {classQ.data.roster.length === 0 && <EmptyState title="No students yet" body="Share the join code or invite students by email." />}
+          {/* The list clips to its own radius: rows paint a hover background edge
+              to edge, and without clipping the first and last rows fill the card's
+              rounded corners in square. */}
           {classQ.data.roster.length > 0 && (
-            <ul className="divide-y divide-pine/15 rounded-[22px] border-[3px] border-pine bg-white">
+            <ul className="divide-y divide-pine/15 overflow-hidden rounded-[22px] border-[3px] border-pine bg-white">
               {classQ.data.roster
                 .filter((r) => r.role === "student")
                 .map((r) => (
