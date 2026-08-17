@@ -2,6 +2,7 @@ import { app, db, storage } from "flingit";
 import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { sanitizeRichText } from "../lib/richtext";
+import { MAX_TEMPLATE_PAGES, TEMPLATES, templateFor } from "../lib/templates";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
@@ -17,6 +18,16 @@ export const FIELD_TYPES = [
 async function notebookAccess(c: any, notebookId: string) {
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
   if (!nb) throw new HttpError(404, "Notebook not found");
+
+  // A personal notebook has no class to be a member of. Only its owner may
+  // touch it, and they hold the editing rights a teacher holds over a class
+  // notebook — it's their own book, so adding pages is theirs to do.
+  if (nb.kind === "personal") {
+    const user = await requireUser(c);
+    if (nb.owner_id !== user.id) throw new HttpError(404, "Notebook not found");
+    return { nb, user, isTeacher: true };
+  }
+
   const { user, isTeacher } = await requireClassMember(c, nb.class_id);
   return { nb, user, isTeacher };
 }
@@ -104,6 +115,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
       id: nb.id, classId: nb.class_id, title: nb.title, status: nb.status,
       pageCount: nb.page_count, assetKey: nb.asset_key, lastPublishedAt: nb.last_published_at,
       accentColor: nb.accent_color ?? "#2E7D6B", hasCover: !!nb.cover_key,
+      kind: nb.kind ?? "class", ownerId: nb.owner_id,
     },
     pages: pages.results ?? [],
     fields: fields.results ?? [],
@@ -792,4 +804,154 @@ app.get("/api/my/notebooks", handler(async (c) => {
     .bind(user.id)
     .all();
   return c.json({ notebooks: rows.results ?? [] });
+}));
+
+// ---------- starting a notebook without a source document ----------
+
+/** Create the pages a template describes, in one go. */
+async function fillFromTemplate(notebookId: string, pages: number, pattern: string, color: string) {
+  for (let i = 1; i <= pages; i++) {
+    await db
+      .prepare(
+        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, pattern, pattern_color, created_at)
+         VALUES (?, ?, ?, '', -1, 612, 792, ?, ?, ?)`,
+      )
+      .bind(uid(), notebookId, i, pattern, color, now())
+      .run();
+  }
+  await syncPageCount(notebookId);
+}
+
+/** The catalogue, so the client never hard-codes a second copy of it. */
+app.get("/api/notebook-templates", handler(async (c) => {
+  const user = await requireUser(c);
+  const audience = user.role === "teacher" ? "teacher" : "student";
+  return c.json({ templates: TEMPLATES.filter((t) => t.audience === "both" || t.audience === audience) });
+}));
+
+/** A class notebook that starts as blank pages rather than an upload. */
+app.post("/api/classes/:id/notebooks/blank", handler(async (c) => {
+  const classId = param(c, "id");
+  const teacher = await requireClassTeacher(c, classId);
+  const body = await c.req.json<{ title?: string; template?: string; pages?: number; pattern?: string; color?: string }>();
+
+  const preset = body.template ? templateFor(body.template) : null;
+  if (body.template && !preset) throw new HttpError(400, "Unknown template");
+  const pages = Math.floor(body.pages ?? preset?.pages ?? 0);
+  const pattern = body.pattern ?? preset?.pattern ?? "";
+  const color = body.color ?? preset?.color ?? "";
+  if (!PAGE_PATTERNS.includes(pattern)) throw new HttpError(400, "Unknown page pattern");
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule colour must be a hex value");
+  if (!Number.isFinite(pages) || pages < 1) throw new HttpError(400, "A notebook needs at least one page");
+  if (pages > MAX_TEMPLATE_PAGES) throw new HttpError(400, `A notebook can start with at most ${MAX_TEMPLATE_PAGES} pages`);
+
+  const notebookId = uid();
+  await db
+    .prepare(
+      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '', '', 0, 'draft', 'class', ?, ?)`,
+    )
+    .bind(notebookId, classId, teacher.id, body.title?.trim() || preset?.label || "Untitled notebook", now(), now())
+    .run();
+  await fillFromTemplate(notebookId, pages, pattern, color);
+  return c.json({ notebook: { id: notebookId } });
+}));
+
+/**
+ * A personal notebook: the user's own, outside any class.
+ *
+ * Deliberately not shareable and not assignable. It exists so a student can
+ * keep their own notes in the same tool they do their coursework in, without
+ * that turning into another thing a teacher can see.
+ */
+app.post("/api/my/personal-notebooks", handler(async (c) => {
+  const user = await requireUser(c);
+  const body = await c.req.json<{ title?: string; template?: string; pages?: number; pattern?: string; color?: string }>();
+
+  const preset = body.template ? templateFor(body.template) : null;
+  if (body.template && !preset) throw new HttpError(400, "Unknown template");
+  const pages = Math.floor(body.pages ?? preset?.pages ?? 0);
+  const pattern = body.pattern ?? preset?.pattern ?? "";
+  const color = body.color ?? preset?.color ?? "";
+  if (!PAGE_PATTERNS.includes(pattern)) throw new HttpError(400, "Unknown page pattern");
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule colour must be a hex value");
+  if (!Number.isFinite(pages) || pages < 1) throw new HttpError(400, "A notebook needs at least one page");
+  if (pages > MAX_TEMPLATE_PAGES) throw new HttpError(400, `A notebook can start with at most ${MAX_TEMPLATE_PAGES} pages`);
+
+  const notebookId = uid();
+  await db
+    .prepare(
+      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind, created_at, updated_at)
+       VALUES (?, '', ?, ?, '', '', 0, 'published', 'personal', ?, ?)`,
+    )
+    .bind(notebookId, user.id, body.title?.trim() || preset?.label || "My notebook", now(), now())
+    .run();
+  await fillFromTemplate(notebookId, pages, pattern, color);
+  return c.json({ notebook: { id: notebookId } });
+}));
+
+/** A personal notebook that starts from the user's own PDF. */
+app.post("/api/my/personal-notebooks/upload", handler(async (c) => {
+  const user = await requireUser(c);
+  const form = await c.req.parseBody();
+  const file = form["file"] as File | undefined;
+  const title = String(form["title"] ?? "").trim();
+  if (!file) throw new HttpError(400, "No file uploaded");
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new HttpError(413, `That file is ${(file.size / 1048576).toFixed(1)}MB — the limit is 25MB.`);
+  }
+
+  const notebookId = uid();
+  const assetKey = `notebooks/${notebookId}/${uid()}.pdf`;
+  await storage.put(assetKey, await file.arrayBuffer(), { contentType: "application/pdf" });
+  await db
+    .prepare(
+      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind, created_at, updated_at)
+       VALUES (?, '', ?, ?, ?, ?, 0, 'published', 'personal', ?, ?)`,
+    )
+    .bind(notebookId, user.id, title || file.name.replace(/\.[^.]+$/, ""), file.name, assetKey, now(), now())
+    .run();
+  return c.json({ notebook: { id: notebookId, assetKey } });
+}));
+
+/** The user's own notebooks, newest first. */
+app.get("/api/my/personal-notebooks", handler(async (c) => {
+  const user = await requireUser(c);
+  const rows = await db
+    .prepare(
+      `SELECT n.id, n.title, n.page_count, n.updated_at, n.accent_color,
+              n.cover_key IS NOT NULL AS has_cover,
+              p.asset_key AS first_asset_key, p.source_index AS first_source_index,
+              p.width AS first_width, p.height AS first_height,
+              p.pattern AS first_pattern, p.pattern_color AS first_pattern_color
+         FROM notebooks n
+         LEFT JOIN pages p ON p.id = (
+           SELECT id FROM pages WHERE notebook_id = n.id AND archived = 0 ORDER BY seq LIMIT 1
+         )
+        WHERE n.kind = 'personal' AND n.owner_id = ?
+        ORDER BY n.updated_at DESC`,
+    )
+    .bind(user.id)
+    .all<any>();
+  return c.json({ notebooks: rows.results ?? [] });
+}));
+
+/** Delete a personal notebook and everything in it. Only the owner, only their own. */
+app.delete("/api/my/personal-notebooks/:id", handler(async (c) => {
+  const user = await requireUser(c);
+  const nb = await db
+    .prepare(`SELECT * FROM notebooks WHERE id = ? AND kind = 'personal' AND owner_id = ?`)
+    .bind(param(c, "id"), user.id)
+    .first<any>();
+  if (!nb) throw new HttpError(404, "Notebook not found");
+  const instances = await db.prepare(`SELECT id FROM instances WHERE notebook_id = ?`).bind(nb.id).all<any>();
+  for (const inst of instances.results ?? []) {
+    await db.prepare(`DELETE FROM layers WHERE instance_id = ?`).bind(inst.id).run();
+    await db.prepare(`DELETE FROM field_values WHERE instance_id = ?`).bind(inst.id).run();
+  }
+  await db.prepare(`DELETE FROM instances WHERE notebook_id = ?`).bind(nb.id).run();
+  await db.prepare(`DELETE FROM fields WHERE notebook_id = ?`).bind(nb.id).run();
+  await db.prepare(`DELETE FROM pages WHERE notebook_id = ?`).bind(nb.id).run();
+  await db.prepare(`DELETE FROM notebooks WHERE id = ?`).bind(nb.id).run();
+  return c.json({ ok: true });
 }));

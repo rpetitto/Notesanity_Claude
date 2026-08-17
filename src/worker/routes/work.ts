@@ -15,7 +15,17 @@ const MAX_LAYER_BYTES = 512 * 1024;
 async function resolveInstance(c: any, notebookId: string, studentIdParam?: string) {
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
   if (!nb) throw new HttpError(404, "Notebook not found");
-  const { user, isTeacher } = await requireClassMember(c, nb.class_id);
+
+  // In a personal notebook the owner is the one writing, not a teacher looking
+  // in — so they resolve to their own instance and can't ask for anyone else's.
+  // (There is no one else's: a personal notebook is never shared.)
+  const { user, isTeacher } = nb.kind === "personal"
+    ? await (async () => {
+        const u = await requireUser(c);
+        if (nb.owner_id !== u.id) throw new HttpError(404, "Notebook not found");
+        return { user: u, isTeacher: false };
+      })()
+    : await requireClassMember(c, nb.class_id);
 
   const studentId = studentIdParam && isTeacher ? studentIdParam : user.id;
   if (studentIdParam && !isTeacher && studentIdParam !== user.id) {
@@ -29,11 +39,15 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
 
   // Lazily provision on first open — covers a student who enrolled between publishes.
   if (!instance) {
-    const enrolled = await db
-      .prepare(`SELECT id FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`)
-      .bind(nb.class_id, studentId)
-      .first();
-    if (!enrolled) throw new HttpError(404, "That student isn't in this class");
+    // A personal notebook has no class to be enrolled in; ownership was already
+    // checked above, and that is the whole of the permission question here.
+    if (nb.kind !== "personal") {
+      const enrolled = await db
+        .prepare(`SELECT id FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`)
+        .bind(nb.class_id, studentId)
+        .first();
+      if (!enrolled) throw new HttpError(404, "That student isn't in this class");
+    }
     const id = uid();
     await db
       .prepare(`INSERT INTO instances (id, notebook_id, class_id, student_id, created_at) VALUES (?, ?, ?, ?, ?)`)
@@ -85,7 +99,7 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     .first();
 
   return c.json({
-    notebook: { id: nb.id, title: nb.title, classId: nb.class_id },
+    notebook: { id: nb.id, title: nb.title, classId: nb.class_id, kind: nb.kind ?? "class" },
     instanceId: instance.id,
     pages: pages.results ?? [],
     fields: fields.results ?? [],

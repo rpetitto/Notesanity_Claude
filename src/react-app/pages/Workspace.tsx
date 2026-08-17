@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckCheck, ChevronRight, PanelLeft, Send, Undo2 } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronRight, Download, PanelLeft, Plus, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
@@ -13,7 +13,11 @@ import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { ErrorNote, Spinner, FlingBadge } from "../components/Shell";
-import { Button, Chip, IconButton } from "../components/ui";
+import { Button, Chip, IconButton, Input, Modal } from "../components/ui";
+import {
+  PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
+  renderPatternToCanvas, type PatternKey,
+} from "../lib/patterns";
 import { cn, formatDue, isOverdue } from "../lib/utils";
 
 /** Header controls share one height so a row of them lines up. */
@@ -148,6 +152,84 @@ function ScopeToggle({
       ))}
     </div>
   );
+}
+
+/** Adding paper to your own notebook: which ruling, what colour, how many. */
+function AddPagesModal({
+  busy, onClose, onAdd,
+}: { busy: boolean; onClose: () => void; onAdd: (b: { pattern: string; color: string; count: number }) => void }) {
+  const [pattern, setPattern] = useState<PatternKey>(DEFAULT_PATTERN);
+  const [color, setColor] = useState(DEFAULT_PATTERN_COLOR);
+  const [count, setCount] = useState(1);
+  return (
+    <Modal onClose={onClose} title="Add pages" className="sm:max-w-2xl">
+      <label className="label-caps mb-2 block text-pine/70">Paper</label>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+        {PATTERNS.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => setPattern(p.key)}
+            aria-pressed={pattern === p.key}
+            className={cn(
+              "flex flex-col items-center gap-1.5 rounded-[12px] border-2 p-2 transition-colors",
+              pattern === p.key ? "border-pine bg-mint/25" : "border-pine/20 hover:bg-oat",
+            )}
+          >
+            <span className="overflow-hidden rounded-[3px] border border-pine/25">
+              <PaperSample pattern={p.key} color={color} />
+            </span>
+            <span className="text-center text-[14px] font-bold leading-tight text-pine">{p.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule colour</label>
+      <div className="flex flex-wrap gap-2">
+        {PATTERN_COLORS.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setColor(c.value)}
+            aria-pressed={color === c.value}
+            title={c.label}
+            className={cn(
+              "flex h-11 w-11 items-center justify-center rounded-full border-2",
+              color === c.value ? "border-pine scale-105" : "border-pine/25 hover:border-pine/50",
+            )}
+          >
+            <span className="h-7 w-7 rounded-full border border-pine/20" style={{ background: c.value }} />
+          </button>
+        ))}
+      </div>
+
+      <label className="label-caps mb-1 mt-5 block text-pine/70" htmlFor="add-count">How many</label>
+      <Input
+        id="add-count"
+        type="number"
+        min={1}
+        max={50}
+        value={count}
+        onChange={(e) => setCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+      />
+
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="primary" disabled={busy} onClick={() => onAdd({ pattern, color, count })}>
+          {busy ? "Adding…" : `Add ${count} page${count === 1 ? "" : "s"}`}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** A sample of the paper, drawn by the same code that paints the page. */
+function PaperSample({ pattern, color }: { pattern: PatternKey; color: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (ref.current) renderPatternToCanvas(pattern, color, 612, 792, ref.current, 52 / 612, 2);
+  }, [pattern, color]);
+  return <canvas ref={ref} style={{ width: 52, height: Math.round((52 * 792) / 612) }} className="block" />;
 }
 
 export default function Workspace() {
@@ -288,6 +370,44 @@ export default function Workspace() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /**
+   * A personal notebook is the student's own: they own the paper as well as the
+   * writing, so they can extend it and take it away as a PDF. Neither applies
+   * to a class notebook, which belongs to the teacher who published it.
+   */
+  const isPersonal = (data as any)?.notebook?.kind === "personal";
+  const [blankOpen, setBlankOpen] = useState(false);
+  const [exporting, setExporting] = useState("");
+
+  const addPages = useMutation({
+    mutationFn: (body: { pattern: string; color: string; count: number }) =>
+      api.post(`/api/notebooks/${notebookId}/pages/blank`, { ...body, insertAfterPageId: null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["work", notebookId] });
+      setBlankOpen(false);
+      toast.success("Pages added");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const exportPdf = async () => {
+    if (!data) return;
+    try {
+      setExporting("Preparing…");
+      const { exportNotebookPdf, layersForPage } = await import("../lib/exportPdf");
+      await exportNotebookPdf(
+        notebookId,
+        data.notebook.title,
+        pages.map((page) => ({ page, layers: layersForPage(page.id, data.layers as any) })),
+        (done, total) => setExporting(`Page ${done} of ${total}…`),
+      );
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setExporting("");
+    }
+  };
+
   // Keyboard: undo/redo on the page currently in view.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -361,6 +481,16 @@ export default function Workspace() {
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {isPersonal && (
+            <>
+              <Button variant="secondary" onClick={() => setBlankOpen(true)}>
+                <Plus className="h-4 w-4" strokeWidth={2.5} /> Add pages
+              </Button>
+              <Button variant="secondary" onClick={() => void exportPdf()} disabled={!!exporting}>
+                <Download className="h-4 w-4" strokeWidth={2.5} /> {exporting || "Export PDF"}
+              </Button>
+            </>
+          )}
           {/* Marked work is finished: show that, don't offer to hand it in again. */}
           {assignment && marked && (
             <Chip tone="mint" icon={<CheckCheck className="h-4 w-4" strokeWidth={2.5} />}>
@@ -435,6 +565,21 @@ export default function Workspace() {
           />
         </div>
       )}
+
+      {blankOpen && (
+
+        <AddPagesModal
+
+          busy={addPages.isPending}
+
+          onClose={() => setBlankOpen(false)}
+
+          onAdd={(body) => addPages.mutate(body)}
+
+        />
+
+      )}
+
 
       {mobileRailOpen && (
         <div className="fixed inset-0 z-40 flex sm:hidden">

@@ -536,3 +536,21 @@ migrate("014_superadmin", async () => {
   `).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_apilog_time ON api_log(created_at DESC)`).run();
 });
+
+/**
+ * Personal notebooks.
+ *
+ * A notebook has always belonged to a class. A personal one belongs to a
+ * person: their own notes, outside the teacher→student flow entirely, not
+ * shared and not assignable. `class_id` is NOT NULL and rewriting the table to
+ * change that would be a far riskier migration than carrying an empty string
+ * and saying plainly which kind a row is.
+ */
+migrate("015_personal_notebooks", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(notebooks)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("kind")) {
+    await db.prepare(`ALTER TABLE notebooks ADD COLUMN kind TEXT NOT NULL DEFAULT 'class'`).run();
+  }
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_notebooks_owner ON notebooks(owner_id, kind)`).run();
+});

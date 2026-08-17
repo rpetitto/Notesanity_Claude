@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import Gradebook from "./Gradebook";
 import PageThumb from "../components/PageThumb";
+import NewNotebookModal from "../components/NewNotebookModal";
 import StudentAssignmentNav, {
   WORK_EMPTY, bucketAssignments, type WorkTab,
 } from "../components/StudentAssignmentNav";
@@ -659,6 +660,7 @@ export default function ClassView() {
   const [coTeacherOpen, setCoTeacherOpen] = useState(false);
   const [workTab, setWorkTab] = useState<WorkTab>("todo");
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [newNotebookOpen, setNewNotebookOpen] = useState(false);
   const [coverVersion, setCoverVersion] = useState(0);
   const [reviewingStudent, setReviewingStudent] = useState<BackfillStudent | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -866,7 +868,7 @@ export default function ClassView() {
       {tab === "notebooks" && (
         <div>
           {isTeacher && (
-            <div className="mb-4 flex justify-end">
+            <div className="mb-4 flex flex-wrap justify-end gap-2">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -874,6 +876,10 @@ export default function ClassView() {
                 className="hidden"
                 onChange={onFileChosen}
               />
+              <Button type="button" variant="secondary" onClick={() => setNewNotebookOpen(true)}>
+                <Plus className="h-4 w-4" strokeWidth={2.5} />
+                Start from blank
+              </Button>
               <Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}>
                 <Upload className="h-4 w-4" strokeWidth={2.5} />
                 Upload notebook
@@ -1095,6 +1101,14 @@ export default function ClassView() {
 
       {inviteOpen && <InviteModal classId={id} onClose={() => setInviteOpen(false)} />}
       {coTeacherOpen && <CoTeacherModal classId={id} onClose={() => setCoTeacherOpen(false)} />}
+      {newNotebookOpen && (
+        <NewNotebookModal
+          destination={{ kind: "class", classId: id! }}
+          onClose={() => setNewNotebookOpen(false)}
+          onCreated={(notebookId) => { setNewNotebookOpen(false); navigate(`/notebooks/${notebookId}/edit`); }}
+        />
+      )}
+
       {customizeOpen && (
         <CustomizeModal
           classId={id}
