@@ -1,6 +1,13 @@
 import { app, db, storage } from "flingit";
 import {
   handler, now, uid, requireUser, requireTeacher, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+import { queueMail } from "../lib/mailqueue";
+
+/** Where the invite should point people — this deployment, whatever it is. */
+function appOrigin(c: any): string {
+  const url = new URL(c.req.url);
+  return `${url.protocol}//${url.host}`;
+}
 
 // Ambiguous characters (0/O, 1/I/L) omitted so codes are easy to read aloud in class.
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -314,10 +321,16 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
   const classId = param(c, "id");
   const teacher = await requireClassTeacher(c, classId);
   const { emails } = await c.req.json<{ emails: string[] }>();
+  // A bare string here would be iterated character by character, and any stray
+  // "@" would pass a contains-check and create a user called "@".
+  if (!Array.isArray(emails)) throw new HttpError(400, "Send a list of email addresses");
+  const cls = await db.prepare(`SELECT name FROM classes WHERE id = ?`).bind(classId).first<any>();
+  if (!cls) throw new HttpError(404, "Class not found");
   let added = 0;
-  for (const raw of emails ?? []) {
-    const email = raw.trim().toLowerCase();
-    if (!email.includes("@")) continue;
+  for (const raw of emails) {
+    const email = String(raw ?? "").trim().toLowerCase();
+    // Something before the @, something after, and a dot in the domain.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
     let student = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first<any>();
     if (!student) {
       const sid = uid();
@@ -337,10 +350,37 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
         .bind(uid(), classId, student.id, now())
         .run();
       await provisionForStudent(classId, student.id);
+
+      /*
+       * Tell them. Inviting used to create the account and the enrolment in
+       * silence, so a student sat waiting for a notification that was never
+       * written, let alone sent.
+       *
+       * No sign-in token in the link: those last twenty minutes, and an invite
+       * is read whenever the person next opens their mail. They land on the
+       * sign-in page and use whichever method they already have.
+       */
+      await queueMail({
+        address: email,
+        kind: "invite",
+        subject: `${teacher.name} added you to ${cls.name} on Notesanity`,
+        content: {
+          preheader: `You've been added to ${cls.name}. Sign in to see your work.`,
+          heading: `You're in ${cls.name}`,
+          body: [
+            `${teacher.name} added you to ${cls.name} on Notesanity, where you'll find the notebooks and assignments for this class.`,
+            "Sign in with the same school account you use elsewhere.",
+          ],
+          action: { label: "Open Notesanity", url: appOrigin(c) },
+          note: "If you weren't expecting this, you can ignore it — nothing happens until you sign in.",
+        },
+      });
       added++;
     }
   }
-  return c.json({ added });
+  // Queued, not sent: the platform allows three sends a minute, so a whole
+  // class goes out over the next few minutes rather than mostly vanishing.
+  return c.json({ added, invitesQueued: added });
 }));
 
 /**

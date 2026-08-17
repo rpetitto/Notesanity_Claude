@@ -211,7 +211,13 @@ function InviteModal({ classId, onClose }: { classId: string; onClose: () => voi
     },
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["class", classId] });
-      toast.success(`Invited ${res.added} student${res.added === 1 ? "" : "s"}`);
+      // Say "on the way", not "sent": invites are queued and go out over the
+      // next few minutes, because the platform caps sends per minute.
+      toast.success(
+        res.added === 0
+          ? "Everyone on that list was already in this class"
+          : `Invited ${res.added} student${res.added === 1 ? "" : "s"} — their emails are on the way`,
+      );
       onClose();
     },
     onError: (err: Error) => toast.error(err.message),
@@ -219,6 +225,10 @@ function InviteModal({ classId, onClose }: { classId: string; onClose: () => voi
 
   return (
     <Modal onClose={onClose} title="Invite by email">
+      <p className="mb-3 text-[16px] text-pine/70">
+        They'll get an email inviting them in. Invites go out over a few minutes, so a large class won't all
+        arrive at once.
+      </p>
       <Label>Emails (comma or newline separated)</Label>
       <Textarea
         autoFocus

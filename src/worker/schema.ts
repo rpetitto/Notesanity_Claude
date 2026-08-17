@@ -554,3 +554,29 @@ migrate("015_personal_notebooks", async () => {
   }
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_notebooks_owner ON notebooks(owner_id, kind)`).run();
 });
+
+/**
+ * Outgoing mail that can wait.
+ *
+ * The platform allows three sends a minute for the whole project, which is
+ * fine for one person asking for a sign-in link and hopeless for a teacher
+ * inviting a class of twenty-five. Those invites are queued and drained on a
+ * schedule instead of being fired at a wall — and, crucially, instead of being
+ * silently dropped, which is what happened before this existed.
+ */
+migrate("016_mail_queue", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS mail_queue (
+      id TEXT PRIMARY KEY,
+      address TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      sent_at TEXT
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_mailqueue_pending ON mail_queue(status, created_at)`).run();
+});
