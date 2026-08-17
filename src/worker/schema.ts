@@ -462,3 +462,27 @@ migrate("012_page_content", async () => {
     await db.prepare(`ALTER TABLE fields ADD COLUMN content TEXT NOT NULL DEFAULT ''`).run();
   }
 });
+
+/**
+ * A record of every sign-in email we tried to send.
+ *
+ * Delivery was previously unobservable: the endpoint answers the same way
+ * whether it sent, refused, or failed — deliberately, so it can't be used to
+ * discover who has an account — which also meant a misconfiguration and a spam
+ * filter looked identical from the outside. This table is the evidence, for an
+ * admin only, so "teachers aren't getting the email" can be answered instead of
+ * guessed at.
+ */
+migrate("013_mail_log", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS mail_log (
+      id TEXT PRIMARY KEY,
+      address TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_maillog_time ON mail_log(created_at DESC)`).run();
+});

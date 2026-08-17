@@ -6,6 +6,15 @@ import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { Button, ButtonLink, Card, Chip, Input, Label, Select } from "../components/ui";
 import { api } from "../lib/api";
 import { signOutHref, useSession } from "../lib/session";
+import { cn, relativeTime } from "../lib/utils";
+
+interface MailEntry {
+  address: string;
+  kind: string;
+  status: string;
+  detail: string;
+  created_at: string;
+}
 
 interface OrgResponse {
   name: string;
@@ -60,8 +69,13 @@ function OrgSettings() {
     <Card className="p-5">
       <h2 className="font-display text-[17px] text-pine">School settings</h2>
       <p className="mt-1 text-[16px] text-pine/70">
-        Domains listed as teacher or student automatically get that role on first sign-in. Everyone else chooses their
-        role themselves.
+        Only these domains can sign in. Anyone else gets no email and no account — so if staff aren't receiving
+        sign-in links, check their domain is listed here first.
+      </p>
+      <p className="mt-2 text-[16px] text-pine/70">
+        Currently allowed: <span className="font-display font-bold text-pine">
+          {[data?.primaryDomain, data?.teacherDomains, data?.studentDomains].filter(Boolean).join(", ")}
+        </span>
       </p>
 
       <div className="mt-4 space-y-3">
@@ -91,6 +105,63 @@ function OrgSettings() {
           {mutation.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * What actually happened to recent sign-in emails.
+ *
+ * The sign-in endpoint answers the same way whether it sent, refused or failed,
+ * so without this an admin has no way to tell a misconfigured domain from a
+ * spam filter — the two look identical from the outside.
+ */
+function MailLog() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["org-mail"],
+    queryFn: () => api.get<{ entries: MailEntry[] }>("/api/org/mail"),
+  });
+
+  const TONE: Record<string, { label: string; className: string; hint: string }> = {
+    sent: { label: "Sent", className: "text-pine", hint: "Handed to the mail provider. If it didn't arrive, it was filtered after this point." },
+    refused_domain: { label: "Not sent", className: "text-[#a3341f]", hint: "That domain isn't on the allowlist above, so no email was sent." },
+    rate_limited: { label: "Rate limited", className: "text-[#8a6a1f]", hint: "Only three sign-in emails can go out per minute. They can try again shortly." },
+    failed: { label: "Failed", className: "text-[#a3341f]", hint: "The mail provider rejected it." },
+  };
+
+  return (
+    <Card className="p-5">
+      <h2 className="font-display text-[17px] text-pine">Sign-in email delivery</h2>
+      <p className="mt-1 text-[16px] text-pine/70">
+        The last 50 attempts. Everyone sees the same "check your email" message when they request a link, so this is
+        the only place the difference shows.
+      </p>
+      {isLoading && <Spinner />}
+      {error && <ErrorNote error={error as Error} />}
+      {data && data.entries.length === 0 && (
+        <p className="mt-4 text-[16px] text-pine/70">No sign-in emails requested yet.</p>
+      )}
+      {data && data.entries.length > 0 && (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[420px] text-[16px]">
+            <tbody className="divide-y divide-pine/10">
+              {data.entries.map((e, i) => {
+                const tone = TONE[e.status] ?? { label: e.status, className: "text-pine/70", hint: "" };
+                return (
+                  <tr key={i}>
+                    <td className="py-2 pr-3 text-pine">{e.address}</td>
+                    <td className={cn("whitespace-nowrap py-2 pr-3 font-display font-bold", tone.className)}
+                        title={tone.hint}>
+                      {tone.label}
+                    </td>
+                    <td className="whitespace-nowrap py-2 text-right text-pine/55">{relativeTime(e.created_at)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   );
 }
@@ -188,6 +259,7 @@ export default function Settings() {
       {user.isAdmin && (
         <>
           <OrgSettings />
+          <MailLog />
           <OrgUsers />
         </>
       )}

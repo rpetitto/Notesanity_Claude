@@ -15,6 +15,7 @@
 import { app, db } from "flingit";
 import { email as mailer } from "flingit/plugin/email-send";
 import { renderEmail } from "../lib/email";
+import { logMail } from "../lib/maillog";
 import type { Context } from "hono";
 import { HttpError, handler, now, setLocalSessionResolver, uid } from "../lib/session";
 
@@ -296,6 +297,14 @@ app.post("/api/auth/magic/request", handler(async (c) => {
   const user = await db.prepare(`SELECT id FROM users WHERE email = ?`).bind(address).first();
   const allowed = user ? true : Boolean(await resolveOrgFor(address).catch(() => null));
 
+  if (!allowed) {
+    // Nothing is sent, and the caller is told the same thing either way — so
+    // record it, or a domain that was never on the allowlist is indistinguishable
+    // from a mail that got filtered.
+    await logMail({ address, kind, status: "refused_domain",
+      detail: "Address is not on the org's allowed domains, so no email was sent." });
+  }
+
   if (allowed) {
     const token = await issueToken(address, kind);
     const link = `${appOrigin(c)}/api/auth/magic/callback?token=${token}`;
@@ -314,19 +323,35 @@ app.post("/api/auth/magic/request", handler(async (c) => {
       note: "If you didn't ask for this, you can ignore this email — nothing will change.",
     });
     try {
-      await mailer.send({
+      const result = await mailer.send({
         to: address,
         subject: reset ? "Reset your Notesanity password" : "Your Notesanity sign-in link",
         text,
         html,
       });
+      // The provider reports failure by return value as well as by throwing.
+      if (result && result.success === false) {
+        await logMail({ address, kind, status: "failed", detail: "Provider reported the send as unsuccessful." });
+      } else {
+        await logMail({ address, kind, status: "sent", detail: result?.messageId ?? "" });
+      }
     } catch (err) {
-      console.error("magic link send failed", err);
+      const message = err instanceof Error ? err.message : String(err);
+      // Three sends a minute, per project — a staff room signing in together
+      // hits it easily, and the failure is otherwise completely silent.
+      const limited = message.includes("PLUGIN_RATE_LIMIT_EXCEEDED");
+      await logMail({
+        address, kind,
+        status: limited ? "rate_limited" : "failed",
+        detail: limited ? "Hit the 3-per-minute send limit. Ask them to try again in a minute." : message,
+      });
+      console.error("magic link send failed", message);
     }
   }
 
-  // Same answer either way.
-  return c.json({ ok: true, sent: true });
+  // Same answer either way — whether the address can sign in is not something
+  // this endpoint will reveal. It no longer claims to have *sent* anything.
+  return c.json({ ok: true });
 }));
 
 app.get("/api/auth/magic/callback", handler(async (c) => {

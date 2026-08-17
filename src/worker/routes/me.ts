@@ -83,3 +83,19 @@ app.patch("/api/org/users/:id", handler(async (c) => {
 }));
 
 export const touchedAt = now;
+
+/**
+ * Admin-only: what happened to recent sign-in emails.
+ *
+ * The request endpoint answers identically whatever the outcome, so this is the
+ * only place the difference between "refused", "rate limited" and "sent" is
+ * visible. Admin-only because it lists addresses that tried to sign in.
+ */
+app.get("/api/org/mail", handler(async (c) => {
+  const user = await requireUser(c);
+  if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  const rows = await db
+    .prepare(`SELECT address, kind, status, detail, created_at FROM mail_log ORDER BY created_at DESC LIMIT 50`)
+    .all<any>();
+  return c.json({ entries: rows.results ?? [] });
+}));
