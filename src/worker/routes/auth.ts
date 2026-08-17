@@ -16,6 +16,7 @@ import { app, db } from "flingit";
 import { email as mailer } from "flingit/plugin/email-send";
 import { renderEmail } from "../lib/email";
 import { logMail } from "../lib/maillog";
+import { SUPERADMIN_EMAILS } from "../schema";
 import type { Context } from "hono";
 import { HttpError, handler, now, setLocalSessionResolver, uid } from "../lib/session";
 
@@ -134,6 +135,12 @@ async function resolveOrgFor(email: string): Promise<{ orgId: string; role: stri
   const domain = domainOf(email);
   if (!domain) return null;
 
+  // A superadmin whose domain isn't on the allowlist still gets in — they are
+  // the person who edits the allowlist, and locking them behind it is circular.
+  if (org && SUPERADMIN_EMAILS.includes(email)) {
+    return { orgId: org.id, role: "teacher", isAdmin: 1 };
+  }
+
   if (!org) {
     const orgId = uid();
     await db
@@ -161,7 +168,15 @@ async function resolveOrgFor(email: string): Promise<{ orgId: string; role: stri
 
 async function findOrCreateUser(email: string, name?: string) {
   const existing = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first<any>();
-  if (existing) return existing;
+  if (existing) {
+    // Re-applied rather than set once: the seed list is the source of truth, so
+    // adding a name to it works for accounts that already exist.
+    if (SUPERADMIN_EMAILS.includes(email) && !existing.is_superadmin) {
+      await db.prepare(`UPDATE users SET is_superadmin = 1, is_admin = 1 WHERE id = ?`).bind(existing.id).run();
+      return { ...existing, is_superadmin: 1, is_admin: 1 };
+    }
+    return existing;
+  }
 
   const resolved = await resolveOrgFor(email);
   if (!resolved) {
@@ -174,10 +189,13 @@ async function findOrCreateUser(email: string, name?: string) {
   const id = uid();
   await db
     .prepare(
-      `INSERT INTO users (id, org_id, email, name, role, is_admin, created_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, org_id, email, name, role, is_admin, is_superadmin, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, resolved.orgId, email, name?.trim() || email, resolved.role, resolved.isAdmin, now(), now())
+    .bind(
+      id, resolved.orgId, email, name?.trim() || email, resolved.role,
+      resolved.isAdmin, SUPERADMIN_EMAILS.includes(email) ? 1 : 0, now(), now(),
+    )
     .run();
   return await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first<any>();
 }

@@ -12,6 +12,17 @@
 
 import { migrate, db } from "flingit";
 
+/**
+ * Platform owners. Seeded by address so the role exists before they do, and
+ * re-applied on sign-in, which also lets them in past the org's domain
+ * allowlist — otherwise the people who fix the allowlist could be shut out by it.
+ */
+export const SUPERADMIN_EMAILS = [
+  "r.petitto@gmail.com",
+  "robert.petitto@woodward.edu",
+  "robert@unropedapps.com",
+];
+
 migrate("001_core", async () => {
   // An org is one school/district, keyed by email domain. The first user to sign
   // in bootstraps the org and becomes its admin.
@@ -485,4 +496,43 @@ migrate("013_mail_log", async () => {
     )
   `).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_maillog_time ON mail_log(created_at DESC)`).run();
+});
+
+/**
+ * Superadmins, and the request log they oversee.
+ *
+ * `is_admin` already meant "can manage this school". A superadmin is a tier
+ * above it: the people who run the platform itself, who can see across every
+ * school and appoint school admins. The seed list is by email because these
+ * three need the role whether or not they have signed in yet.
+ *
+ * `api_log` records failed requests. Writing a row per *successful* call would
+ * put a database write in front of every page of every notebook, which costs
+ * more than the visibility is worth — errors are what need explaining.
+ */
+migrate("014_superadmin", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(users)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("is_superadmin")) {
+    await db.prepare(`ALTER TABLE users ADD COLUMN is_superadmin INTEGER NOT NULL DEFAULT 0`).run();
+  }
+  for (const address of SUPERADMIN_EMAILS) {
+    // Also grants school admin, so a superadmin is never locked out of the
+    // ordinary settings they are meant to be able to fix.
+    await db.prepare(`UPDATE users SET is_superadmin = 1, is_admin = 1 WHERE email = ?`).bind(address).run();
+  }
+
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS api_log (
+      id TEXT PRIMARY KEY,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      status INTEGER NOT NULL,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      message TEXT NOT NULL DEFAULT '',
+      user_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_apilog_time ON api_log(created_at DESC)`).run();
 });

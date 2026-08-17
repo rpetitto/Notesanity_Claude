@@ -22,6 +22,8 @@ export interface AppUser {
   picture: string | null;
   role: "teacher" | "student" | "pending";
   is_admin: number;
+  /** Platform owner — sees and edits across every school. */
+  is_superadmin?: number;
 }
 
 export interface Org {
@@ -192,15 +194,51 @@ export async function requireClassMember(c: Context, classId: string): Promise<{
 }
 
 /** Wrap a handler so thrown HttpErrors become clean JSON responses. */
+/**
+ * Record a request that went wrong.
+ *
+ * Only failures. A row per successful call would put a database write in front
+ * of every page of every notebook, which costs more than it explains — and the
+ * questions people actually ask are about what broke.
+ */
+const API_LOG_KEEP = 500;
+
+async function logApiFailure(c: Context, status: number, message: string, startedAt: number) {
+  try {
+    const url = new URL(c.req.url);
+    await db
+      .prepare(
+        `INSERT INTO api_log (id, method, path, status, duration_ms, message, user_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        uid(), c.req.method, url.pathname, status, Math.round(Date.now() - startedAt),
+        message.slice(0, 500), (c.get("userId") as string) ?? null, now(),
+      )
+      .run();
+    await db
+      .prepare(`DELETE FROM api_log WHERE id NOT IN (SELECT id FROM api_log ORDER BY created_at DESC LIMIT ${API_LOG_KEEP})`)
+      .run();
+  } catch (err) {
+    console.error("api log failed", err);
+  }
+}
+
 export function handler(fn: (c: Context) => Promise<Response>) {
   return async (c: Context) => {
+    const startedAt = Date.now();
     try {
-      return await fn(c);
+      const res = await fn(c);
+      // Handlers can also fail by returning a status rather than throwing.
+      if (res.status >= 400) await logApiFailure(c, res.status, "", startedAt);
+      return res;
     } catch (err: any) {
       if (err instanceof HttpError) {
+        await logApiFailure(c, err.status, err.message, startedAt);
         return c.json({ error: err.message }, err.status as any);
       }
       console.error("Unhandled error:", err?.stack || err);
+      await logApiFailure(c, 500, err?.message ?? "Server error", startedAt);
       return c.json({ error: err?.message ?? "Server error" }, 500);
     }
   };

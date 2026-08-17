@@ -49,6 +49,8 @@ export interface Me {
   picture?: string | null;
   role: "teacher" | "student" | "pending";
   isAdmin: boolean;
+  /** Platform owner: sees and edits across every school. */
+  isSuperadmin?: boolean;
 }
 
 export interface ClassSummary {

@@ -9,7 +9,7 @@ app.get("/api/me", handler(async (c) => {
   return c.json({
     user: {
       id: user.id, email: user.email, name: user.name, picture: user.picture,
-      role: user.role, isAdmin: !!user.is_admin,
+      role: user.role, isAdmin: !!user.is_admin, isSuperadmin: !!user.is_superadmin,
     },
     org: org ? { name: org.name, primaryDomain: org.primary_domain } : null,
   });

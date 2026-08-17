@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "./lib/session";
@@ -10,6 +11,10 @@ import StudentHome from "./pages/StudentHome";
 import ClassView from "./pages/ClassView";
 import Gradebook from "./pages/Gradebook";
 import Settings from "./pages/Settings";
+// Loaded on demand: the admin console pulls in a canvas data grid that no
+// student or teacher has any reason to download.
+const Admin = lazy(() => import("./pages/Admin"));
+
 import NotebookEditor from "./pages/NotebookEditor";
 import UploadNotebook from "./pages/UploadNotebook";
 import Workspace from "./pages/Workspace";
@@ -82,6 +87,7 @@ export default function App() {
       <Route path="/notebooks/:notebookId" element={<Workspace />} />
       <Route path="/work" element={<StudentHome />} />
       <Route path="/settings" element={<Settings />} />
+      <Route path="/admin" element={<Suspense fallback={<Spinner label="Loading admin…" />}><Admin /></Suspense>} />
       <Route path="*" element={<Navigate to={home} replace />} />
     </Routes>
   );

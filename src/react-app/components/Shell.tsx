@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { BookOpen, ClipboardList, GraduationCap, LayoutGrid, LogOut, Settings } from "lucide-react";
+import { BookOpen, ClipboardList, GraduationCap, LayoutGrid, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { signOutHref, useSession } from "../lib/session";
 import { cn, initials } from "../lib/utils";
 
@@ -58,6 +58,9 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
         { to: "/work", label: "My work", icon: BookOpen },
         { to: "/settings", label: "Settings", icon: Settings },
       ];
+
+  // Superadmins get one more door, wherever they sit in a school.
+  if (user?.isSuperadmin) nav.push({ to: "/admin", label: "Admin", icon: ShieldCheck });
 
   return (
     <div className="min-h-dvh">
