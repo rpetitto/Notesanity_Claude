@@ -66,18 +66,19 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
     <div className="min-h-dvh">
       <header className="sticky top-0 z-30 border-b-2 border-pine/12 bg-oat/95 backdrop-blur">
         <div className={cn("mx-auto flex h-14 items-center gap-4 px-4", wide ? "max-w-none" : "max-w-6xl")}>
-          <Link to={user?.role === "teacher" ? "/classes" : "/work"} className="flex items-center gap-2">
+          <Link to={user?.role === "teacher" ? "/classes" : "/work"} className="flex shrink-0 items-center gap-2">
             <Logo size={26} />
-            <span className="wordmark text-[22px]">Notesanity</span>
+            {/* The mark alone carries the brand once space is tight. */}
+            <span className="wordmark hidden text-[22px] md:inline">Notesanity</span>
           </Link>
 
-          <nav className="ml-2 hidden items-center gap-1 sm:flex">
+          <nav className="ml-2 hidden min-w-0 items-center gap-1 overflow-x-auto sm:flex">
             {nav.map(({ to, label, icon: Icon }) => (
               <Link
                 key={to}
                 to={to}
                 className={cn(
-                  "flex min-h-[44px] items-center gap-2 rounded-full border-[3px] px-4 font-display text-[16px] font-bold transition-colors",
+                  "flex min-h-[44px] shrink-0 items-center gap-2 rounded-full border-[3px] px-4 font-display text-[16px] font-bold transition-colors",
                   pathname.startsWith(to)
                     ? "border-pine bg-pine text-oat"
                     : "border-transparent text-pine hover:bg-pine/8",
@@ -89,9 +90,9 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-3">
             {user && (
-              <span className="label-caps hidden items-center gap-1.5 rounded-full border-2 border-pine/25 px-2.5 py-1 text-pine/70 sm:flex">
+              <span className="label-caps hidden items-center gap-1.5 rounded-full border-2 border-pine/25 px-2.5 py-1 text-pine/70 lg:flex">
                 <GraduationCap className="h-3.5 w-3.5" />
                 {user.role === "teacher" ? "Teacher" : "Student"}
               </span>
@@ -118,12 +119,15 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
               key={to}
               to={to}
               className={cn(
-                "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 font-display text-[16px] font-bold",
+                // `min-w-0` is what lets a long label shrink; without it the
+                // row's min-content width pushed the bar past the viewport.
+                "flex min-h-[56px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1",
+                "font-display text-[15px] font-bold",
                 active ? "text-pine" : "text-pine/55",
               )}
             >
-              <Icon className="h-6 w-6" strokeWidth={2.5} />
-              {label}
+              <Icon className="h-6 w-6 shrink-0" strokeWidth={2.5} />
+              <span className="w-full truncate text-center">{label}</span>
             </Link>
           );
         })}
