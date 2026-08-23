@@ -439,7 +439,7 @@ export default function Workspace() {
 
   return (
     <div className="flex h-dvh flex-col bg-oat">
-      <header className="flex items-center gap-x-3 border-b-2 border-pine/12 bg-white px-3 py-2">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b-2 border-pine/12 bg-white px-3 py-2">
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
@@ -480,7 +480,7 @@ export default function Workspace() {
           </div>
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {isPersonal && (
             <>
               <Button variant="secondary" onClick={() => setBlankOpen(true)}>

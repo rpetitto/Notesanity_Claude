@@ -538,7 +538,7 @@ export default function NotebookEditor() {
   return (
     <div className="flex h-dvh flex-col bg-oat">
       <div className="h-1 shrink-0" style={{ backgroundColor: notebook.accentColor || "#20302C" }} />
-      <header className="relative flex items-center gap-3 border-b-2 border-pine/12 bg-white px-3 py-2">
+      <header className="relative flex flex-wrap items-center gap-3 border-b-2 border-pine/12 bg-white px-3 py-2">
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
@@ -558,7 +558,7 @@ export default function NotebookEditor() {
           </div>
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <Chip
             tone={notebook.status === "published" ? "mint" : "quiet"}
             icon={notebook.status === "published" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}

@@ -444,7 +444,9 @@ export default function Grading() {
           </div>
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        {/* The actions outgrow a handset on their own, so they wrap among
+            themselves rather than pushing the page sideways. */}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={() => setRosterOpen((v) => !v)}>
             <Users className="h-4 w-4" strokeWidth={2.5} /> Roster
           </Button>

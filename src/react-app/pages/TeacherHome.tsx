@@ -215,9 +215,11 @@ export default function TeacherHome() {
 
   return (
     <Shell>
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-[32px] text-pine">Classes</h1>
-        <div className="flex items-center gap-2">
+        {/* The two actions are wider than a handset once the title is beside
+            them, so they drop to their own line rather than push the page. */}
+        <div className="flex flex-wrap items-center gap-2">
           {hasGoogleClientId && (
             <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>
               <Import className="h-4 w-4" strokeWidth={2.5} />
