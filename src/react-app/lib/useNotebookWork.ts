@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type WorkResponse } from "./api";
 import { useAutosave } from "./autosave";
-import { type LayerData, emptyLayer, serializeLayer } from "./ink";
+import { type LayerData, emptyLayer, serializeLayer, serializeDelta } from "./ink";
 import { buildLayerMaps, type LayerMap } from "../components/NotebookSurface";
 
 const HISTORY_LIMIT = 40;
@@ -24,6 +24,11 @@ export function useNotebookWork({ notebookId, studentId, writeTarget, data }: Op
   const [teacherLayers, setTeacherLayers] = useState<LayerMap>({});
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const revs = useRef<Record<string, number>>({});
+  /**
+   * The strokes the server is known to hold, per layer, as the very objects
+   * that are in state. Identity is what tells an append apart from an erase.
+   */
+  const syncedStrokes = useRef<Record<string, LayerData["s"]>>({});
   const dirtyLayers = useRef<Set<string>>(new Set());
   const dirtyValues = useRef<Set<string>>(new Set());
 
@@ -37,6 +42,15 @@ export function useNotebookWork({ notebookId, studentId, writeTarget, data }: Op
     setStudentLayers(maps.student);
     setTeacherLayers(maps.teacher);
     revs.current = maps.revs;
+    // Everything just loaded is by definition what the server holds, so the
+    // first stroke drawn after opening a page can already go up as a delta.
+    syncedStrokes.current = {};
+    for (const [pageId, layer] of Object.entries(maps.student)) {
+      syncedStrokes.current[`student:${pageId}`] = layer.s.slice();
+    }
+    for (const [pageId, layer] of Object.entries(maps.teacher)) {
+      syncedStrokes.current[`teacher:${pageId}`] = layer.s.slice();
+    }
     const values: Record<string, string> = {};
     for (const v of data.values) values[v.field_id] = v.value;
     setFieldValues(values);
@@ -63,11 +77,40 @@ export function useNotebookWork({ notebookId, studentId, writeTarget, data }: Op
       for (const pageId of pageIds) {
         const layer = map[pageId] ?? emptyLayer();
         const revKey = `${target}:${pageId}`;
-        const res = await api.put<{ rev: number }>(
-          `/api/notebooks/${notebookId}/layers/${pageId}${query}`,
-          { kind: target, data: serializeLayer(layer), rev: revs.current[revKey] ?? 0 },
-        );
+        const url = `/api/notebooks/${notebookId}/layers/${pageId}${query}`;
+        const rev = revs.current[revKey] ?? 0;
+        const synced = syncedStrokes.current[revKey];
+
+        // A pure append leaves every already-saved stroke untouched, so the
+        // strokes we sent last time are still the same objects in the same
+        // order. Erasing or undoing rebuilds the array and fails this check,
+        // which is exactly when the whole layer has to go.
+        const appended =
+          synced !== undefined &&
+          layer.s.length >= synced.length &&
+          synced.every((st, i) => st === layer.s[i]);
+
+        let res: { rev: number };
+        if (appended) {
+          try {
+            res = await api.put<{ rev: number }>(url, {
+              kind: target,
+              rev,
+              delta: serializeDelta(layer, synced!.length),
+            });
+          } catch {
+            // The server refused the base revision — someone saved from
+            // another device. Send the whole layer, which is the same thing
+            // this code did before deltas existed.
+            res = await api.put<{ rev: number }>(url, { kind: target, data: serializeLayer(layer), rev });
+          }
+        } else {
+          res = await api.put<{ rev: number }>(url, { kind: target, data: serializeLayer(layer), rev });
+        }
+
         revs.current[revKey] = res.rev;
+        // Remember the exact stroke objects the server now holds.
+        syncedStrokes.current[revKey] = layer.s.slice();
         dirtyLayers.current.delete(pageId);
       }
 

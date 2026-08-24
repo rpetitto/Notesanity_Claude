@@ -94,6 +94,33 @@ export function parseLayer(raw?: string | null): LayerData {
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+/** One stroke, rounded the same way `serializeLayer` rounds it. */
+const packStroke = (st: Stroke) => ({
+  t: st.t,
+  c: st.c,
+  w: r1(st.w),
+  p: st.p.map((n, i) => (i % 3 === 2 ? r2(n) : r1(n))),
+  ...(st.ts ? { ts: st.ts } : {}),
+});
+
+/**
+ * The tail of a layer: strokes added since `from`, with the small collections
+ * whole.
+ *
+ * Drawing appends to `s` and touches nothing else, so this is what almost every
+ * autosave actually contains. Text, stamps and comments are sent in full
+ * because they are a handful of short records — the weight of a page is its
+ * stroke points.
+ */
+export function serializeDelta(layer: LayerData, from: number) {
+  return {
+    s: layer.s.slice(from).map(packStroke),
+    x: layer.x.map((t) => ({ ...t, x: r1(t.x), y: r1(t.y), w: r1(t.w), s: r1(t.s) })),
+    e: layer.e.map((s) => ({ ...s, x: r1(s.x), y: r1(s.y), s: r1(s.s) })),
+    c: layer.c.map((k) => ({ ...k, x: r1(k.x), y: r1(k.y) })),
+  };
+}
+
 export function serializeLayer(layer: LayerData): string {
   return JSON.stringify({
     v: 1,

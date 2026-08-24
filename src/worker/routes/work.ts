@@ -125,15 +125,30 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
   const { user, isTeacher, instance } = await resolveInstance(c, param(c, "id"), studentParam);
   const pageId = param(c, "pageId");
-  const body = await c.req.json<{ kind: "student" | "teacher"; data: string; rev?: number }>();
+  const body = await c.req.json<{
+    kind: "student" | "teacher";
+    data?: string;
+    rev?: number;
+    /**
+     * Append-only save: the strokes drawn since `rev`, plus the small
+     * non-stroke collections in full. Drawing only ever adds to `s`, so this
+     * is the shape of almost every autosave — sending a few hundred bytes
+     * instead of re-uploading the whole page of ink each time.
+     */
+    delta?: { s: unknown[]; x: unknown[]; e: unknown[]; c: unknown[] };
+  }>();
   const kind = body.kind === "teacher" ? "teacher" : "student";
 
   if (kind === "teacher" && !isTeacher) throw new HttpError(403, "Only teachers can add grading markup");
   if (kind === "student" && isTeacher && instance.student_id !== user.id) {
     throw new HttpError(403, "Teachers annotate on the teacher layer, not the student's");
   }
-  if (typeof body.data !== "string") throw new HttpError(400, "data must be a string");
-  if (body.data.length > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
+  const isDelta = !!body.delta;
+  if (!isDelta && typeof body.data !== "string") throw new HttpError(400, "data must be a string");
+  if (isDelta && !Array.isArray(body.delta!.s)) throw new HttpError(400, "delta.s must be an array");
+  if (!isDelta && body.data!.length > MAX_LAYER_BYTES) {
+    throw new HttpError(413, "That page has too much ink to save");
+  }
 
   // Handed-in work stays frozen, including after it is returned, until a teacher
   // reopens it. That closes the window where a page could be changed after
@@ -159,10 +174,39 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     if (body.rev !== undefined && body.rev < existing.rev) {
       return c.json({ conflict: true, rev: existing.rev }, 409);
     }
+
+    let data: string;
+    if (isDelta) {
+      // A delta describes strokes appended to one exact revision. Anything
+      // else — a save from another device, a rev the client guessed — has to
+      // be refused rather than merged, or the append lands on ink the client
+      // never saw. The client answers a 409 by sending the whole layer.
+      const row = await db
+        .prepare(`SELECT data FROM layers WHERE id = ?`)
+        .bind(existing.id)
+        .first<{ data: string }>();
+      if (body.rev !== existing.rev) return c.json({ conflict: true, rev: existing.rev }, 409);
+      let base: any;
+      try {
+        base = JSON.parse(row?.data || "{}");
+      } catch {
+        return c.json({ conflict: true, rev: existing.rev }, 409);
+      }
+      const d = body.delta!;
+      data = JSON.stringify({
+        v: 1,
+        s: [...(Array.isArray(base.s) ? base.s : []), ...d.s],
+        x: d.x ?? [], e: d.e ?? [], c: d.c ?? [],
+      });
+      if (data.length > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
+    } else {
+      data = body.data!;
+    }
+
     const rev = existing.rev + 1;
     await db
       .prepare(`UPDATE layers SET data = ?, rev = ?, updated_at = ? WHERE id = ?`)
-      .bind(body.data, rev, now(), existing.id)
+      .bind(data, rev, now(), existing.id)
       .run();
     await logActivity({
       actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
@@ -174,9 +218,17 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     return c.json({ ok: true, rev });
   }
 
+  // No row yet, so a delta simply *is* the layer — but only if the client
+  // believed it was starting from nothing too.
+  if (isDelta && (body.rev ?? 0) !== 0) return c.json({ conflict: true, rev: 0 }, 409);
+  const fresh = isDelta
+    ? JSON.stringify({ v: 1, s: body.delta!.s, x: body.delta!.x ?? [], e: body.delta!.e ?? [], c: body.delta!.c ?? [] })
+    : body.data!;
+  if (fresh.length > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
+
   await db
     .prepare(`INSERT INTO layers (id, instance_id, page_id, kind, data, rev, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)`)
-    .bind(uid(), instance.id, pageId, kind, body.data, now())
+    .bind(uid(), instance.id, pageId, kind, fresh, now())
     .run();
   await logActivity({
     actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
