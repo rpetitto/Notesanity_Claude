@@ -81,6 +81,13 @@ export interface ToolState {
   width: number;
   stamp: string;
   fontSize: number;
+  /**
+   * How the eraser bites. "quick" takes the whole stroke the moment you touch
+   * any part of it — the fast way to clear a mistake. "manual" rubs out only
+   * the length actually dragged over, which is what you want to fix one letter
+   * in a word without redrawing the rest.
+   */
+  erase?: "quick" | "manual";
 }
 
 interface Props {
@@ -568,16 +575,63 @@ export default function PageCanvas({
     }
   };
 
+  /**
+   * Rub out the part of each stroke under the eraser, splitting what is left.
+   *
+   * A stroke is a flat run of points, so removing a bite from the middle
+   * leaves two strokes rather than one with a hole. Fragments shorter than two
+   * points can't be drawn and are dropped.
+   */
+  const erasePartial = (x: number, y: number, radius: number) => {
+    let changed = false;
+    const out: typeof activeLayer.s = [];
+    for (const st of activeLayer.s) {
+      const reach = radius + (st.w ?? 1) / 2;
+      const r2 = reach * reach;
+      const pts = st.p;
+      let run: number[] = [];
+      const kept: number[][] = [];
+      let bitten = false;
+      for (let i = 0; i + 2 < pts.length; i += 3) {
+        const dx = pts[i] - x;
+        const dy = pts[i + 1] - y;
+        if (dx * dx + dy * dy <= r2) {
+          bitten = true;
+          if (run.length >= 6) kept.push(run);
+          run = [];
+        } else {
+          run.push(pts[i], pts[i + 1], pts[i + 2]);
+        }
+      }
+      if (run.length >= 6) kept.push(run);
+      if (!bitten) { out.push(st); continue; }
+      changed = true;
+      for (const seg of kept) out.push({ ...st, p: seg });
+    }
+    return changed ? out : null;
+  };
+
   const eraseAt = (x: number, y: number) => {
     if (!onLayerChange) return;
     const radius = Math.max(4, tool.width * 1.5);
-    const idx = hitStroke(activeLayer.s, x, y, radius);
-    if (idx >= 0) {
-      const next = activeLayer.s.slice();
-      next.splice(idx, 1);
-      onLayerChange({ ...activeLayer, s: next });
-      return;
+
+    if (tool.erase === "manual") {
+      const next = erasePartial(x, y, radius);
+      if (next) {
+        onLayerChange({ ...activeLayer, s: next });
+        return;
+      }
+    } else {
+      const idx = hitStroke(activeLayer.s, x, y, radius);
+      if (idx >= 0) {
+        const next = activeLayer.s.slice();
+        next.splice(idx, 1);
+        onLayerChange({ ...activeLayer, s: next });
+        return;
+      }
     }
+
+    // Stamps have no length to rub along, so either eraser takes the whole thing.
     const stamp = activeLayer.e.find((s) => Math.abs(s.x - x) < s.s && Math.abs(s.y - y) < s.s);
     if (stamp) onLayerChange({ ...activeLayer, e: activeLayer.e.filter((s) => s.id !== stamp.id) });
   };

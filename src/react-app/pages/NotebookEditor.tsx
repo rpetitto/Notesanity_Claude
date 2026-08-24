@@ -188,7 +188,7 @@ export default function NotebookEditor() {
   // ---- master-page annotation mode ----
   const [annotateMode, setAnnotateMode] = useState(false);
   const [inkTool, setInkTool] = useState<ToolState>({
-    kind: "pen", color: TEACHER_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14,
+    kind: "pen", color: TEACHER_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14, erase: "quick",
   });
   const [inkFingerDraw, setInkFingerDraw] = useState(false);
   const [annotationLayer, setAnnotationLayer] = useState<LayerData>(emptyLayer());

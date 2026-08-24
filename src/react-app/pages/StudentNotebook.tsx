@@ -172,7 +172,7 @@ export default function StudentNotebook() {
   });
 
   const [tool, setTool] = useState<ToolState>({
-    kind: "select", color: "#D93025", width: 2.5, stamp: "✅", fontSize: 14,
+    kind: "select", color: "#D93025", width: 2.5, stamp: "✅", fontSize: 14, erase: "quick",
   });
   const [fingerDraw, setFingerDraw] = useState(false);
   const [zoom, setZoom] = useState<ZoomMode>("page");

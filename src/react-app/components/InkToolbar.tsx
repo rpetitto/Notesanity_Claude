@@ -125,6 +125,34 @@ export default function InkToolbar({
         </div>
       )}
 
+      {/* How much the eraser takes. Only meaningful while it is the tool in
+          hand, so it sits beside its sizes rather than in a settings menu. */}
+      {tool.kind === "eraser" && (
+        <div className="flex shrink-0 items-center gap-1 rounded-full border-2 border-pine/20 p-0.5">
+          {([
+            { mode: "quick", label: "Quick", hint: "Erases a whole stroke wherever you touch it" },
+            { mode: "manual", label: "Manual", hint: "Rubs out only the part you drag over" },
+          ] as const).map((opt) => {
+            const active = (tool.erase ?? "quick") === opt.mode;
+            return (
+              <button
+                key={opt.mode}
+                type="button"
+                title={opt.hint}
+                aria-pressed={active}
+                onClick={() => onToolChange({ ...tool, erase: opt.mode })}
+                className={cn(
+                  "flex h-10 items-center rounded-full px-3 font-display text-[16px] font-bold transition-colors whitespace-nowrap",
+                  active ? "bg-pine text-oat" : "text-pine/70 hover:bg-oat",
+                )}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {tool.kind === "stamp" && (
         <div className="flex shrink-0 items-center gap-0.5">
           {STAMPS.map((s) => (
