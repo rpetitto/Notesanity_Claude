@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type SaveStatus = "idle" | "saving" | "saved" | "offline";
+export type SaveStatus = "idle" | "saving" | "saved" | "offline" | "retrying";
 
 interface Options<T> {
   /** Stable identity for the local mirror. */
@@ -39,6 +39,8 @@ export function useAutosave<T>({ key, save, debounceMs = 1200, enabled = true }:
     const value = pending.current;
     inFlight.current = true;
     setStatus("saving");
+    /** When to try again: a backoff after a failure, or a debounce for work that arrived mid-flight. */
+    let retryIn: number | null = null;
     try {
       await saveRef.current(value);
       // Only drop the local mirror once the server has definitely accepted it,
@@ -49,16 +51,31 @@ export function useAutosave<T>({ key, save, debounceMs = 1200, enabled = true }:
         setStatus("saved");
       }
       attempt.current = 0;
-    } catch {
-      setStatus("offline");
-      const delay = BACKOFF[Math.min(attempt.current, BACKOFF.length - 1)];
+    } catch (err) {
+      // "Offline" is a claim about the network, so only make it when the
+      // request never reached a server. A refusal that came back with a status
+      // is a different problem, and saying otherwise sent people to check their
+      // Wi-Fi over a conflict the app was failing to resolve.
+      const reachedServer = typeof (err as { status?: unknown } | null)?.status === "number";
+      setStatus(reachedServer || navigator.onLine ? "retrying" : "offline");
+      retryIn = BACKOFF[Math.min(attempt.current, BACKOFF.length - 1)];
       attempt.current++;
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => { void flush(); }, delay);
     } finally {
       inFlight.current = false;
+      /**
+       * Anything queued while this request was in flight lost its wake-up to
+       * the guard at the top — the debounce fired, found a save running, and
+       * returned without booking another. Nothing then sent it until the next
+       * stroke happened to arrive, and if none did the work was simply never
+       * saved. This is that missing wake-up.
+       */
+      if (retryIn === null && pending.current !== null) retryIn = debounceMs;
+      if (retryIn !== null) {
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => { void flush(); }, retryIn);
+      }
     }
-  }, [enabled, key]);
+  }, [enabled, key, debounceMs]);
 
   const queue = useCallback(
     (value: T) => {

@@ -219,6 +219,7 @@ export function SaveIndicator({ status }: { status: SaveStatus }) {
     saving: { label: "Saving…", className: "text-pine/70" },
     saved: { label: "Saved", className: "text-pine" },
     offline: { label: "Offline — retrying", className: "text-[#5c4611]" },
+    retrying: { label: "Couldn't save — retrying", className: "text-[#5c4611]" },
   };
   const s = map[status];
   if (!s.label) return null;
@@ -226,7 +227,9 @@ export function SaveIndicator({ status }: { status: SaveStatus }) {
     <span className={cn("flex items-center gap-1.5 text-[16px] whitespace-nowrap", s.className)}>
       <span className={cn(
         "h-1.5 w-1.5 rounded-full",
-        status === "saved" ? "bg-mint" : status === "offline" ? "bg-[#8a6a1f] animate-pulse" : "bg-pine/50 animate-pulse",
+        status === "saved" ? "bg-mint"
+          : status === "offline" || status === "retrying" ? "bg-[#8a6a1f] animate-pulse"
+          : "bg-pine/50 animate-pulse",
       )} />
       {s.label}
     </span>

@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type WorkResponse } from "./api";
+import { ApiError, api, type WorkResponse } from "./api";
 import { useAutosave } from "./autosave";
 import { type LayerData, emptyLayer, serializeLayer, serializeDelta } from "./ink";
 import { buildLayerMaps, type LayerMap } from "../components/NotebookSurface";
@@ -90,6 +90,24 @@ export function useNotebookWork({ notebookId, studentId, writeTarget, data }: Op
           layer.s.length >= synced.length &&
           synced.every((st, i) => st === layer.s[i]);
 
+        /**
+         * Send the whole layer, answering a refused revision with the one the
+         * server reports it holds.
+         *
+         * Retrying the revision that was just refused can only be refused
+         * again, so without this a single conflict became a save loop that
+         * never recovered — the failure this whole path exists to survive.
+         */
+        const putWhole = async (baseRev: number): Promise<{ rev: number }> => {
+          try {
+            return await api.put<{ rev: number }>(url, { kind: target, data: serializeLayer(layer), rev: baseRev });
+          } catch (err) {
+            const theirs = err instanceof ApiError && err.status === 409 ? err.body?.rev : undefined;
+            if (typeof theirs !== "number" || theirs === baseRev) throw err;
+            return await api.put<{ rev: number }>(url, { kind: target, data: serializeLayer(layer), rev: theirs });
+          }
+        };
+
         let res: { rev: number };
         if (appended) {
           try {
@@ -98,20 +116,26 @@ export function useNotebookWork({ notebookId, studentId, writeTarget, data }: Op
               rev,
               delta: serializeDelta(layer, synced!.length),
             });
-          } catch {
-            // The server refused the base revision — someone saved from
-            // another device. Send the whole layer, which is the same thing
-            // this code did before deltas existed.
-            res = await api.put<{ rev: number }>(url, { kind: target, data: serializeLayer(layer), rev });
+          } catch (err) {
+            // The server refused the base revision — a save from another
+            // device, or one of ours it never acknowledged. Fall back to the
+            // whole layer, starting from the revision it says it has.
+            const theirs = err instanceof ApiError && err.status === 409 ? err.body?.rev : undefined;
+            res = await putWhole(typeof theirs === "number" ? theirs : rev);
           }
         } else {
-          res = await api.put<{ rev: number }>(url, { kind: target, data: serializeLayer(layer), rev });
+          res = await putWhole(rev);
         }
 
         revs.current[revKey] = res.rev;
         // Remember the exact stroke objects the server now holds.
         syncedStrokes.current[revKey] = layer.s.slice();
-        dirtyLayers.current.delete(pageId);
+
+        // Ink drawn while this request was in flight left the page dirty for a
+        // reason. Clearing the flag regardless dropped those strokes on the
+        // floor: the next flush found nothing to send and reported success.
+        const current = (target === "teacher" ? layersRef.current.teacherLayers : layersRef.current.studentLayers)[pageId];
+        if (current === layer) dirtyLayers.current.delete(pageId);
       }
 
       if (dirtyValues.current.size > 0 && target === "student") {

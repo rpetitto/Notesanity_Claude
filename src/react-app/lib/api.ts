@@ -1,5 +1,12 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /**
+   * The decoded error body, when there was one.
+   *
+   * A 409 from a layer save carries the revision the server actually holds,
+   * and the client needs it to recover — without this it can only retry the
+   * revision that was just refused, forever.
+   */
+  constructor(public status: number, message: string, public body?: any) {
     super(message);
   }
 }
@@ -15,13 +22,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
+    let body: any;
     try {
-      const body = (await res.json()) as any;
+      body = (await res.json()) as any;
       if (body?.error) message = body.error;
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
