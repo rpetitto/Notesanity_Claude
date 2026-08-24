@@ -52,6 +52,53 @@ const csv = (s: string) =>
   s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
 
 /**
+ * Find the school an email domain belongs to.
+ *
+ * This is the whole of multi-tenancy. Every school was previously resolved as
+ * "whichever row comes back first", which is correct only while exactly one
+ * school exists — with two, sign-in picked between them by storage order and a
+ * teacher at the second one was refused outright.
+ *
+ * `primary_domain` is UNIQUE, so the common case is an indexed lookup. The
+ * additional teacher/student domains are comma-separated in a column, so they
+ * need a scan — bounded by the number of schools, which is small, and only
+ * reached when the primary lookup misses.
+ */
+export async function orgForDomain(domain: string): Promise<Org | null> {
+  if (!domain) return null;
+  const primary = await db
+    .prepare(`SELECT * FROM orgs WHERE lower(primary_domain) = ?`)
+    .bind(domain)
+    .first<Org>();
+  if (primary) return primary;
+
+  // Wrapped in commas at both ends so "school.edu" can't match "myschool.edu".
+  const needle = `%,${domain},%`;
+  return await db
+    .prepare(
+      `SELECT * FROM orgs
+        WHERE ',' || lower(replace(teacher_domains, ' ', '')) || ',' LIKE ?
+           OR ',' || lower(replace(student_domains, ' ', '')) || ',' LIKE ?
+        LIMIT 1`,
+    )
+    .bind(needle, needle)
+    .first<Org>();
+}
+
+/** Which role a domain implies within its school; "pending" when it says nothing. */
+export function roleForDomain(org: Org, domain: string): AppUser["role"] {
+  if (csv(org.teacher_domains ?? "").includes(domain)) return "teacher";
+  if (csv(org.student_domains ?? "").includes(domain)) return "student";
+  return "pending";
+}
+
+/** True when no school exists yet, so the next sign-in bootstraps one. */
+export async function noOrgsYet(): Promise<boolean> {
+  const any = await db.prepare(`SELECT id FROM orgs LIMIT 1`).first<{ id: string }>();
+  return !any;
+}
+
+/**
  * Resolve the signed-in Google account to a Notesanity user row.
  *
  * The very first person to sign in bootstraps the org from their own email
@@ -91,10 +138,13 @@ export async function currentUser(c: Context): Promise<AppUser | null> {
   const domain = domainOf(email);
   if (!domain) throw new HttpError(403, "Your account has no email domain.");
 
-  const org = await db.prepare(`SELECT * FROM orgs LIMIT 1`).first<Org>();
+  const org = await orgForDomain(domain);
 
-  // Bootstrap: first ever sign-in creates the org and becomes admin/teacher.
-  if (!org) {
+  // Bootstrap: the first ever sign-in creates the school and becomes its
+  // admin. Once any school exists an unrecognised domain is refused rather
+  // than quietly starting another one — a new district is provisioned
+  // deliberately, not by whoever happens to sign in next.
+  if (!org && (await noOrgsYet())) {
     const orgId = uid();
     await db
       .prepare(
@@ -117,23 +167,19 @@ export async function currentUser(c: Context): Promise<AppUser | null> {
     };
   }
 
-  const allowed = new Set([
-    org.primary_domain.toLowerCase(),
-    ...csv(org.teacher_domains),
-    ...csv(org.student_domains),
-  ]);
-  if (!allowed.has(domain)) {
+  // No school claims this domain. The message deliberately doesn't name any
+  // school — with several tenants, telling a stranger which ones exist leaks
+  // the customer list.
+  if (!org) {
     throw new HttpError(
       403,
-      `Notesanity is limited to ${org.primary_domain}. Your account (${email}) isn't on an approved domain — ask your Notesanity admin to add it.`,
+      `Your account (${email}) isn't on a domain any school here has approved — ask your Notesanity admin to add it.`,
     );
   }
 
   // Role by domain when the school separates staff and student domains,
   // otherwise the user picks on first run.
-  let role: AppUser["role"] = "pending";
-  if (csv(org.teacher_domains).includes(domain)) role = "teacher";
-  else if (csv(org.student_domains).includes(domain)) role = "student";
+  const role = roleForDomain(org, domain);
 
   const userId = uid();
   await db

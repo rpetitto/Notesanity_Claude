@@ -18,7 +18,7 @@ import { renderEmail } from "../lib/email";
 import { logMail } from "../lib/maillog";
 import { SUPERADMIN_EMAILS } from "../schema";
 import type { Context } from "hono";
-import { HttpError, handler, now, setLocalSessionResolver, uid } from "../lib/session";
+import { HttpError, handler, noOrgsYet, now, orgForDomain, roleForDomain, setLocalSessionResolver, uid } from "../lib/session";
 
 const SESSION_COOKIE = "notesanity_session";
 const SESSION_DAYS = 30;
@@ -131,17 +131,26 @@ const csv = (s: string) => s.split(",").map((x) => x.trim().toLowerCase()).filte
  * domain isn't allowed.
  */
 async function resolveOrgFor(email: string): Promise<{ orgId: string; role: string; isAdmin: number } | null> {
-  const org = await db.prepare(`SELECT * FROM orgs LIMIT 1`).first<any>();
   const domain = domainOf(email);
   if (!domain) return null;
 
-  // A superadmin whose domain isn't on the allowlist still gets in — they are
-  // the person who edits the allowlist, and locking them behind it is circular.
-  if (org && SUPERADMIN_EMAILS.includes(email)) {
-    return { orgId: org.id, role: "teacher", isAdmin: 1 };
+  const org = await orgForDomain(domain);
+
+  // A superadmin whose domain isn't on any allowlist still gets in — they are
+  // the person who edits the allowlists, and locking them behind one is
+  // circular. They land in their own school when it exists, and otherwise in
+  // the oldest one, which is a home address rather than a limit: `is_superadmin`
+  // is what actually grants them sight across schools.
+  if (SUPERADMIN_EMAILS.includes(email)) {
+    const home =
+      org ?? (await db.prepare(`SELECT * FROM orgs ORDER BY created_at LIMIT 1`).first<any>());
+    if (home) return { orgId: home.id, role: "teacher", isAdmin: 1 };
   }
 
+  // Bootstrap only when no school exists at all. Once one does, an unknown
+  // domain is refused rather than silently founding a second school.
   if (!org) {
+    if (!(await noOrgsYet())) return null;
     const orgId = uid();
     await db
       .prepare(
@@ -153,17 +162,7 @@ async function resolveOrgFor(email: string): Promise<{ orgId: string; role: stri
     return { orgId, role: "teacher", isAdmin: 1 };
   }
 
-  const allowed = new Set([
-    String(org.primary_domain).toLowerCase(),
-    ...csv(org.teacher_domains ?? ""),
-    ...csv(org.student_domains ?? ""),
-  ]);
-  if (!allowed.has(domain)) return null;
-
-  let role = "pending";
-  if (csv(org.teacher_domains ?? "").includes(domain)) role = "teacher";
-  else if (csv(org.student_domains ?? "").includes(domain)) role = "student";
-  return { orgId: org.id, role, isAdmin: 0 };
+  return { orgId: org.id, role: roleForDomain(org, domain), isAdmin: 0 };
 }
 
 async function findOrCreateUser(email: string, name?: string) {
@@ -180,10 +179,11 @@ async function findOrCreateUser(email: string, name?: string) {
 
   const resolved = await resolveOrgFor(email);
   if (!resolved) {
-    const org = await db.prepare(`SELECT primary_domain FROM orgs LIMIT 1`).first<any>();
+    // No school is named: with several tenants, that would tell a stranger who
+    // the customers are.
     throw new HttpError(
       403,
-      `Notesanity is limited to ${org?.primary_domain ?? "this school"}. Ask your Notesanity admin to add your domain.`,
+      "That email isn't on a domain any school here has approved. Ask your Notesanity admin to add it.",
     );
   }
   const id = uid();

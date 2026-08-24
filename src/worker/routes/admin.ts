@@ -15,7 +15,7 @@
  */
 
 import { app, db } from "flingit";
-import { HttpError, handler, now, param, requireUser } from "../lib/session";
+import { HttpError, handler, now, param, requireUser, uid } from "../lib/session";
 import { SUPERADMIN_EMAILS } from "../schema";
 
 async function requireSuperadmin(c: any) {
@@ -93,6 +93,7 @@ async function page(
 
 /** Fields a superadmin may change, per table. Anything not listed is read-only. */
 const EDITABLE: Record<string, { table: string; columns: string[] }> = {
+  orgs: { table: "orgs", columns: ["name", "teacher_domains", "student_domains"] },
   users: { table: "users", columns: ["name", "role", "is_admin", "is_superadmin"] },
   notebooks: { table: "notebooks", columns: ["title", "status"] },
   assignments: { table: "assignments", columns: ["title", "due_at", "status", "points_max"] },
@@ -114,6 +115,52 @@ app.get("/api/admin/overview", handler(async (c) => {
       `SELECT COUNT(*) AS n FROM api_log WHERE created_at > datetime('now', '-1 day')`,
     ),
   });
+}));
+
+/**
+ * The schools on the platform.
+ *
+ * `primary_domain` is what sign-in resolves against, so it is set once here and
+ * never editable in the grid: changing it would strand every account already
+ * created under it.
+ */
+app.get("/api/admin/orgs", handler(async (c) => {
+  await requireSuperadmin(c);
+  return page(c, {
+    select: `o.id, o.name, o.primary_domain, o.teacher_domains, o.student_domains, o.created_at,
+             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id) AS users,
+             (SELECT COUNT(*) FROM classes c2 WHERE c2.org_id = o.id) AS classes`,
+    from: `orgs o`,
+    searchable: ["o.name", "o.primary_domain"],
+    order: `o.created_at DESC`,
+  });
+}));
+
+app.post("/api/admin/orgs", handler(async (c) => {
+  await requireSuperadmin(c);
+  const b = await c.req.json<{
+    name?: string; primaryDomain?: string; teacherDomains?: string; studentDomains?: string;
+  }>();
+  const name = (b.name ?? "").trim();
+  const domain = (b.primaryDomain ?? "").trim().toLowerCase().replace(/^@/, "");
+  if (!name) throw new HttpError(400, "Give the school a name");
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) throw new HttpError(400, "That doesn't look like an email domain");
+
+  const clash = await db
+    .prepare(`SELECT name FROM orgs WHERE lower(primary_domain) = ?`)
+    .bind(domain)
+    .first<{ name: string }>();
+  if (clash) throw new HttpError(409, `${domain} already belongs to ${clash.name}`);
+
+  const id = uid();
+  await db
+    .prepare(
+      `INSERT INTO orgs (id, name, primary_domain, teacher_domains, student_domains, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, name, domain, (b.teacherDomains ?? "").trim(), (b.studentDomains ?? "").trim(), now())
+    .run();
+  return c.json({ id });
 }));
 
 app.get("/api/admin/users", handler(async (c) => {

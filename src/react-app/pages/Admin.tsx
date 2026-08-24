@@ -53,6 +53,20 @@ interface TableSpec {
 
 const TABLES: TableSpec[] = [
   {
+    key: "orgs",
+    label: "Schools",
+    endpoint: "orgs",
+    hint: "Sign-in resolves a person to a school by their email domain. The primary domain is fixed once accounts exist under it.",
+    columns: [
+      { id: "name", title: "School", width: 200, editable: true },
+      { id: "primary_domain", title: "Primary domain", width: 190 },
+      { id: "teacher_domains", title: "Teacher domains", width: 200, editable: true },
+      { id: "student_domains", title: "Student domains", width: 200, editable: true },
+      { id: "users", title: "People", width: 90, kind: "number" },
+      { id: "classes", title: "Classes", width: 90, kind: "number" },
+    ],
+  },
+  {
     key: "users",
     label: "Users",
     endpoint: "users",
@@ -150,6 +164,57 @@ const display = (columnId: string, value: unknown): string => {
 
 /** How many rows one page of a console table holds. */
 const PAGE_SIZE = 100;
+
+/**
+ * Adding a school, which the grid can't do — it edits rows, it doesn't create
+ * them. A school is the unit of tenancy: everyone whose email domain resolves
+ * here lands in it, and never sees another one's classes.
+ */
+function NewSchool() {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const [domain, setDomain] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.post("/api/admin/orgs", { name, primaryDomain: domain }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["admin", "orgs"] });
+      toast.success(`${name} added`);
+      setName(""); setDomain(""); setOpen(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!open) {
+    return (
+      <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+        Add a school
+      </Button>
+    );
+  }
+
+  return (
+    <form
+      className="flex flex-wrap items-end gap-2"
+      onSubmit={(e) => { e.preventDefault(); create.mutate(); }}
+    >
+      <div>
+        <Label htmlFor="school-name">School</Label>
+        <Input id="school-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Westfield District" className="h-11" />
+      </div>
+      <div>
+        <Label htmlFor="school-domain">Primary domain</Label>
+        <Input id="school-domain" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="westfield.edu" className="h-11" />
+      </div>
+      <Button type="submit" disabled={create.isPending || !name.trim() || !domain.trim()}>
+        {create.isPending ? "Adding…" : "Add"}
+      </Button>
+      <Button type="button" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
+  );
+}
 
 function AdminGrid({ spec }: { spec: TableSpec }) {
   const qc = useQueryClient();
@@ -267,7 +332,8 @@ function AdminGrid({ spec }: { spec: TableSpec }) {
           {spec.hint}
           {isFetching && " · updating…"}
         </p>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {spec.endpoint === "orgs" && <NewSchool />}
           <Button
             variant="secondary"
             size="sm"
