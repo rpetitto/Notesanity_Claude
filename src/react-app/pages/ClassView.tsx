@@ -810,6 +810,11 @@ export default function ClassView() {
             <h1 className="truncate font-display text-[24px] text-oat">{cls.name}</h1>
           </div>
         </div>
+        {/* Everything in this row is conditional — the section label, and the
+            teacher-only controls. A student in a class with no section left an
+            empty row still painting its padding, which read as a white band
+            below the banner. */}
+        {(cls.section || isTeacher) && (
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div className="min-w-0">
             {cls.section && <p className="truncate text-[16px] text-pine/70">{cls.section}</p>}
@@ -841,6 +846,7 @@ export default function ClassView() {
             )}
           </div>
         </div>
+        )}
       </Card>
 
       <div className="mb-5 flex items-center gap-3 overflow-x-auto">

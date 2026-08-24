@@ -28,6 +28,69 @@ async function requireSuperadmin(c: any) {
   return user;
 }
 
+/**
+ * Paging, so a console page costs the same on day one and at fifty thousand users.
+ *
+ * These tables used to come back whole — every user, every notebook, every
+ * grade — which was fine at a few hundred rows and 412 KB of JSON at two
+ * thousand. The window is clamped rather than trusted: a crafted `limit` can't
+ * ask for the table back.
+ */
+const PAGE_DEFAULT = 100;
+const PAGE_MAX = 500;
+
+function paging(c: any): { limit: number; offset: number; q: string } {
+  const url = new URL(c.req.url);
+  // An absent parameter has to be caught before Number(), which reads both null
+  // and "" as 0 and would otherwise turn "no limit given" into a limit of zero.
+  const asInt = (raw: string | null, fallback: number) => {
+    if (raw === null || raw.trim() === "") return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+  };
+  return {
+    limit: Math.min(PAGE_MAX, Math.max(1, asInt(url.searchParams.get("limit"), PAGE_DEFAULT))),
+    offset: asInt(url.searchParams.get("offset"), 0),
+    q: (url.searchParams.get("q") ?? "").trim().slice(0, 100),
+  };
+}
+
+/** A case-insensitive contains-match across the columns worth searching. */
+function search(q: string, columns: string[]): { where: string; params: string[] } {
+  if (!q) return { where: "", params: [] };
+  const like = `%${q}%`;
+  return {
+    where: `WHERE (${columns.map((col) => `${col} LIKE ?`).join(" OR ")})`,
+    params: columns.map(() => like),
+  };
+}
+
+/**
+ * Run one windowed query and its matching count.
+ *
+ * The count uses the same FROM and WHERE as the page, so the total a superadmin
+ * reads always describes the rows they are actually looking through.
+ */
+async function page(
+  c: any,
+  opts: { select: string; from: string; searchable: string[]; order: string },
+) {
+  const { limit, offset, q } = paging(c);
+  const { where, params } = search(q, opts.searchable);
+
+  const rows = await db
+    .prepare(`SELECT ${opts.select} FROM ${opts.from} ${where} ORDER BY ${opts.order} LIMIT ? OFFSET ?`)
+    .bind(...params, limit, offset)
+    .all<any>();
+
+  const counted = await db
+    .prepare(`SELECT COUNT(*) AS n FROM ${opts.from} ${where}`)
+    .bind(...params)
+    .first<{ n: number }>();
+
+  return c.json({ rows: rows.results ?? [], total: counted?.n ?? 0, limit, offset });
+}
+
 /** Fields a superadmin may change, per table. Anything not listed is read-only. */
 const EDITABLE: Record<string, { table: string; columns: string[] }> = {
   users: { table: "users", columns: ["name", "role", "is_admin", "is_superadmin"] },
@@ -55,77 +118,68 @@ app.get("/api/admin/overview", handler(async (c) => {
 
 app.get("/api/admin/users", handler(async (c) => {
   await requireSuperadmin(c);
-  const rows = await db
-    .prepare(
-      `SELECT u.id, u.email, u.name, u.role, u.is_admin, u.is_superadmin, u.created_at, u.last_seen_at,
-              (SELECT COUNT(*) FROM enrollments e WHERE e.user_id = u.id) AS classes
-         FROM users u ORDER BY u.created_at DESC`,
-    )
-    .all<any>();
-  return c.json({ rows: rows.results ?? [] });
+  return page(c, {
+    select: `u.id, u.email, u.name, u.role, u.is_admin, u.is_superadmin, u.created_at, u.last_seen_at,
+             (SELECT COUNT(*) FROM enrollments e WHERE e.user_id = u.id) AS classes`,
+    from: `users u`,
+    searchable: ["u.email", "u.name", "u.role"],
+    order: `u.created_at DESC`,
+  });
 }));
 
 app.get("/api/admin/notebooks", handler(async (c) => {
   await requireSuperadmin(c);
-  const rows = await db
-    .prepare(
-      `SELECT n.id, n.title, n.status, n.page_count, n.created_at, n.updated_at,
-              c.name AS class_name, u.email AS owner_email,
-              (SELECT COUNT(*) FROM assignments a WHERE a.notebook_id = n.id) AS assignments
-         FROM notebooks n
-         LEFT JOIN classes c ON c.id = n.class_id
-         LEFT JOIN users u ON u.id = n.owner_id
-        ORDER BY n.updated_at DESC`,
-    )
-    .all<any>();
-  return c.json({ rows: rows.results ?? [] });
+  return page(c, {
+    select: `n.id, n.title, n.status, n.page_count, n.created_at, n.updated_at,
+             c.name AS class_name, u.email AS owner_email,
+             (SELECT COUNT(*) FROM assignments a WHERE a.notebook_id = n.id) AS assignments`,
+    from: `notebooks n
+           LEFT JOIN classes c ON c.id = n.class_id
+           LEFT JOIN users u ON u.id = n.owner_id`,
+    searchable: ["n.title", "c.name", "u.email"],
+    order: `n.updated_at DESC`,
+  });
 }));
 
 app.get("/api/admin/assignments", handler(async (c) => {
   await requireSuperadmin(c);
-  const rows = await db
-    .prepare(
-      `SELECT a.id, a.title, a.status, a.due_at, a.grading, a.points_max, a.created_at,
-              c.name AS class_name, n.title AS notebook_title,
-              (SELECT COUNT(*) FROM submissions s WHERE s.assignment_id = a.id) AS submissions,
-              (SELECT COUNT(*) FROM submissions s WHERE s.assignment_id = a.id AND s.graded_at IS NOT NULL) AS graded
-         FROM assignments a
-         LEFT JOIN classes c ON c.id = a.class_id
-         LEFT JOIN notebooks n ON n.id = a.notebook_id
-        ORDER BY a.created_at DESC`,
-    )
-    .all<any>();
-  return c.json({ rows: rows.results ?? [] });
+  return page(c, {
+    select: `a.id, a.title, a.status, a.due_at, a.grading, a.points_max, a.created_at,
+             c.name AS class_name, n.title AS notebook_title,
+             (SELECT COUNT(*) FROM submissions s WHERE s.assignment_id = a.id) AS submissions,
+             (SELECT COUNT(*) FROM submissions s WHERE s.assignment_id = a.id AND s.graded_at IS NOT NULL) AS graded`,
+    from: `assignments a
+           LEFT JOIN classes c ON c.id = a.class_id
+           LEFT JOIN notebooks n ON n.id = a.notebook_id`,
+    searchable: ["a.title", "c.name", "n.title"],
+    order: `a.created_at DESC`,
+  });
 }));
 
 app.get("/api/admin/grades", handler(async (c) => {
   await requireSuperadmin(c);
-  const rows = await db
-    .prepare(
-      `SELECT s.id, u.email AS student_email, a.title AS assignment, c.name AS class_name,
-              s.status, s.grade_points, s.grade_letter, s.grade_complete, s.feedback,
-              a.points_max, s.submitted_at, s.returned_at, s.graded_at
-         FROM submissions s
-         LEFT JOIN users u ON u.id = s.student_id
-         LEFT JOIN assignments a ON a.id = s.assignment_id
-         LEFT JOIN classes c ON c.id = a.class_id
-        ORDER BY COALESCE(s.graded_at, s.submitted_at, s.id) DESC`,
-    )
-    .all<any>();
-  return c.json({ rows: rows.results ?? [] });
+  return page(c, {
+    select: `s.id, u.email AS student_email, a.title AS assignment, c.name AS class_name,
+             s.status, s.grade_points, s.grade_letter, s.grade_complete, s.feedback,
+             a.points_max, s.submitted_at, s.returned_at, s.graded_at`,
+    from: `submissions s
+           LEFT JOIN users u ON u.id = s.student_id
+           LEFT JOIN assignments a ON a.id = s.assignment_id
+           LEFT JOIN classes c ON c.id = a.class_id`,
+    searchable: ["u.email", "a.title", "c.name", "s.status"],
+    order: `COALESCE(s.graded_at, s.submitted_at, s.id) DESC`,
+  });
 }));
 
 app.get("/api/admin/logs", handler(async (c) => {
   await requireSuperadmin(c);
-  const rows = await db
-    .prepare(
-      `SELECT l.id, l.method, l.path, l.status, l.duration_ms, l.message, l.created_at,
-              u.email AS user_email
-         FROM api_log l LEFT JOIN users u ON u.id = l.user_id
-        ORDER BY l.created_at DESC LIMIT 500`,
-    )
-    .all<any>();
-  return c.json({ rows: rows.results ?? [] });
+  return page(c, {
+    select: `l.id, l.method, l.path, l.status, l.duration_ms, l.message, l.created_at,
+             u.email AS user_email`,
+    from: `api_log l LEFT JOIN users u ON u.id = l.user_id`,
+    searchable: ["l.path", "l.message", "u.email"],
+    order: `l.created_at DESC`,
+  });
 }));
 
 /**

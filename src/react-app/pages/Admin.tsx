@@ -148,13 +148,36 @@ const display = (columnId: string, value: unknown): string => {
   return String(value);
 };
 
+/** How many rows one page of a console table holds. */
+const PAGE_SIZE = 100;
+
 function AdminGrid({ spec }: { spec: TableSpec }) {
   const qc = useQueryClient();
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["admin", spec.endpoint],
-    queryFn: () => api.get<{ rows: Record<string, unknown>[] }>(`/api/admin/${spec.endpoint}`),
+  const [term, setTerm] = useState("");
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+
+  // Typing shouldn't put a query on the wire per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQ(term.trim());
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [term]);
+
+  const { data, isLoading, error, isFetching } = useQuery({
+    queryKey: ["admin", spec.endpoint, q, offset],
+    queryFn: () =>
+      api.get<{ rows: Record<string, unknown>[]; total: number }>(
+        `/api/admin/${spec.endpoint}?limit=${PAGE_SIZE}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      ),
+    // Keeps the previous page painted while the next one loads, so paging
+    // doesn't flash a spinner over the grid.
+    placeholderData: (prev) => prev,
   });
   const rows = useMemo(() => data?.rows ?? [], [data]);
+  const total = data?.total ?? 0;
 
   const save = useMutation({
     mutationFn: ({ id, column, value }: { id: string; column: string; value: unknown }) =>
@@ -223,13 +246,50 @@ function AdminGrid({ spec }: { spec: TableSpec }) {
   if (isLoading) return <Spinner label={`Loading ${spec.label.toLowerCase()}…`} />;
   if (error) return <ErrorNote error={error as Error} />;
 
+  const from = total === 0 ? 0 : offset + 1;
+  const to = offset + rows.length;
+
   return (
     <div>
-      <p className="mb-3 text-[16px] text-pine/70">
-        {rows.length} row{rows.length === 1 ? "" : "s"} · {spec.hint}
-      </p>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <Input
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          placeholder={`Search ${spec.label.toLowerCase()}…`}
+          className="h-11 w-full max-w-xs"
+          aria-label={`Search ${spec.label.toLowerCase()}`}
+        />
+        <p className="text-[16px] text-pine/70">
+          {total === 0
+            ? "No matches"
+            : `${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
+          {" · "}
+          {spec.hint}
+          {isFetching && " · updating…"}
+        </p>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+          >
+            Previous
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={to >= total}
+            onClick={() => setOffset(offset + PAGE_SIZE)}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
       {rows.length === 0 ? (
-        <p className="rounded-[12px] border-2 border-pine/20 bg-oat p-4 text-[16px] text-pine/70">Nothing here yet.</p>
+        <p className="rounded-[12px] border-2 border-pine/20 bg-oat p-4 text-[16px] text-pine/70">
+          {q ? `Nothing matches “${q}”.` : "Nothing here yet."}
+        </p>
       ) : (
         <div className="overflow-hidden rounded-[12px] border-[3px] border-pine">
           <DataEditor
@@ -412,9 +472,25 @@ function MailLog() {
 
 function OrgUsers() {
   const qc = useQueryClient();
+  const [term, setTerm] = useState("");
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQ(term.trim());
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [term]);
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["org-users"],
-    queryFn: () => api.get<{ users: OrgUser[] }>("/api/org/users"),
+    queryKey: ["org-users", q, offset],
+    queryFn: () =>
+      api.get<{ users: OrgUser[]; total: number }>(
+        `/api/org/users?limit=${PAGE_SIZE}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      ),
+    placeholderData: (prev) => prev,
   });
 
   const mutation = useMutation({
@@ -430,9 +506,32 @@ function OrgUsers() {
   if (isLoading) return <Spinner />;
   if (error || !data) return <ErrorNote error={(error as Error) ?? new Error("Couldn't load users")} />;
 
+  const total = data.total ?? data.users.length;
+  const to = offset + data.users.length;
+
   return (
     <Card className="mt-6">
-      <h2 className="p-5 pb-0 font-display text-[17px] text-pine">People</h2>
+      <div className="flex flex-wrap items-center gap-3 p-5 pb-0">
+        <h2 className="font-display text-[17px] text-pine">People</h2>
+        <Input
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          placeholder="Search by name or email…"
+          className="h-11 w-full max-w-xs"
+          aria-label="Search people"
+        />
+        <span className="text-[16px] text-pine/70">
+          {total === 0 ? "No matches" : `${(offset + 1).toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="secondary" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
+            Previous
+          </Button>
+          <Button variant="secondary" size="sm" disabled={to >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
+            Next
+          </Button>
+        </div>
+      </div>
       <ul className="mt-3 divide-y divide-pine/15">
         {data.users.map((u) => (
           <li key={u.id} className="flex items-center gap-3 px-5 py-3">
