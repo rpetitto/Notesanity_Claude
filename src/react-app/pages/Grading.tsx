@@ -907,6 +907,14 @@ function GradePanel({
       feedback,
     });
 
+  /**
+   * A returned grade is a record of what the student has already been told, so
+   * the panel stops being a form until the teacher reopens it. Leaving the
+   * inputs live with no way to save would be the worse half-measure: a teacher
+   * would change a mark and find nowhere to commit it.
+   */
+  const returned = !!row.returnedAt;
+
   const fields = (
     <>
       {assignment.grading === "points" && (
@@ -917,9 +925,10 @@ function GradePanel({
               type="number"
               value={points}
               onChange={(e) => setPoints(e.target.value)}
+              disabled={returned}
               min={0}
               max={assignment.pointsMax}
-              className="w-20 rounded-[12px] border-[3px] border-pine px-2 py-1.5 text-[16px] outline-none focus:ring-[3px] focus:ring-mint"
+              className="w-20 rounded-[12px] border-[3px] border-pine px-2 py-1.5 text-[16px] outline-none focus:ring-[3px] focus:ring-mint disabled:opacity-60"
             />
             <span className="text-[16px] text-pine/70">/ {assignment.pointsMax}</span>
           </div>
@@ -934,8 +943,9 @@ function GradePanel({
               <button
                 key={l}
                 onClick={() => setLetter(l)}
+                disabled={returned}
                 className={cn(
-                  "h-10 flex-1 rounded-[12px] border-[3px] text-[16px] font-bold",
+                  "h-10 flex-1 rounded-[12px] border-[3px] text-[16px] font-bold disabled:opacity-60",
                   letter === l ? "border-pine bg-mint text-pine" : "border-pine/20 text-pine/70 hover:bg-oat",
                 )}
               >
@@ -950,14 +960,16 @@ function GradePanel({
         <div className="mt-4 flex gap-2">
           <button
             onClick={() => setComplete(true)}
-            className={cn("h-10 flex-1 rounded-[12px] border-[3px] text-[16px] font-bold",
+            disabled={returned}
+            className={cn("h-10 flex-1 rounded-[12px] border-[3px] text-[16px] font-bold disabled:opacity-60",
               complete === true ? "border-pine bg-mint text-pine" : "border-pine/20 text-pine/70 hover:bg-oat")}
           >
             Complete
           </button>
           <button
             onClick={() => setComplete(false)}
-            className={cn("h-10 flex-1 rounded-[12px] border-[3px] text-[16px] font-bold",
+            disabled={returned}
+            className={cn("h-10 flex-1 rounded-[12px] border-[3px] text-[16px] font-bold disabled:opacity-60",
               complete === false ? "border-[#a3341f] bg-[#a3341f]/10 text-[#a3341f]" : "border-pine/20 text-pine/70 hover:bg-oat")}
           >
             Incomplete
@@ -970,20 +982,26 @@ function GradePanel({
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
         rows={4}
+        disabled={returned}
         placeholder="Nice work on question 3…"
-        className="mt-1 text-[16px]"
+        className="mt-1 text-[16px] disabled:opacity-60"
       />
 
-      <Button variant="secondary" onClick={submit} disabled={saving} className="mt-3 w-full">
-        Save grade
-      </Button>
-      <Button variant="primary" onClick={() => { submit(); onReturn(); }} className="mt-2 w-full">
-        <Send className="h-4 w-4" strokeWidth={2.5} /> Save &amp; return
-      </Button>
+      {!returned && (
+        <>
+          <Button variant="secondary" onClick={submit} disabled={saving} className="mt-3 w-full">
+            Save grade
+          </Button>
+          <Button variant="primary" onClick={() => { submit(); onReturn(); }} className="mt-2 w-full">
+            <Send className="h-4 w-4" strokeWidth={2.5} /> Save &amp; return
+          </Button>
+        </>
+      )}
 
-      {row.returnedAt && (
-        <p className="mt-3 flex items-center gap-1.5 text-[16px] text-pine/70">
-          <Lock className="h-3 w-3" strokeWidth={2.5} /> Returned {relativeTime(row.returnedAt)}
+      {returned && (
+        <p className="mt-3 flex items-start gap-1.5 text-[16px] text-pine/70">
+          <Lock className="mt-1 h-3 w-3 shrink-0" strokeWidth={2.5} />
+          <span>Returned {relativeTime(row.returnedAt)}. Reopen it to change the grade or comment.</span>
         </p>
       )}
 

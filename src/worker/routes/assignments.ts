@@ -504,9 +504,15 @@ app.post("/api/assignments/:id/reopen", handler(async (c) => {
     .first<{ id: string }>();
   if (!sub) throw new HttpError(404, "No submission to reopen");
 
+  // `returned_at` is cleared too: the work is back with the student, so it is
+  // no longer returned, and it should show up as waiting to be handed in and
+  // returned again. The grade itself stays, so a teacher reopening a piece for
+  // one more paragraph doesn't have to retype the mark they already gave.
   await db
     .prepare(
-      `UPDATE submissions SET locked = 0, status = 'in_progress', reopened_at = ?, submitted_at = NULL, updated_at = ?
+      `UPDATE submissions
+          SET locked = 0, status = 'in_progress', reopened_at = ?, submitted_at = NULL,
+              returned_at = NULL, updated_at = ?
         WHERE id = ?`,
     )
     .bind(now(), now(), sub.id)
