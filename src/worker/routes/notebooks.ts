@@ -28,6 +28,19 @@ async function notebookAccess(c: any, notebookId: string) {
     return { nb, user, isTeacher: true };
   }
 
+  // A student's own notebook inside a class. The owner holds the authoring
+  // rights a teacher holds over a class notebook — it is their book. A teacher
+  // of the class may look in, and that is all: every write in this file is
+  // already gated on `isTeacher`, so handing them `false` makes the whole
+  // notebook read-only to them without a second rule to keep in step.
+  if (nb.kind === "student") {
+    const { user, isTeacher: teachesClass } = await requireClassMember(c, nb.class_id);
+    if (nb.owner_id === user.id) return { nb, user, isTeacher: true };
+    if (teachesClass) return { nb, user, isTeacher: false };
+    // Classmates never see each other's notebooks.
+    throw new HttpError(404, "Notebook not found");
+  }
+
   const { user, isTeacher } = await requireClassMember(c, nb.class_id);
   return { nb, user, isTeacher };
 }
@@ -949,7 +962,13 @@ app.delete("/api/my/personal-notebooks/:id", handler(async (c) => {
     .bind(param(c, "id"), user.id)
     .first<any>();
   if (!nb) throw new HttpError(404, "Notebook not found");
-  const instances = await db.prepare(`SELECT id FROM instances WHERE notebook_id = ?`).bind(nb.id).all<any>();
+  await deleteNotebookCascade(nb.id);
+  return c.json({ ok: true });
+}));
+
+/** Remove a notebook and everything anchored to it, ink chunks included. */
+async function deleteNotebookCascade(notebookId: string) {
+  const instances = await db.prepare(`SELECT id FROM instances WHERE notebook_id = ?`).bind(notebookId).all<any>();
   for (const inst of instances.results ?? []) {
     await db
       .prepare(`DELETE FROM layer_chunks WHERE layer_id IN (SELECT id FROM layers WHERE instance_id = ?)`)
@@ -958,9 +977,88 @@ app.delete("/api/my/personal-notebooks/:id", handler(async (c) => {
     await db.prepare(`DELETE FROM layers WHERE instance_id = ?`).bind(inst.id).run();
     await db.prepare(`DELETE FROM field_values WHERE instance_id = ?`).bind(inst.id).run();
   }
-  await db.prepare(`DELETE FROM instances WHERE notebook_id = ?`).bind(nb.id).run();
-  await db.prepare(`DELETE FROM fields WHERE notebook_id = ?`).bind(nb.id).run();
-  await db.prepare(`DELETE FROM pages WHERE notebook_id = ?`).bind(nb.id).run();
-  await db.prepare(`DELETE FROM notebooks WHERE id = ?`).bind(nb.id).run();
+  await db.prepare(`DELETE FROM instances WHERE notebook_id = ?`).bind(notebookId).run();
+  await db.prepare(`DELETE FROM fields WHERE notebook_id = ?`).bind(notebookId).run();
+  await db.prepare(`DELETE FROM pages WHERE notebook_id = ?`).bind(notebookId).run();
+  await db.prepare(`DELETE FROM notebooks WHERE id = ?`).bind(notebookId).run();
+}
+
+/**
+ * A student's own notebook inside a class.
+ *
+ * It sits in the class so it's alongside the coursework it relates to, and the
+ * teacher can look in — but it is deliberately outside the sync: no instances
+ * are provisioned for anyone else, it can't be assigned, and the teacher can't
+ * push pages into it. The student is the author, and the notebook is theirs.
+ */
+async function requireClassStudent(c: any, classId: string) {
+  const { user, isTeacher } = await requireClassMember(c, classId);
+  if (isTeacher) {
+    throw new HttpError(400, "Teachers make class notebooks — this is for a student's own notebook");
+  }
+  return user;
+}
+
+app.post("/api/classes/:id/my-notebooks", handler(async (c) => {
+  const classId = param(c, "id");
+  const user = await requireClassStudent(c, classId);
+  const body = await c.req.json<{ title?: string; template?: string; pages?: number; pattern?: string; color?: string }>();
+
+  const preset = body.template ? templateFor(body.template) : null;
+  if (body.template && !preset) throw new HttpError(400, "Unknown template");
+  const pages = Math.floor(body.pages ?? preset?.pages ?? 0);
+  const pattern = body.pattern ?? preset?.pattern ?? "";
+  const color = body.color ?? preset?.color ?? "";
+  if (!PAGE_PATTERNS.includes(pattern)) throw new HttpError(400, "Unknown page pattern");
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule colour must be a hex value");
+  if (!Number.isFinite(pages) || pages < 1) throw new HttpError(400, "A notebook needs at least one page");
+  if (pages > MAX_TEMPLATE_PAGES) throw new HttpError(400, `A notebook can start with at most ${MAX_TEMPLATE_PAGES} pages`);
+
+  const notebookId = uid();
+  await db
+    .prepare(
+      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '', '', 0, 'published', 'student', ?, ?)`,
+    )
+    .bind(notebookId, classId, user.id, body.title?.trim() || preset?.label || "My notebook", now(), now())
+    .run();
+  await fillFromTemplate(notebookId, pages, pattern, color);
+  return c.json({ notebook: { id: notebookId } });
+}));
+
+/** The same, starting from the student's own PDF. */
+app.post("/api/classes/:id/my-notebooks/upload", handler(async (c) => {
+  const classId = param(c, "id");
+  const user = await requireClassStudent(c, classId);
+  const form = await c.req.parseBody();
+  const file = form["file"] as File | undefined;
+  const title = String(form["title"] ?? "").trim();
+  if (!file) throw new HttpError(400, "No file uploaded");
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new HttpError(413, `That file is ${(file.size / 1048576).toFixed(1)}MB — the limit is 25MB.`);
+  }
+
+  const notebookId = uid();
+  const assetKey = `notebooks/${notebookId}/${uid()}.pdf`;
+  await storage.put(assetKey, await file.arrayBuffer(), { contentType: "application/pdf" });
+  await db
+    .prepare(
+      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 'published', 'student', ?, ?)`,
+    )
+    .bind(notebookId, classId, user.id, title || file.name.replace(/\.[^.]+$/, ""), file.name, assetKey, now(), now())
+    .run();
+  return c.json({ notebook: { id: notebookId, assetKey } });
+}));
+
+/** Delete a student's own class notebook. Only the owner, only their own. */
+app.delete("/api/classes/:classId/my-notebooks/:id", handler(async (c) => {
+  const user = await requireUser(c);
+  const nb = await db
+    .prepare(`SELECT * FROM notebooks WHERE id = ? AND kind = 'student' AND owner_id = ?`)
+    .bind(param(c, "id"), user.id)
+    .first<any>();
+  if (!nb) throw new HttpError(404, "Notebook not found");
+  await deleteNotebookCascade(nb.id);
   return c.json({ ok: true });
 }));

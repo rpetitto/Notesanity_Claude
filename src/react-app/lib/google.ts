@@ -23,6 +23,7 @@ export const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file";
 declare global {
   interface Window {
     google?: any;
+    gapi?: any;
   }
 }
 
@@ -193,4 +194,112 @@ export async function convertToPdf(file: File, onProgress?: (msg: string) => voi
       headers: { Authorization: `Bearer ${token}` },
     }).catch(() => {});
   }
+}
+
+/* ---------- picking an existing file out of Drive ---------- */
+
+/**
+ * The Picker needs the Cloud project number, which is the part of the client id
+ * before the first dash. Deriving it keeps one thing to configure rather than two.
+ */
+const APP_ID = CLIENT_ID.split("-")[0] ?? "";
+
+/** Optional: only some Picker views require it, but Drive views are happier with it. */
+const API_KEY = (import.meta.env.VITE_GOOGLE_API_KEY as string | undefined) ?? "";
+
+export interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+}
+
+/** Types a notebook can be built from. */
+const PICKABLE = [
+  "application/pdf",
+  "application/vnd.google-apps.document",
+  "application/vnd.google-apps.presentation",
+].join(",");
+
+let pickerPromise: Promise<void> | null = null;
+
+function loadPicker(): Promise<void> {
+  if (window.google?.picker) return Promise.resolve();
+  if (pickerPromise) return pickerPromise;
+  pickerPromise = new Promise<void>((resolve, reject) => {
+    const done = () => window.gapi.load("picker", { callback: () => resolve(), onerror: () => reject(new Error("Couldn't load the Google Picker")) });
+    if (window.gapi?.load) return done();
+    const el = document.createElement("script");
+    el.src = "https://apis.google.com/js/api.js";
+    el.async = true;
+    el.defer = true;
+    el.onload = done;
+    el.onerror = () => reject(new Error("Couldn't load the Google Picker"));
+    document.head.appendChild(el);
+  });
+  return pickerPromise;
+}
+
+/**
+ * Show the teacher their own Drive and return what they chose.
+ *
+ * `drive.file` stays the only scope asked for: picking a file through the
+ * Picker grants this app access to that one file, which is the whole point of
+ * using it rather than asking to read someone's entire Drive.
+ *
+ * Resolves to null when the picker is closed without choosing.
+ */
+export async function pickDriveFile(): Promise<DriveFile | null> {
+  const token = await getToken(DRIVE_SCOPES);
+  await loadPicker();
+  const picker = window.google.picker;
+
+  return new Promise<DriveFile | null>((resolve) => {
+    const view = new picker.DocsView(picker.ViewId.DOCS)
+      .setMimeTypes(PICKABLE)
+      .setIncludeFolders(true)
+      .setSelectFolderEnabled(false);
+
+    const builder = new picker.PickerBuilder()
+      .setAppId(APP_ID)
+      .setOAuthToken(token)
+      .addView(view)
+      .addView(new picker.DocsUploadView())
+      .setTitle("Choose a document")
+      .setCallback((data: any) => {
+        if (data.action === picker.Action.PICKED) {
+          const doc = data.docs?.[0];
+          resolve(doc ? { id: doc.id, name: doc.name, mimeType: doc.mimeType } : null);
+        } else if (data.action === picker.Action.CANCEL) {
+          resolve(null);
+        }
+      });
+    if (API_KEY) builder.setDeveloperKey(API_KEY);
+    builder.build().setVisible(true);
+  });
+}
+
+/**
+ * Get a picked Drive file as a PDF.
+ *
+ * A Doc or Slides deck is exported; a PDF is downloaded as it stands. Either
+ * way what comes back is a PDF, which is the only thing the rest of the import
+ * knows how to read.
+ */
+export async function driveFileAsPdf(file: DriveFile): Promise<Blob> {
+  const token = await getToken(DRIVE_SCOPES);
+  const isNative = file.mimeType.startsWith("application/vnd.google-apps.");
+  const url = isNative
+    ? `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=application/pdf`
+    : `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      res.status === 403 && text.includes("exportSizeLimitExceeded")
+        ? "That document is too large for Google to export (10MB limit). Export it to PDF yourself and upload the PDF."
+        : `Couldn't fetch that file from Drive (${res.status})`,
+    );
+  }
+  return await res.blob();
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  BookOpen, Check, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus, RefreshCw, Upload, UserPlus, UserX, Users,
+  BookOpen, Check, ClipboardList, Copy, Eye, FolderOpen, GraduationCap, Palette, Plus, RefreshCw, Upload, UserPlus, UserX, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import Gradebook from "./Gradebook";
@@ -16,6 +16,7 @@ import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
+import { driveFileAsPdf, hasGoogleClientId, pickDriveFile } from "../lib/google";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
 const SWATCHES = [
@@ -67,6 +68,10 @@ interface ClassNotebook {
   first_height?: number | null;
   first_pattern?: string | null;
   first_pattern_color?: string | null;
+  /** "class" is the teacher's; "student" is one a student made for themselves. */
+  kind?: string;
+  owner_id?: string;
+  owner_name?: string | null;
 }
 
 interface TeacherRow {
@@ -643,6 +648,55 @@ export function StudentAssignmentCard({ a }: { a: StudentAssignmentData }) {
   );
 }
 
+
+/**
+ * One notebook on the class shelf. Shared by the teacher's notebooks and the
+ * students' own, so the two read as the same kind of thing — a byline is the
+ * only difference a teacher sees.
+ */
+function NotebookCard({ nb, to, byline }: { nb: ClassNotebook; to: string; byline?: string }) {
+  const accent = nb.accent_color || DEFAULT_ACCENT;
+  return (
+    <Link
+      to={to}
+      className="group overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--color-pine)]"
+    >
+      <div className="h-2" style={{ background: accent }} />
+      <div className="flex gap-3 p-4">
+        {/* An uploaded cover wins; otherwise the first page stands in. */}
+        <div className="shrink-0">
+          {nb.has_cover ? (
+            <img src={`/api/notebooks/${nb.id}/cover`} alt="" className="h-[74px] w-14 rounded border-2 border-pine object-cover" />
+          ) : nb.first_asset_key || nb.first_pattern ? (
+            <PageThumb
+              pdfUrl={assetUrl(nb.id, nb.first_asset_key ?? undefined)}
+              sourceIndex={nb.first_source_index ?? 0}
+              pageWidth={nb.first_width ?? 612}
+              pageHeight={nb.first_height ?? 792}
+              pattern={nb.first_pattern ?? undefined}
+              patternColor={nb.first_pattern_color ?? undefined}
+              width={56}
+            />
+          ) : (
+            <div className="h-[74px] w-14 rounded border-2 border-pine" style={{ background: `linear-gradient(135deg, ${accent}22, ${accent}55)` }} />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-display text-[17px] text-pine">{nb.title}</div>
+          {byline && <div className="truncate text-[16px] text-pine/70">{byline}</div>}
+          <div className="mt-0.5 text-[16px] text-pine/70">{nb.page_count} pages</div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {nb.kind !== "student" && (
+              <Chip tone={nb.status === "published" ? "mint" : "quiet"} className="capitalize">{nb.status}</Chip>
+            )}
+            <span className="text-[16px] text-pine/50">{relativeTime(nb.updated_at)}</span>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 export default function ClassView() {
   const { classId } = useParams<{ classId: string }>();
   const id = classId ?? "";
@@ -671,6 +725,8 @@ export default function ClassView() {
   const [workTab, setWorkTab] = useState<WorkTab>("todo");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [newNotebookOpen, setNewNotebookOpen] = useState(false);
+  const [myNotebookOpen, setMyNotebookOpen] = useState(false);
+  const [driveBusy, setDriveBusy] = useState("");
   const [coverVersion, setCoverVersion] = useState(0);
   const [reviewingStudent, setReviewingStudent] = useState<BackfillStudent | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -691,6 +747,12 @@ export default function ClassView() {
   });
 
   const isTeacher = classQ.data?.myRole === "teacher";
+
+  // The server already decides who may see which of these; splitting them here
+  // is only about where they sit on the page.
+  const allNotebooks = useMemo(() => classQ.data?.notebooks ?? [], [classQ.data]);
+  const classNotebooks = useMemo(() => allNotebooks.filter((n) => n.kind !== "student"), [allNotebooks]);
+  const studentNotebooks = useMemo(() => allNotebooks.filter((n) => n.kind === "student"), [allNotebooks]);
 
   // Fetched unconditionally (not gated on `tab === "assignments"`) — the nav's
   // to-do badge needs a count before the tab is ever opened.
@@ -737,6 +799,30 @@ export default function ClassView() {
       toast.success("Join code copied");
     } catch {
       toast.error("Couldn't copy — copy it manually");
+    }
+  };
+
+  /**
+   * Build a notebook from a file already in the teacher's Drive.
+   *
+   * The picker hands back a Doc, a Slides deck or a PDF; each arrives here as a
+   * PDF and then joins the same import the upload button uses, so there is one
+   * path that turns a document into pages rather than two.
+   */
+  const importFromDrive = async () => {
+    try {
+      setDriveBusy("Opening Drive…");
+      const picked = await pickDriveFile();
+      if (!picked) return;
+      setDriveBusy("Fetching…");
+      const blob = await driveFileAsPdf(picked);
+      const base = picked.name.replace(/\.[^.]+$/, "");
+      const file = new File([blob], `${base}.pdf`, { type: "application/pdf" });
+      navigate(`/classes/${id}/upload`, { state: { file } });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setDriveBusy("");
     }
   };
 
@@ -882,83 +968,87 @@ export default function ClassView() {
       </div>
 
       {tab === "notebooks" && (
-        <div>
-          {isTeacher && (
-            <div className="mb-4 flex flex-wrap justify-end gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,.pptx,application/pdf"
-                className="hidden"
-                onChange={onFileChosen}
+        <div className="space-y-8">
+          <section>
+            {isTeacher && (
+              <div className="mb-4 flex flex-wrap justify-end gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,.pptx,application/pdf"
+                  className="hidden"
+                  onChange={onFileChosen}
+                />
+                <Button type="button" variant="secondary" onClick={() => setNewNotebookOpen(true)}>
+                  <Plus className="h-4 w-4" strokeWidth={2.5} />
+                  Start from blank
+                </Button>
+                {hasGoogleClientId && (
+                  <Button type="button" variant="secondary" onClick={() => void importFromDrive()} disabled={!!driveBusy}>
+                    <FolderOpen className="h-4 w-4" strokeWidth={2.5} />
+                    {driveBusy || "From Google Drive"}
+                  </Button>
+                )}
+                <Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="h-4 w-4" strokeWidth={2.5} />
+                  Upload notebook
+                </Button>
+              </div>
+            )}
+            {classNotebooks.length === 0 ? (
+              <EmptyState
+                title="No notebooks yet"
+                body={isTeacher
+                  ? "Upload a PDF, Word, or PowerPoint file to build your first notebook."
+                  : "Your teacher hasn't shared a notebook with this class yet."}
               />
-              <Button type="button" variant="secondary" onClick={() => setNewNotebookOpen(true)}>
-                <Plus className="h-4 w-4" strokeWidth={2.5} />
-                Start from blank
-              </Button>
-              <Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}>
-                <Upload className="h-4 w-4" strokeWidth={2.5} />
-                Upload notebook
-              </Button>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {classNotebooks.map((nb) => (
+                  <NotebookCard key={nb.id} nb={nb} to={isTeacher ? `/notebooks/${nb.id}/edit` : `/notebooks/${nb.id}`} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* A student's own notebook lives here alongside the coursework, but
+              outside it: the teacher can read it and nothing more. */}
+          <section>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-t-2 border-pine/12 pt-6">
+              <div className="min-w-0">
+                <h2 className="font-display text-[20px] text-pine">
+                  {isTeacher ? "Student notebooks" : "My notebooks"}
+                </h2>
+                <p className="measure text-[16px] text-pine/70">
+                  {isTeacher
+                    ? "Notebooks students keep for themselves in this class. You can read them — they aren't yours to edit or assign."
+                    : "Your own notebook for this class. Your teacher can look in, but can't write in it or assign it."}
+                </p>
+              </div>
+              {!isTeacher && (
+                <Button type="button" variant="primary" onClick={() => setMyNotebookOpen(true)} className="shrink-0">
+                  <Plus className="h-4 w-4" strokeWidth={2.5} />
+                  New notebook
+                </Button>
+              )}
             </div>
-          )}
-          {classQ.data.notebooks.length === 0 && (
-            <EmptyState title="No notebooks yet" body="Upload a PDF, Word, or PowerPoint file to build your first notebook." />
-          )}
-          {classQ.data.notebooks.length > 0 && (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {classQ.data.notebooks.map((nb) => {
-                const accent = nb.accent_color || DEFAULT_ACCENT;
-                const to = isTeacher ? `/notebooks/${nb.id}/edit` : `/notebooks/${nb.id}`;
-                return (
-                  <Link
+            {studentNotebooks.length === 0 ? (
+              <p className="rounded-[12px] border-2 border-dashed border-pine/25 bg-white/60 px-4 py-5 text-[16px] text-pine/65">
+                {isTeacher ? "No student has made one yet." : "You haven't made one for this class yet."}
+              </p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {studentNotebooks.map((nb) => (
+                  <NotebookCard
                     key={nb.id}
-                    to={to}
-                    className="group overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--color-pine)]"
-                  >
-                    <div className="h-2" style={{ background: accent }} />
-                    <div className="flex gap-3 p-4">
-                      {/* An uploaded cover wins; otherwise the first page stands in. */}
-                      <div className="shrink-0">
-                        {nb.has_cover ? (
-                          <img
-                            src={`/api/notebooks/${nb.id}/cover`}
-                            alt=""
-                            className="h-[74px] w-14 rounded border-2 border-pine object-cover"
-                          />
-                        ) : nb.first_asset_key || nb.first_pattern ? (
-                          <PageThumb
-                            pdfUrl={assetUrl(nb.id, nb.first_asset_key ?? undefined)}
-                            sourceIndex={nb.first_source_index ?? 0}
-                            pageWidth={nb.first_width ?? 612}
-                            pageHeight={nb.first_height ?? 792}
-                            pattern={nb.first_pattern ?? undefined}
-                            patternColor={nb.first_pattern_color ?? undefined}
-                            width={56}
-                          />
-                        ) : (
-                          <div
-                            className="h-[74px] w-14 rounded border-2 border-pine"
-                            style={{ background: `linear-gradient(135deg, ${accent}22, ${accent}55)` }}
-                          />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-display text-[17px] text-pine">{nb.title}</div>
-                        <div className="mt-0.5 text-[16px] text-pine/70">{nb.page_count} pages</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          <Chip tone={nb.status === "published" ? "mint" : "quiet"} className="capitalize">
-                            {nb.status}
-                          </Chip>
-                          <span className="text-[16px] text-pine/50">{relativeTime(nb.updated_at)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
+                    nb={nb}
+                    to={`/notebooks/${nb.id}`}
+                    byline={isTeacher ? nb.owner_name ?? "A student" : undefined}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       )}
 
@@ -1127,6 +1217,15 @@ export default function ClassView() {
           onCreated={(notebookId) => { setNewNotebookOpen(false); navigate(`/notebooks/${notebookId}/edit`); }}
         />
       )}
+
+      {myNotebookOpen && (
+        <NewNotebookModal
+          destination={{ kind: "student", classId: id! }}
+          onClose={() => setMyNotebookOpen(false)}
+          onCreated={(notebookId) => { setMyNotebookOpen(false); navigate(`/notebooks/${notebookId}`); }}
+        />
+      )}
+
 
       {customizeOpen && (
         <CustomizeModal

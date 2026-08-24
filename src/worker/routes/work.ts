@@ -92,6 +92,21 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
   if (!nb) throw new HttpError(404, "Notebook not found");
 
+  // A student's own notebook in a class is nobody else's to write in. The
+  // owner works in it exactly as they would a personal notebook; a teacher of
+  // the class may read it, which is what `readOnly` carries to the callers that
+  // save — there is no teacher layer here and no marking.
+  if (nb.kind === "student") {
+    const { user: u, isTeacher: teachesClass } = await requireClassMember(c, nb.class_id);
+    const owns = nb.owner_id === u.id;
+    if (!owns && !teachesClass) throw new HttpError(404, "Notebook not found");
+    if (studentIdParam && studentIdParam !== nb.owner_id) {
+      throw new HttpError(403, "That notebook belongs to one student");
+    }
+    const instance = await ensureInstance(nb, nb.owner_id, false);
+    return { nb, user: u, isTeacher: false, instance, studentId: nb.owner_id, readOnly: !owns };
+  }
+
   // In a personal notebook the owner is the one writing, not a teacher looking
   // in — so they resolve to their own instance and can't ask for anyone else's.
   // (There is no one else's: a personal notebook is never shared.)
@@ -108,16 +123,26 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
     throw new HttpError(403, "You can only open your own notebook");
   }
 
+  const instance = await ensureInstance(nb, studentId, nb.kind !== "personal");
+  return { nb, user, isTeacher, instance, studentId, readOnly: false };
+}
+
+/**
+ * The row that holds one person's work in one notebook, created on first open.
+ *
+ * Lazy rather than provisioned up front, which covers a student who enrolled
+ * between publishes. `checkEnrolment` is false where ownership has already
+ * settled the permission question — a personal or student-owned notebook has
+ * no class membership to test.
+ */
+async function ensureInstance(nb: any, studentId: string, checkEnrolment: boolean) {
   let instance = await db
     .prepare(`SELECT * FROM instances WHERE notebook_id = ? AND student_id = ?`)
     .bind(nb.id, studentId)
     .first<any>();
 
-  // Lazily provision on first open — covers a student who enrolled between publishes.
   if (!instance) {
-    // A personal notebook has no class to be enrolled in; ownership was already
-    // checked above, and that is the whole of the permission question here.
-    if (nb.kind !== "personal") {
+    if (checkEnrolment) {
       const enrolled = await db
         .prepare(`SELECT id FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`)
         .bind(nb.class_id, studentId)
@@ -132,7 +157,7 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
     instance = { id, notebook_id: nb.id, class_id: nb.class_id, student_id: studentId };
   }
 
-  return { nb, user, isTeacher, instance, studentId };
+  return instance;
 }
 
 /**
@@ -141,7 +166,7 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
  */
 app.get("/api/notebooks/:id/work", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { nb, isTeacher, instance, studentId } = await resolveInstance(c, param(c, "id"), studentParam);
+  const { nb, isTeacher, instance, studentId, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
 
   const pages = await db
     .prepare(
@@ -213,7 +238,10 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     })),
     student,
     isTeacher,
-    canEditStudentLayer: !isTeacher || studentId === (await requireUser(c)).id,
+    // A teacher looking into a student's own notebook is a reader. Told plainly
+    // here so the client doesn't offer a pen whose every save would be refused.
+    readOnly,
+    canEditStudentLayer: !readOnly && (!isTeacher || studentId === (await requireUser(c)).id),
   });
 }));
 
@@ -226,7 +254,8 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
  */
 app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { user, isTeacher, instance } = await resolveInstance(c, param(c, "id"), studentParam);
+  const { user, isTeacher, instance, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (readOnly) throw new HttpError(403, "This is the student's own notebook — you can read it, not write in it");
   const pageId = param(c, "pageId");
   const body = await c.req.json<{
     kind: "student" | "teacher";
@@ -414,7 +443,8 @@ const bareType = (value: string) => (value || "").split(";")[0].trim().toLowerCa
  */
 app.post("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { nb, user, isTeacher, instance } = await resolveInstance(c, param(c, "id"), studentParam);
+  const { nb, user, isTeacher, instance, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (readOnly) throw new HttpError(403, "This is the student's own notebook — you can read it, not write in it");
   if (isTeacher && instance.student_id !== user.id) {
     throw new HttpError(403, "Teachers can't answer on a student's behalf");
   }
@@ -492,7 +522,8 @@ app.get("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
 
 app.delete("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { user, isTeacher, instance } = await resolveInstance(c, param(c, "id"), studentParam);
+  const { user, isTeacher, instance, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (readOnly) throw new HttpError(403, "This is the student's own notebook — you can read it, not write in it");
   if (isTeacher && instance.student_id !== user.id) throw new HttpError(403, "Not your response to remove");
   await db
     .prepare(`UPDATE field_values SET asset_key = NULL, content_type = NULL, updated_at = ? WHERE instance_id = ? AND field_id = ?`)
@@ -504,7 +535,8 @@ app.delete("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
 /** Save typed answers to teacher-defined form fields. */
 app.put("/api/notebooks/:id/values", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { user, isTeacher, instance } = await resolveInstance(c, param(c, "id"), studentParam);
+  const { user, isTeacher, instance, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (readOnly) throw new HttpError(403, "This is the student's own notebook — you can read it, not write in it");
   if (isTeacher && instance.student_id !== user.id) {
     throw new HttpError(403, "Teachers can't type into a student's answers");
   }

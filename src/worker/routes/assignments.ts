@@ -142,7 +142,9 @@ app.post("/api/classes/:id/assignments", handler(async (c) => {
   if (!b.notebookId) throw new HttpError(400, "Pick a notebook");
   if (!Array.isArray(b.pageIds) || b.pageIds.length === 0) throw new HttpError(400, "Select at least one page");
   const nb = await db
-    .prepare(`SELECT id FROM notebooks WHERE id = ? AND class_id = ?`)
+    // `kind = 'class'`: a student's own notebook is never assignable, even by
+    // the teacher who can see it.
+    .prepare(`SELECT id FROM notebooks WHERE id = ? AND class_id = ? AND kind = 'class'`)
     .bind(b.notebookId, classId)
     .first();
   if (!nb) throw new HttpError(404, "Notebook not found in this class");

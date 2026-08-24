@@ -43,8 +43,14 @@ function Sample({ pattern, color, width = 58 }: { pattern: string; color: string
 export default function NewNotebookModal({
   destination, onClose, onCreated,
 }: {
-  /** Where a new notebook goes: a class, or the signed-in person's own shelf. */
-  destination: { kind: "class"; classId: string } | { kind: "personal" };
+  /**
+   * Where a new notebook goes: a class (the teacher's), the signed-in person's
+   * own shelf, or a student's own notebook kept inside a class.
+   */
+  destination:
+    | { kind: "class"; classId: string }
+    | { kind: "personal" }
+    | { kind: "student"; classId: string };
   onClose: () => void;
   onCreated: (notebookId: string) => void;
 }) {
@@ -61,9 +67,17 @@ export default function NewNotebookModal({
   const chosen = templates.find((t) => t.key === selected);
 
   const createUrl =
-    destination.kind === "class"
-      ? `/api/classes/${destination.classId}/notebooks/blank`
-      : "/api/my/personal-notebooks";
+    destination.kind === "class" ? `/api/classes/${destination.classId}/notebooks/blank`
+    : destination.kind === "student" ? `/api/classes/${destination.classId}/my-notebooks`
+    : "/api/my/personal-notebooks";
+
+  // A teacher's class notebook is uploaded from the class page itself, so only
+  // the two personal cases bring their own file in here.
+  const uploadUrl =
+    destination.kind === "student"
+      ? `/api/classes/${destination.classId}/my-notebooks/upload`
+      : "/api/my/personal-notebooks/upload";
+  const canImport = destination.kind !== "class";
 
   const create = useMutation({
     mutationFn: () =>
@@ -88,9 +102,7 @@ export default function NewNotebookModal({
       const form = new FormData();
       form.append("file", new File([pdf], file.name.replace(/\.[^.]+$/, "") + ".pdf", { type: "application/pdf" }));
       if (title.trim()) form.append("title", title.trim());
-      const { notebook } = await api.upload<{ notebook: { id: string } }>(
-        "/api/my/personal-notebooks/upload", form,
-      );
+      const { notebook } = await api.upload<{ notebook: { id: string } }>(uploadUrl, form);
       setBusy("Reading pages…");
       const sizes = await readPageSizes(pdf);
       await api.post(`/api/notebooks/${notebook.id}/pages`, { pages: sizes });
@@ -135,7 +147,7 @@ export default function NewNotebookModal({
         ))}
       </div>
 
-      {destination.kind === "personal" && (
+      {canImport && (
         <>
           <label className="label-caps mb-2 mt-5 block text-pine/70">Or bring your own</label>
           <input

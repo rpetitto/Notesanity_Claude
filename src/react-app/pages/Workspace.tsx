@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckCheck, ChevronRight, Download, PanelLeft, Plus, Send, Undo2 } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, PanelLeft, Plus, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
@@ -241,18 +241,32 @@ export default function Workspace() {
   const { user } = useSession();
   const goBack = useBackTo("/work");
 
-  // A teacher has no student instance of their own notebook, so opening the
-  // student workspace directly would dead-end. Send them to the editor instead.
+  /**
+   * Which kind of notebook this is decides where a teacher belongs.
+   *
+   * A teacher has no instance of their own class notebook, so opening the
+   * student workspace on one would dead-end — they go to the editor. A
+   * student's own notebook is the opposite case: there is nothing for them to
+   * edit, and the workspace is exactly the right place to read it.
+   */
+  const isTeacherRole = user?.role === "teacher";
+  const metaQuery = useQuery({
+    queryKey: ["notebook-meta", notebookId],
+    queryFn: () => api.get<{ notebook: { kind?: string } }>(`/api/notebooks/${notebookId}`),
+    enabled: !!notebookId && isTeacherRole,
+  });
+  const studentOwned = metaQuery.data?.notebook.kind === "student";
+
   useEffect(() => {
-    if (user?.role === "teacher" && notebookId) {
+    if (isTeacherRole && notebookId && metaQuery.data && !studentOwned) {
       navigate(`/notebooks/${notebookId}/edit`, { replace: true });
     }
-  }, [user?.role, notebookId, navigate]);
+  }, [isTeacherRole, studentOwned, metaQuery.data, notebookId, navigate]);
 
   const workQuery = useQuery({
     queryKey: ["work", notebookId],
     queryFn: () => api.get<WorkResponse>(`/api/notebooks/${notebookId}/work`),
-    enabled: !!notebookId && user?.role !== "teacher",
+    enabled: !!notebookId && (!isTeacherRole || studentOwned),
   });
 
   const assignmentQuery = useQuery({
@@ -270,13 +284,16 @@ export default function Workspace() {
    * marked, until a teacher reopens it.
    */
   const locked = Boolean(submission?.locked);
+  // A teacher reading a student's own notebook. Not "locked" — nothing was
+  // handed in — just not theirs to write in.
+  const readOnly = Boolean(data?.readOnly);
   const marked = Boolean(submission?.returnedAt);
   // Taking work back is only honest while nobody has marked it yet.
   const canUnsubmit = locked && !marked && !submission?.graded;
 
   const work = useNotebookWork({
     notebookId,
-    writeTarget: locked ? null : "student",
+    writeTarget: locked || readOnly ? null : "student",
     data,
   });
 
@@ -523,6 +540,12 @@ export default function Workspace() {
         </div>
       </header>
 
+      {readOnly && (
+        <div className="flex items-center gap-2 border-b-2 border-pine/15 bg-oat px-4 py-2 text-[16px] text-pine/80">
+          <Eye className="h-4 w-4" strokeWidth={2.5} />
+          {data.student?.name ? `${data.student.name}'s own notebook` : "A student's own notebook"} — you can read it, but it isn't yours to write in or assign.
+        </div>
+      )}
       {locked && !marked && (
         <div className="flex items-center gap-2 border-b-2 border-[#8a6a1f]/40 bg-[#f7e6bf] px-4 py-2 text-[16px] text-[#5c4611]">
           <Check className="h-4 w-4" strokeWidth={2.5} />
@@ -548,7 +571,10 @@ export default function Workspace() {
         </div>
       )}
 
-      {!locked && (
+      {/* No pen where there is nothing to write on: handed-in work, or someone
+          else's notebook. Offering a tool that silently does nothing is worse
+          than not offering it. */}
+      {!locked && !readOnly && (
         <div className="overflow-x-auto">
           <InkToolbar
             tool={tool}
@@ -648,7 +674,7 @@ export default function Workspace() {
             teacherLayers={work.teacherLayers}
           masterLayers={masterLayers}
             fieldValues={work.fieldValues}
-            writeTarget={locked ? null : "student"}
+            writeTarget={locked || readOnly ? null : "student"}
             tool={tool}
             fingerDraw={fingerDraw}
             zoom={zoom}

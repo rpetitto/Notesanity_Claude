@@ -128,6 +128,8 @@ export interface WorkResponse {
   values: { field_id: string; value: string }[];
   student: { id: string; name: string; email: string; picture?: string | null };
   isTeacher: boolean;
+  /** Set when the viewer may read this notebook but not write in it. */
+  readOnly?: boolean;
 }
 
 export interface AssignmentSummary {

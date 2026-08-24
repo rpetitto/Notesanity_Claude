@@ -32,8 +32,10 @@ async function uniqueJoinCode(): Promise<string> {
  * flag the enrollment so the teacher gets the assignment-backfill prompt.
  */
 async function provisionForStudent(classId: string, studentId: string) {
+  // Only the teacher's own notebooks are pushed out. A student-made notebook
+  // lives in the class but is not part of it: nobody else gets a copy.
   const notebooks = await db
-    .prepare(`SELECT id FROM notebooks WHERE class_id = ? AND status = 'published'`)
+    .prepare(`SELECT id FROM notebooks WHERE class_id = ? AND status = 'published' AND kind = 'class'`)
     .bind(classId)
     .all<{ id: string }>();
   for (const nb of notebooks.results ?? []) {
@@ -178,18 +180,24 @@ app.get("/api/classes/:id", handler(async (c) => {
     .all();
   const notebooks = await db
     .prepare(
-      `SELECT n.id, n.title, n.status, n.page_count, n.updated_at,
+      `SELECT n.id, n.title, n.status, n.page_count, n.updated_at, n.kind, n.owner_id,
+              u.name AS owner_name,
               n.accent_color, n.cover_key IS NOT NULL AS has_cover,
               p.id AS first_page_id, p.asset_key AS first_asset_key,
               p.source_index AS first_source_index, p.width AS first_width, p.height AS first_height,
               p.pattern AS first_pattern, p.pattern_color AS first_pattern_color
          FROM notebooks n
+         LEFT JOIN users u ON u.id = n.owner_id
          LEFT JOIN pages p ON p.id = (
            SELECT id FROM pages WHERE notebook_id = n.id AND archived = 0 ORDER BY seq LIMIT 1
          )
-        WHERE n.class_id = ? ORDER BY n.created_at DESC`,
+        WHERE n.class_id = ?
+          -- A student's own notebook is theirs and their teacher's to see;
+          -- classmates never see each other's.
+          AND (n.kind = 'class' OR ? = 1 OR n.owner_id = ?)
+        ORDER BY n.created_at DESC`,
     )
-    .bind(classId)
+    .bind(classId, isTeacher ? 1 : 0, user.id)
     .all();
 
   const teachers = await db
