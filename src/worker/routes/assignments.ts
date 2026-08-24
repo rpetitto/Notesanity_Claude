@@ -28,37 +28,57 @@ async function loadAssignment(c: any, assignmentId: string) {
  */
 const HAS_INK = 24; // an empty layer still serialises to a few characters
 
-async function workSignal(
-  instanceId: string | null,
+/**
+ * The same signal for every student in a notebook at once, keyed by instance.
+ *
+ * Asking per student cost two round trips each, so a lecture section of 300 ran
+ * over six hundred queries to draw one status grid. The instances are reached
+ * through a subquery rather than a bound list of ids so that the number of
+ * parameters stays tied to the assignment's page count, not to the roster.
+ */
+async function workSignals(
+  notebookId: string,
   pageIds: string[],
-): Promise<{ started: boolean; lastWorkedAt: string | null }> {
-  if (!instanceId || pageIds.length === 0) return { started: false, lastWorkedAt: null };
+): Promise<Map<string, { started: boolean; lastWorkedAt: string | null }>> {
+  const signals = new Map<string, { started: boolean; lastWorkedAt: string | null }>();
+  if (pageIds.length === 0) return signals;
   const placeholders = pageIds.map(() => "?").join(",");
+
+  const record = (instanceId: string | null, t: string | null) => {
+    if (!instanceId || !t) return;
+    const prev = signals.get(instanceId);
+    // Latest of the two sources wins: ink and typing are equally "work".
+    if (!prev || !prev.lastWorkedAt || t > prev.lastWorkedAt) {
+      signals.set(instanceId, { started: true, lastWorkedAt: t });
+    }
+  };
 
   const ink = await db
     .prepare(
-      `SELECT MAX(updated_at) AS t FROM layers
-        WHERE instance_id = ? AND kind = 'student' AND LENGTH(data) > ${HAS_INK}
-          AND page_id IN (${placeholders})`,
+      `SELECT instance_id, MAX(updated_at) AS t FROM layers
+        WHERE instance_id IN (SELECT id FROM instances WHERE notebook_id = ?)
+          AND kind = 'student' AND LENGTH(data) > ${HAS_INK}
+          AND page_id IN (${placeholders})
+        GROUP BY instance_id`,
     )
-    .bind(instanceId, ...pageIds)
-    .first<{ t: string | null }>();
+    .bind(notebookId, ...pageIds)
+    .all<{ instance_id: string; t: string | null }>();
 
   const typed = await db
     .prepare(
-      `SELECT MAX(v.updated_at) AS t FROM field_values v
+      `SELECT v.instance_id, MAX(v.updated_at) AS t FROM field_values v
          JOIN fields f ON f.id = v.field_id
-        WHERE v.instance_id = ? AND f.archived = 0 AND f.page_id IN (${placeholders})
-          AND (TRIM(v.value) <> '' OR v.asset_key IS NOT NULL)`,
+        WHERE v.instance_id IN (SELECT id FROM instances WHERE notebook_id = ?)
+          AND f.archived = 0 AND f.page_id IN (${placeholders})
+          AND (TRIM(v.value) <> '' OR v.asset_key IS NOT NULL)
+        GROUP BY v.instance_id`,
     )
-    .bind(instanceId, ...pageIds)
-    .first<{ t: string | null }>();
+    .bind(notebookId, ...pageIds)
+    .all<{ instance_id: string; t: string | null }>();
 
-  const times = [ink?.t, typed?.t].filter(Boolean) as string[];
-  return {
-    started: times.length > 0,
-    lastWorkedAt: times.length ? times.sort()[times.length - 1] : null,
-  };
+  for (const r of ink.results ?? []) record(r.instance_id, r.t);
+  for (const r of typed.results ?? []) record(r.instance_id, r.t);
+  return signals;
 }
 
 app.get("/api/classes/:id/assignments", handler(async (c) => {
@@ -311,17 +331,31 @@ app.get("/api/assignments/:id", handler(async (c) => {
     .bind(a.class_id)
     .all<any>();
 
+  // Everything the grid needs is fetched for the whole roster at once. Reading
+  // it per student turned a 30-name class into 67 queries and a 300-name one
+  // into 609; these four cost the same whatever the roster size.
+  const submissions = await db
+    .prepare(`SELECT * FROM submissions WHERE assignment_id = ?`)
+    .bind(a.id)
+    .all<any>();
+  const subByStudent = new Map<string, any>();
+  for (const s of submissions.results ?? []) subByStudent.set(s.student_id, s);
+
+  const instances = await db
+    .prepare(`SELECT id, student_id FROM instances WHERE notebook_id = ?`)
+    .bind(a.notebook_id)
+    .all<{ id: string; student_id: string }>();
+  const instanceByStudent = new Map<string, string>();
+  for (const i of instances.results ?? []) instanceByStudent.set(i.student_id, i.id);
+
+  const signals = await workSignals(a.notebook_id, pageIds);
+
   const rows = [];
   for (const s of roster.results ?? []) {
-    const sub = await db
-      .prepare(`SELECT * FROM submissions WHERE assignment_id = ? AND student_id = ?`)
-      .bind(a.id, s.id)
-      .first<any>();
-    const inst = await db
-      .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
-      .bind(a.notebook_id, s.id)
-      .first<{ id: string }>();
-    const { started, lastWorkedAt } = await workSignal(inst?.id ?? null, pageIds);
+    const sub = subByStudent.get(s.id);
+    const instanceId = instanceByStudent.get(s.id);
+    const { started, lastWorkedAt } = (instanceId ? signals.get(instanceId) : undefined)
+      ?? { started: false, lastWorkedAt: null };
     let status = sub?.status ?? "not_started";
     if (status === "not_started" && started) status = "in_progress";
     rows.push({
