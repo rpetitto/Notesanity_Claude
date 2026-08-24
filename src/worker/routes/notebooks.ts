@@ -373,6 +373,11 @@ async function deletePages(notebookId: string, pageIds: string[]) {
       .bind(pid)
       .run();
     await db.prepare(`DELETE FROM fields WHERE page_id = ?`).bind(pid).run();
+    // Chunks first: they are reached through the layer row that is about to go.
+    await db
+      .prepare(`DELETE FROM layer_chunks WHERE layer_id IN (SELECT id FROM layers WHERE page_id = ?)`)
+      .bind(pid)
+      .run();
     await db.prepare(`DELETE FROM layers WHERE page_id = ?`).bind(pid).run();
     await db.prepare(`DELETE FROM pages WHERE id = ?`).bind(pid).run();
 
@@ -946,6 +951,10 @@ app.delete("/api/my/personal-notebooks/:id", handler(async (c) => {
   if (!nb) throw new HttpError(404, "Notebook not found");
   const instances = await db.prepare(`SELECT id FROM instances WHERE notebook_id = ?`).bind(nb.id).all<any>();
   for (const inst of instances.results ?? []) {
+    await db
+      .prepare(`DELETE FROM layer_chunks WHERE layer_id IN (SELECT id FROM layers WHERE instance_id = ?)`)
+      .bind(inst.id)
+      .run();
     await db.prepare(`DELETE FROM layers WHERE instance_id = ?`).bind(inst.id).run();
     await db.prepare(`DELETE FROM field_values WHERE instance_id = ?`).bind(inst.id).run();
   }

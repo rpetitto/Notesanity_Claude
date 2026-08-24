@@ -580,3 +580,29 @@ migrate("016_mail_queue", async () => {
   `).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_mailqueue_pending ON mail_queue(status, created_at)`).run();
 });
+
+/**
+ * Overflow chunks for a page's ink.
+ *
+ * A layer used to be one TEXT column, so adding a single stroke rewrote every
+ * stroke already on the page — around 107 KB a save on a dense page, and the
+ * reason a page had to be capped at all. The strokes are now split across rows
+ * of a fixed size: an append rewrites only the last one.
+ *
+ * `layers.data` stays the first chunk and keeps the text, stamps and comments,
+ * which means every row written before this migration is already a valid
+ * chunk 0 and nothing has to be converted. That matters more than elegance
+ * here — the data being migrated would be student work, which has no backup.
+ */
+migrate("017_layer_chunks", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS layer_chunks (
+      id TEXT PRIMARY KEY,
+      layer_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      data TEXT NOT NULL DEFAULT '',
+      UNIQUE(layer_id, seq)
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_layer_chunks_layer ON layer_chunks(layer_id, seq)`).run();
+});
