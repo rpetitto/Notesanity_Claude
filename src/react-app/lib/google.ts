@@ -204,8 +204,12 @@ export async function convertToPdf(file: File, onProgress?: (msg: string) => voi
  */
 const APP_ID = CLIENT_ID.split("-")[0] ?? "";
 
-/** Optional: only some Picker views require it, but Drive views are happier with it. */
+/**
+ * The Picker needs its own API key alongside the OAuth token — it is one of the
+ * four things `PickerBuilder` is documented to take, not an optional extra.
+ */
 const API_KEY = (import.meta.env.VITE_GOOGLE_API_KEY as string | undefined) ?? "";
+export const hasDrivePicker = Boolean(CLIENT_ID && API_KEY);
 
 export interface DriveFile {
   id: string;
@@ -249,6 +253,11 @@ function loadPicker(): Promise<void> {
  * Resolves to null when the picker is closed without choosing.
  */
 export async function pickDriveFile(): Promise<DriveFile | null> {
+  if (!API_KEY) {
+    throw new Error(
+      "Google Drive picking isn't configured yet — set VITE_GOOGLE_API_KEY to a Google Cloud API key with the Picker API enabled, then redeploy.",
+    );
+  }
   const token = await getToken(DRIVE_SCOPES);
   await loadPicker();
   const picker = window.google.picker;
@@ -273,8 +282,7 @@ export async function pickDriveFile(): Promise<DriveFile | null> {
           resolve(null);
         }
       });
-    if (API_KEY) builder.setDeveloperKey(API_KEY);
-    builder.build().setVisible(true);
+    builder.setDeveloperKey(API_KEY).build().setVisible(true);
   });
 }
 

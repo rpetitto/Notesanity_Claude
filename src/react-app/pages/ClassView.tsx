@@ -16,7 +16,7 @@ import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
-import { driveFileAsPdf, hasGoogleClientId, pickDriveFile } from "../lib/google";
+import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
 const SWATCHES = [
@@ -983,7 +983,7 @@ export default function ClassView() {
                   <Plus className="h-4 w-4" strokeWidth={2.5} />
                   Start from blank
                 </Button>
-                {hasGoogleClientId && (
+                {hasDrivePicker && (
                   <Button type="button" variant="secondary" onClick={() => void importFromDrive()} disabled={!!driveBusy}>
                     <FolderOpen className="h-4 w-4" strokeWidth={2.5} />
                     {driveBusy || "From Google Drive"}
