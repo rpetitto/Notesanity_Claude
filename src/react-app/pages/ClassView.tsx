@@ -748,6 +748,30 @@ export default function ClassView() {
 
   const isTeacher = classQ.data?.myRole === "teacher";
 
+  /**
+   * The three ways to start a notebook, defined once and rendered in two
+   * places — above the grid, or inside the empty card when there is no grid
+   * yet. Two sources would drift the moment one of them gained an option.
+   */
+  const notebookActions = (
+    <>
+      <Button type="button" variant="secondary" onClick={() => setNewNotebookOpen(true)}>
+        <Plus className="h-4 w-4" strokeWidth={2.5} />
+        Start from blank
+      </Button>
+      <Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}>
+        <Upload className="h-4 w-4" strokeWidth={2.5} />
+        Choose a file
+      </Button>
+      {hasDrivePicker && (
+        <Button type="button" variant="primary" onClick={() => void importFromDrive()} disabled={!!driveBusy}>
+          <FolderOpen className="h-4 w-4" strokeWidth={2.5} />
+          {driveBusy || "From Google Drive"}
+        </Button>
+      )}
+    </>
+  );
+
   // The server already decides who may see which of these; splitting them here
   // is only about where they sit on the page.
   const allNotebooks = useMemo(() => classQ.data?.notebooks ?? [], [classQ.data]);
@@ -820,7 +844,14 @@ export default function ClassView() {
       const file = new File([blob], `${base}.pdf`, { type: "application/pdf" });
       navigate(`/classes/${id}/upload`, { state: { file } });
     } catch (e) {
-      toast.error((e as Error).message);
+      const m = (e as Error).message;
+      // The likeliest cause by far is the Picker API not being enabled for the
+      // school's Google project, so say so rather than showing a bare code.
+      toast.error(
+        /picker|api key|developer key|403/i.test(m)
+          ? "Couldn't open Google Drive. Notesanity's Google project needs the Picker API enabled (and an API key set)."
+          : m,
+      );
     } finally {
       setDriveBusy("");
     }
@@ -970,37 +1001,30 @@ export default function ClassView() {
       {tab === "notebooks" && (
         <div className="space-y-8">
           <section>
+            {/* One input for both places the buttons appear, so it can't fall
+                out of the tree when the toolbar above the grid is hidden. */}
             {isTeacher && (
-              <div className="mb-4 flex flex-wrap justify-end gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.docx,.pptx,application/pdf"
-                  className="hidden"
-                  onChange={onFileChosen}
-                />
-                <Button type="button" variant="secondary" onClick={() => setNewNotebookOpen(true)}>
-                  <Plus className="h-4 w-4" strokeWidth={2.5} />
-                  Start from blank
-                </Button>
-                {hasDrivePicker && (
-                  <Button type="button" variant="secondary" onClick={() => void importFromDrive()} disabled={!!driveBusy}>
-                    <FolderOpen className="h-4 w-4" strokeWidth={2.5} />
-                    {driveBusy || "From Google Drive"}
-                  </Button>
-                )}
-                <Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}>
-                  <Upload className="h-4 w-4" strokeWidth={2.5} />
-                  Upload notebook
-                </Button>
-              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.pptx,application/pdf"
+                className="hidden"
+                onChange={onFileChosen}
+              />
+            )}
+            {/* With no notebooks the same actions sit inside the empty card,
+                where a teacher is already looking — repeating them above it
+                would just be the same row twice. */}
+            {isTeacher && classNotebooks.length > 0 && (
+              <div className="mb-4 flex flex-wrap justify-end gap-2">{notebookActions}</div>
             )}
             {classNotebooks.length === 0 ? (
               <EmptyState
                 title="No notebooks yet"
                 body={isTeacher
-                  ? "Upload a PDF, Word, or PowerPoint file to build your first notebook."
+                  ? "Start from blank paper, or build one from a PDF, Word or PowerPoint file — yours or one in your Drive."
                   : "Your teacher hasn't shared a notebook with this class yet."}
+                action={isTeacher ? <div className="flex flex-wrap justify-center gap-2">{notebookActions}</div> : undefined}
               />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

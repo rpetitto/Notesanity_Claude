@@ -65,7 +65,13 @@ export const TEMPLATES: NotebookTemplate[] = [
   },
 ];
 
-/** Guards how many pages one request may create, template or not. */
-export const MAX_TEMPLATE_PAGES = 200;
+/**
+ * Guards how many pages one request may create, template or not.
+ *
+ * Matches the ceiling the new-notebook dialogue offers: the client stopping at
+ * a hundred is a courtesy, this is the rule. More pages are added from inside
+ * the notebook, which is a separate limit.
+ */
+export const MAX_TEMPLATE_PAGES = 100;
 
 export const templateFor = (key: string) => TEMPLATES.find((t) => t.key === key) ?? null;

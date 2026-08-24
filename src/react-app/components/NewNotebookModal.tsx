@@ -2,33 +2,33 @@
  * Starting a notebook without a document to import.
  *
  * The same dialogue serves a teacher building a class notebook and a student
- * starting their own, because the choice is identical: pick the paper, or bring
- * a PDF. Only the destination differs, which the caller supplies.
+ * starting their own, because the choice is identical: pick the paper and say
+ * how much of it, or bring a PDF. Only the destination differs, which the
+ * caller supplies.
  *
- * Templates are fetched rather than hard-coded — the server already holds the
- * catalogue, and two copies would drift.
+ * Paper and length are chosen separately rather than bundled into fixed
+ * templates. A ruling and a page count are independent decisions, and pairing
+ * them meant "lined" only ever came as a hundred pages and "music" only ever as
+ * thirty — a teacher wanting eight pages of staves had no way to say so.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button, Input, Modal } from "./ui";
-import { Spinner } from "./Shell";
 import { api } from "../lib/api";
-import { renderPatternToCanvas, type PatternKey } from "../lib/patterns";
+import {
+  PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
+  renderPatternToCanvas, type PatternKey,
+} from "../lib/patterns";
 import { convertToPdf, needsConversion } from "../lib/google";
 import { readPageSizes } from "../lib/pdf";
 import { cn } from "../lib/utils";
 
-interface Template {
-  key: string;
-  label: string;
-  description: string;
-  pages: number;
-  pattern: string;
-  color: string;
-}
+/** The most pages one new notebook may start with. Mirrored on the server. */
+const MAX_PAGES = 100;
+const DEFAULT_PAGES = 50;
 
 /** A sample of the paper, drawn with the code that paints the real page. */
 function Sample({ pattern, color, width = 58 }: { pattern: string; color: string; width?: number }) {
@@ -54,17 +54,17 @@ export default function NewNotebookModal({
   onClose: () => void;
   onCreated: (notebookId: string) => void;
 }) {
-  const [selected, setSelected] = useState<string>("");
+  const [pattern, setPattern] = useState<PatternKey>(DEFAULT_PATTERN);
+  const [color, setColor] = useState(DEFAULT_PATTERN_COLOR);
+  // Held as text so the field can be empty while being retyped, rather than
+  // snapping back to a number under the cursor.
+  const [pages, setPages] = useState(String(DEFAULT_PAGES));
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const templatesQ = useQuery({
-    queryKey: ["notebook-templates"],
-    queryFn: () => api.get<{ templates: Template[] }>("/api/notebook-templates"),
-  });
-  const templates = templatesQ.data?.templates ?? [];
-  const chosen = templates.find((t) => t.key === selected);
+  const count = Math.floor(Number(pages));
+  const countValid = Number.isFinite(count) && count >= 1 && count <= MAX_PAGES;
 
   const createUrl =
     destination.kind === "class" ? `/api/classes/${destination.classId}/notebooks/blank`
@@ -81,7 +81,12 @@ export default function NewNotebookModal({
 
   const create = useMutation({
     mutationFn: () =>
-      api.post<{ notebook: { id: string } }>(createUrl, { template: selected, title: title.trim() || undefined }),
+      api.post<{ notebook: { id: string } }>(createUrl, {
+        title: title.trim() || undefined,
+        pattern,
+        color,
+        pages: count,
+      }),
     onSuccess: (res) => onCreated(res.notebook.id),
     onError: (e: Error) => toast.error(e.message),
   });
@@ -89,7 +94,7 @@ export default function NewNotebookModal({
   /**
    * Importing a PDF is a three-step dance: the file may need converting, the
    * upload creates the notebook, then the client reads the page sizes and
-   * creates the page records. Only the last two apply to a personal notebook.
+   * creates the page records.
    */
   const importPdf = async (file: File) => {
     try {
@@ -121,30 +126,66 @@ export default function NewNotebookModal({
         id="nb-title"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder={chosen?.label ?? "My notebook"}
+        placeholder="My notebook"
       />
 
-      <label className="label-caps mb-2 mt-5 block text-pine/70">Start from</label>
-      {templatesQ.isLoading && <Spinner />}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {templates.map((t) => (
+      <label className="label-caps mb-2 mt-5 block text-pine/70">Paper</label>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+        {PATTERNS.map((p) => (
           <button
-            key={t.key}
+            key={p.key}
             type="button"
-            onClick={() => setSelected(t.key)}
-            aria-pressed={selected === t.key}
+            onClick={() => setPattern(p.key)}
+            aria-pressed={pattern === p.key}
             className={cn(
               "flex flex-col items-center gap-1.5 rounded-[12px] border-2 p-2 text-center transition-colors",
-              selected === t.key ? "border-pine bg-mint/25" : "border-pine/20 hover:bg-oat",
+              pattern === p.key ? "border-pine bg-mint/25" : "border-pine/20 hover:bg-oat",
             )}
           >
             <span className="overflow-hidden rounded-[3px] border border-pine/25">
-              <Sample pattern={t.pattern} color={t.color} />
+              <Sample pattern={p.key} color={color} />
             </span>
-            <span className="text-[15px] font-bold leading-tight text-pine">{t.label}</span>
-            <span className="text-[14px] leading-tight text-pine/60">{t.pages} pages</span>
+            <span className="text-[15px] font-bold leading-tight text-pine">{p.label}</span>
+            <span className="text-[14px] leading-tight text-pine/60">{p.hint}</span>
           </button>
         ))}
+      </div>
+
+      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule colour</label>
+      <div className="flex flex-wrap gap-2">
+        {PATTERN_COLORS.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setColor(c.value)}
+            aria-label={c.label}
+            aria-pressed={color === c.value}
+            title={c.label}
+            className={cn(
+              "h-11 w-11 rounded-full border-2 transition-transform",
+              color === c.value ? "scale-110 border-pine" : "border-pine/25 hover:scale-105",
+            )}
+            style={{ background: c.value }}
+          />
+        ))}
+      </div>
+
+      <label className="label-caps mb-2 mt-5 block text-pine/70" htmlFor="nb-pages">Pages</label>
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          id="nb-pages"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={MAX_PAGES}
+          value={pages}
+          onChange={(e) => setPages(e.target.value)}
+          className="w-28"
+          aria-describedby="nb-pages-hint"
+        />
+        <span id="nb-pages-hint" className={cn("text-[16px]", countValid ? "text-pine/65" : "text-[#a3341f]")}>
+          {countValid ? `1 to ${MAX_PAGES} — you can add more later.` : `Enter a number from 1 to ${MAX_PAGES}.`}
+        </span>
       </div>
 
       {canImport && (
@@ -171,10 +212,10 @@ export default function NewNotebookModal({
         <Button variant="secondary" onClick={onClose} disabled={create.isPending || !!busy}>Cancel</Button>
         <Button
           variant="primary"
-          disabled={!selected || create.isPending || !!busy}
+          disabled={!countValid || create.isPending || !!busy}
           onClick={() => create.mutate()}
         >
-          {create.isPending ? "Creating…" : chosen ? `Create ${chosen.pages} pages` : "Create"}
+          {create.isPending ? "Creating…" : `Create ${countValid ? count : ""} page${count === 1 ? "" : "s"}`}
         </Button>
       </div>
     </Modal>
