@@ -120,7 +120,7 @@ export interface LayerRec {
 }
 
 export interface WorkResponse {
-  notebook: { id: string; title: string; classId: string; kind?: "class" | "personal" };
+  notebook: { id: string; title: string; classId: string; kind?: "class" | "personal" | "student" };
   instanceId: string;
   pages: PageRec[];
   fields: FieldRec[];

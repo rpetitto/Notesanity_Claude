@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, PanelLeft, Plus, Send, Undo2 } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, PanelLeft, Pencil, Plus, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
@@ -41,7 +41,7 @@ const RAIL_KEY = "notesanity:studentRail";
  * the two can't drift apart.
  */
 function PageRail({
-  pages, notebookId, visiblePage, assignedIds, onSelect,
+  pages, notebookId, visiblePage, assignedIds, onSelect, onEditPage, onRenameSection,
 }: {
   pages: PageRec[];
   notebookId: string;
@@ -49,6 +49,9 @@ function PageRail({
   /** When browsing the whole notebook, which pages the assignment actually covers. */
   assignedIds?: Set<string>;
   onSelect: (id: string) => void;
+  /** Only passed for a notebook the reader owns — theirs to name and arrange. */
+  onEditPage?: (page: PageRec) => void;
+  onRenameSection?: (name: string, pageIds: string[]) => void;
 }) {
   // Consecutive runs, not a group-by: a section is a stretch of the notebook,
   // and the same name appearing twice is two stretches, not one.
@@ -66,7 +69,7 @@ function PageRail({
     const scoped = !!assignedIds;
     const assigned = assignedIds?.has(page.id) ?? false;
     const faded = scoped && !assigned;
-    return (
+    const body = (
       <button
         key={page.id}
         type="button"
@@ -97,6 +100,23 @@ function PageRail({
         </span>
       </button>
     );
+
+    // Nested inside a row would put a button inside a button, so the two sit
+    // side by side and the row keeps its own hit area.
+    if (!onEditPage) return body;
+    return (
+      <div key={page.id} className="group/row relative">
+        {body}
+        <button
+          type="button"
+          onClick={() => onEditPage(page)}
+          aria-label={`Rename or file ${page.label || `page ${number}`}`}
+          className="absolute right-1 top-1 flex h-9 w-9 items-center justify-center rounded-full text-pine/55 opacity-0 transition-opacity hover:bg-pine/10 hover:text-pine focus:opacity-100 group-hover/row:opacity-100"
+        >
+          <Pencil className="h-3.5 w-3.5" strokeWidth={2.5} />
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -109,6 +129,16 @@ function PageRail({
           <div key={`${section.name}-${si}`} className="mb-2 rounded-xl border border-pine/20 bg-oat/60 p-1.5">
             <div className="mb-1 flex items-center gap-1 px-1">
               <span className="label-caps min-w-0 flex-1 truncate text-pine/80">{section.name}</span>
+              {onRenameSection && (
+                <button
+                  type="button"
+                  onClick={() => onRenameSection(section.name, section.pages.map((p) => p.page.id))}
+                  aria-label={`Rename section ${section.name}`}
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-pine/55 hover:bg-pine/10 hover:text-pine"
+                >
+                  <Pencil className="h-3.5 w-3.5" strokeWidth={2.5} />
+                </button>
+              )}
               <span className="text-[16px] text-pine/55">{section.pages.length}</span>
             </div>
             {section.pages.map(row)}
@@ -116,6 +146,87 @@ function PageRail({
         ),
       )}
     </div>
+  );
+}
+
+
+/**
+ * Naming a page and filing it under a section, in one dialogue.
+ *
+ * The two belong together: a section here is just a name shared by a run of
+ * consecutive pages, so "put this page in Week 2" and "call this page Cube
+ * studies" are the same kind of edit and shouldn't be two separate trips.
+ * Existing sections are offered as suggestions rather than a fixed list, so a
+ * new one costs no more than typing it.
+ */
+function PageOptionsModal({
+  page, number, sections, busy, onClose, onSave,
+}: {
+  page: PageRec;
+  number: number;
+  sections: string[];
+  busy: boolean;
+  onClose: () => void;
+  onSave: (v: { label: string; groupName: string }) => void;
+}) {
+  const [label, setLabel] = useState(page.label ?? "");
+  const [group, setGroup] = useState(page.group_name ?? "");
+  return (
+    <Modal onClose={onClose} title={`Page ${number}`}>
+      <label className="label-caps mb-1 block text-pine/70" htmlFor="pg-label">Name</label>
+      <Input
+        id="pg-label"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        placeholder={`Page ${number}`}
+        autoFocus
+      />
+
+      <label className="label-caps mb-1 mt-5 block text-pine/70" htmlFor="pg-section">Section</label>
+      <Input
+        id="pg-section"
+        value={group}
+        onChange={(e) => setGroup(e.target.value)}
+        list="pg-sections"
+        placeholder="No section"
+      />
+      <datalist id="pg-sections">
+        {sections.map((sname) => <option key={sname} value={sname} />)}
+      </datalist>
+      <p className="mt-2 text-[16px] text-pine/65">
+        Pages next to each other with the same section name are grouped together. Leave it empty to take this page out of its section.
+      </p>
+
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="primary" onClick={() => onSave({ label: label.trim(), groupName: group.trim() })} disabled={busy}>
+          {busy ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Renaming a whole run of pages at once, so a section isn't retyped per page. */
+function SectionRenameModal({
+  name, count, busy, onClose, onSave,
+}: { name: string; count: number; busy: boolean; onClose: () => void; onSave: (v: string) => void }) {
+  const [value, setValue] = useState(name);
+  return (
+    <Modal onClose={onClose} title="Rename section">
+      <p className="mb-3 text-[16px] text-pine/70">
+        {count} page{count === 1 ? "" : "s"} are in this section.
+      </p>
+      <label className="label-caps mb-1 block text-pine/70" htmlFor="sec-name">Name</label>
+      <Input id="sec-name" value={value} onChange={(e) => setValue(e.target.value)} autoFocus placeholder="Week 1" />
+      <p className="mt-2 text-[16px] text-pine/65">Clearing the name takes these pages out of the section.</p>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="primary" onClick={() => onSave(value.trim())} disabled={busy}>
+          {busy ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -287,6 +398,42 @@ export default function Workspace() {
   // A teacher reading a student's own notebook. Not "locked" — nothing was
   // handed in — just not theirs to write in.
   const readOnly = Boolean(data?.readOnly);
+
+  /**
+   * Naming and sectioning belongs to whoever owns the notebook. That is the
+   * student in their own book, and nobody in a notebook the teacher built —
+   * there the pages are the teacher's, and the server refuses anyway.
+   */
+  const ownsNotebook =
+    !readOnly && (data?.notebook.kind === "personal" || data?.notebook.kind === "student");
+
+  const [editingPage, setEditingPage] = useState<PageRec | null>(null);
+  const [editingSection, setEditingSection] = useState<{ name: string; pageIds: string[] } | null>(null);
+
+
+  const savePage = useMutation({
+    mutationFn: (v: { label: string; groupName: string }) =>
+      api.patch(`/api/notebooks/${notebookId}/pages/${editingPage!.id}`, v),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["work", notebookId] });
+      setEditingPage(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const saveSection = useMutation({
+    mutationFn: (name: string) =>
+      api.post(`/api/notebooks/${notebookId}/pages/bulk`, {
+        pageIds: editingSection!.pageIds,
+        action: name ? "group" : "ungroup",
+        groupName: name,
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["work", notebookId] });
+      setEditingSection(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const marked = Boolean(submission?.returnedAt);
   // Taking work back is only honest while nobody has marked it yet.
   const canUnsubmit = locked && !marked && !submission?.graded;
@@ -359,6 +506,11 @@ export default function Workspace() {
     if (!assignedIds.size || showAllPages) return all;
     return all.filter((p) => assignedIds.has(p.id));
   }, [data?.pages, assignedIds, showAllPages]);
+
+  const sectionNames = useMemo(
+    () => Array.from(new Set(pages.map((p) => p.group_name ?? "").filter(Boolean))),
+    [pages],
+  );
 
   useEffect(() => {
     if (!visiblePage && pages[0]) setVisiblePage(pages[0].id);
@@ -540,6 +692,27 @@ export default function Workspace() {
         </div>
       </header>
 
+      {editingPage && (
+        <PageOptionsModal
+          page={editingPage}
+          number={pages.findIndex((p) => p.id === editingPage.id) + 1}
+          sections={sectionNames}
+          busy={savePage.isPending}
+          onClose={() => setEditingPage(null)}
+          onSave={(v) => savePage.mutate(v)}
+        />
+      )}
+
+      {editingSection && (
+        <SectionRenameModal
+          name={editingSection.name}
+          count={editingSection.pageIds.length}
+          busy={saveSection.isPending}
+          onClose={() => setEditingSection(null)}
+          onSave={(v) => saveSection.mutate(v)}
+        />
+      )}
+
       {readOnly && (
         <div className="flex items-center gap-2 border-b-2 border-pine/15 bg-oat px-4 py-2 text-[16px] text-pine/80">
           <Eye className="h-4 w-4" strokeWidth={2.5} />
@@ -635,6 +808,8 @@ export default function Workspace() {
               visiblePage={visiblePage}
               assignedIds={showAllPages ? assignedIds : undefined}
               onSelect={goToPage}
+              onEditPage={ownsNotebook ? setEditingPage : undefined}
+              onRenameSection={ownsNotebook ? (name, pageIds) => setEditingSection({ name, pageIds }) : undefined}
             />
           </aside>
         </div>
@@ -652,6 +827,8 @@ export default function Workspace() {
               visiblePage={visiblePage}
               assignedIds={showAllPages ? assignedIds : undefined}
               onSelect={goToPage}
+              onEditPage={ownsNotebook ? setEditingPage : undefined}
+              onRenameSection={ownsNotebook ? (name, pageIds) => setEditingSection({ name, pageIds }) : undefined}
             />
           </aside>
         )}
