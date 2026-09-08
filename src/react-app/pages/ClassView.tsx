@@ -24,7 +24,7 @@ const SWATCHES = [
   "#D9A441", "#A3341F", "#4F7A3A",
 ];
 
-/** Local view of an assignment row that also carries the notebook's colour, since
+/** Local view of an assignment row that also carries the notebook's color, since
  * `AssignmentSummary` (shared with other owners' code) doesn't declare it. */
 type ClassAssignmentRow = AssignmentSummary & Partial<AssignmentCardData>;
 
@@ -300,7 +300,7 @@ function CoTeacherModal({ classId, onClose }: { classId: string; onClose: () => 
   );
 }
 
-/** Emoji, accent colour and a featured banner image for the class header and tiles everywhere. */
+/** Emoji, accent color and a featured banner image for the class header and tiles everywhere. */
 function CustomizeModal({
   classId,
   cls,
@@ -402,7 +402,7 @@ function CustomizeModal({
       </div>
 
       <div className="mb-5">
-        <Label>Colour</Label>
+        <Label>Color</Label>
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           {SWATCHES.map((c) => (
             <button
@@ -418,7 +418,7 @@ function CustomizeModal({
             />
           ))}
           <label
-            title="Custom colour"
+            title="Custom color"
             className="relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-pine/40 text-pine/60 hover:bg-oat"
           >
             <Palette className="h-4 w-4" strokeWidth={2.5} />
@@ -1109,7 +1109,7 @@ export default function ClassView() {
                 counts={{
                   todo: studentBuckets.todo.length,
                   "handed-in": studentBuckets["handed-in"].length,
-                  marked: studentBuckets.marked.length,
+                  graded: studentBuckets.graded.length,
                 }}
               />
               {studentBuckets[workTab].length === 0 ? (

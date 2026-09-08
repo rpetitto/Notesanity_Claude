@@ -15,7 +15,7 @@ export type ToolKind = "pen" | "highlighter" | "eraser" | "text" | "stamp" | "co
 export interface Stroke {
   /** 'p' pen, 'h' highlighter */
   t: "p" | "h";
-  /** colour */
+  /** color */
   c: string;
   /** base width in page units */
   w: number;

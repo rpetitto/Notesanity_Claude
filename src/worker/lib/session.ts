@@ -141,7 +141,7 @@ export async function currentUser(c: Context): Promise<AppUser | null> {
   const org = await orgForDomain(domain);
 
   // Bootstrap: the first ever sign-in creates the school and becomes its
-  // admin. Once any school exists an unrecognised domain is refused rather
+  // admin. Once any school exists an unrecognized domain is refused rather
   // than quietly starting another one — a new district is provisioned
   // deliberately, not by whoever happens to sign in next.
   if (!org && (await noOrgsYet())) {

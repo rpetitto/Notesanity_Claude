@@ -35,7 +35,7 @@ export interface SendEmailResult {
  *
  * A throttled message is not a failed one: the queue leaves it pending and
  * doesn't spend one of its four attempts on the provider being busy. That
- * behaviour is keyed off this marker, so a rate limit from any provider has to
+ * behavior is keyed off this marker, so a rate limit from any provider has to
  * surface wearing it.
  */
 export const RATE_LIMIT_MARKER = "PLUGIN_RATE_LIMIT_EXCEEDED";

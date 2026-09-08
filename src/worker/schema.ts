@@ -236,7 +236,7 @@ migrate("001_core", async () => {
 
 /**
  * Page grouping — lets a teacher label runs of pages ("Warm-up", "Lab", "Homework")
- * in the notebook's page list. Purely organisational: grouping never moves a page
+ * in the notebook's page list. Purely organizational: grouping never moves a page
  * or touches the UUID student work is anchored to.
  */
 migrate("002_page_groups", async () => {
@@ -359,7 +359,7 @@ migrate("004_class_identity", async () => {
   }
 });
 
-/** Per-notebook cover styling: an accent colour and an optional uploaded image. */
+/** Per-notebook cover styling: an accent color and an optional uploaded image. */
 migrate("003_notebook_cover", async () => {
   const cols = await db.prepare(`PRAGMA table_info(notebooks)`).all<{ name: string }>();
   const has = (name: string) => (cols.results ?? []).some((c) => c.name === name);
@@ -376,7 +376,7 @@ migrate("003_notebook_cover", async () => {
  *
  * Accents were seeded with #1A73E8 before the brand existed; it clashes badly
  * with Pine and Oat. Anything still on the old default moves to the brand's
- * deep teal. A colour a teacher actually chose is left alone.
+ * deep teal. A color a teacher actually chose is left alone.
  */
 migrate("008_brand_accents", async () => {
   await db.prepare(`UPDATE classes SET accent_color = '#2E7D6B' WHERE accent_color = '#1A73E8'`).run();

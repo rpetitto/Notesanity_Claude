@@ -199,7 +199,8 @@ ${body}
       <div>
         <h4>Support</h4>
         <ul>
-          <li><a href="/help">Help centre</a></li>
+          <li><a href="/help">Help center</a></li>
+          <li><a href="/changelog">Changelog</a></li>
           <li><a href="mailto:support@notesanity.com">support@notesanity.com</a></li>
         </ul>
       </div>

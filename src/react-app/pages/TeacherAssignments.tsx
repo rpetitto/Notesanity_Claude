@@ -47,7 +47,7 @@ export interface AssignmentCardData {
   title: string;
   notebookId: string;
   notebookTitle: string;
-  /** The notebook's own accent colour — the assignment card's top strip and thumbnail tint borrow it. */
+  /** The notebook's own accent color — the assignment card's top strip and thumbnail tint borrow it. */
   notebookColor?: string;
   notebookHasCover?: boolean;
   pageCount: number;

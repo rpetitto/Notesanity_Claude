@@ -1,7 +1,7 @@
 /**
  * Starting points for a notebook with no source document.
  *
- * A template is just a recipe — how many pages, which ruling, what colour —
+ * A template is just a recipe — how many pages, which ruling, what color —
  * built with the same blank-page machinery a teacher already uses to insert
  * pages one at a time. Nothing is stored per template; picking one is a
  * shorthand for "make me these pages".

@@ -136,19 +136,19 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
   useEscapeClose(true, onClose);
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     listCourses()
       .then((list) => {
-        if (!cancelled) setCourses(list);
+        if (!canceled) setCourses(list);
       })
       .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+        if (!canceled) setError(err.message);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!canceled) setLoading(false);
       });
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, []);
 

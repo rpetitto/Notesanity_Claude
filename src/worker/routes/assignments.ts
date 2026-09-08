@@ -26,7 +26,7 @@ async function loadAssignment(c: any, assignmentId: string) {
  * Ink and typed answers count equally — annotating a diagram is work in the
  * same way that filling a box is.
  */
-const HAS_INK = 24; // an empty layer still serialises to a few characters
+const HAS_INK = 24; // an empty layer still serializes to a few characters
 
 /**
  * The same signal for every student in a notebook at once, keyed by instance.

@@ -1,7 +1,7 @@
 import { layout } from "../layout.mjs";
 
 /**
- * The help centre.
+ * The help center.
  *
  * Written from what the app actually does today, not from what it might do —
  * a help page that describes a feature which isn't there costs more support
@@ -23,13 +23,13 @@ const group = (title, items) => `
 export default () =>
   layout({
     path: "/help",
-    title: "Help centre",
+    title: "Help center",
     description:
-      "Answers about building notebooks, assigning work, marking, students' own notebooks, sign-in and offline behaviour in Notesanity.",
+      "Answers about building notebooks, assigning work, grading, students' own notebooks, sign-in and offline behavior in Notesanity.",
     body: `
 <section>
   <div class="wrap narrow">
-    <p class="eyebrow">Help centre</p>
+    <p class="eyebrow">Help center</p>
     <h1>How Notesanity works</h1>
     <p class="lede">
       Short answers to the questions we're asked most. Walkthrough videos and fuller
@@ -69,7 +69,7 @@ export default () =>
       [
         "What blank paper is there?",
         `Lined (wide or college), graph, dot grid, music staves, engineering, isometric, a
-         coordinate plane, or plain blank — in eight rule colours, and you choose how many
+         coordinate plane, or plain blank — in eight rule colors, and you choose how many
          pages, up to 100. You can add more pages at any time.`,
       ],
       [
@@ -79,14 +79,14 @@ export default () =>
          part of the page rather than something to answer.`,
       ],
       [
-        "Can I reorganise pages after students have started?",
+        "Can I reorganize pages after students have started?",
         `Yes. Pages carry a permanent identity, so renaming, regrouping and reordering them
          doesn't disturb work already written on them. Inserting a page inside a section keeps
          it in that section.`,
       ],
     ])}
 
-    ${group("Assigning and marking", [
+    ${group("Assigning and grading", [
       [
         "How do I set work?",
         `Create an assignment, choose which pages of the notebook it covers, set a due date and
@@ -94,15 +94,15 @@ export default () =>
          automatically, and you're asked which past assignments should apply to them.`,
       ],
       [
-        "How do I mark?",
+        "How do I grade?",
         `Open the assignment and move through the roster. You write on the student's page in your
          own layer — your marks and their work never mix. Add a comment, set a grade, and
          return it.`,
       ],
       [
         "Can a student change work after handing it in?",
-        `No. Handing in freezes the pages, and they stay frozen after marking, so nothing can be
-         altered after it's been seen. You can reopen a piece if a student needs another go —
+        `No. Handing in freezes the pages, and they stay frozen after grading, so nothing can be
+         altered after it's been graded. You can reopen a piece if a student needs another go —
          the grade you already gave is kept.`,
       ],
       [
@@ -125,7 +125,7 @@ export default () =>
          assignment, and classmates can't see it at all.`,
       ],
       [
-        "Can students name and organise their own pages?",
+        "Can students name and organize their own pages?",
         `In their own notebooks, yes: pages can be renamed and grouped into sections. In a
          notebook their teacher built, the pages belong to the teacher.`,
       ],
@@ -140,7 +140,7 @@ export default () =>
       ],
       [
         "What does the highlighter do differently?",
-        `If it recognises that you're highlighting along a line of text it snaps the stroke
+        `If it recognizes that you're highlighting along a line of text it snaps the stroke
          straight, so a highlight looks deliberate rather than hand-wobbled.`,
       ],
       [

@@ -211,7 +211,7 @@ export default function PageCanvas({
   useEffect(() => {
     const canvas = baseRef.current;
     if (!canvas) return;
-    const signal = { cancelled: false };
+    const signal = { canceled: false };
     setBaseReady(false);
     if (isPattern(pattern)) {
       renderPatternToCanvas(
@@ -222,9 +222,9 @@ export default function PageCanvas({
       return;
     }
     renderPageToCanvas(pdfUrl, sourceIndex, canvas, scale, DPR(), signal)
-      .then(() => { if (!signal.cancelled) setBaseReady(true); })
+      .then(() => { if (!signal.canceled) setBaseReady(true); })
       .catch((err) => console.error("PDF render failed", err));
-    return () => { signal.cancelled = true; };
+    return () => { signal.canceled = true; };
   }, [pdfUrl, sourceIndex, scale, pattern, patternColor, pageWidth, pageHeight]);
 
   // ---- Layer 3: committed ink ----
@@ -1151,12 +1151,12 @@ function responseUrl(notebookId: string, fieldId: string, studentId: string | un
 function useResponseProbe(url: string, nonce: number) {
   const [exists, setExists] = useState<boolean | null>(null);
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     setExists(null);
     fetch(url, { method: "HEAD", credentials: "same-origin" })
-      .then((res) => { if (!cancelled) setExists(res.ok); })
-      .catch(() => { if (!cancelled) setExists(false); });
-    return () => { cancelled = true; };
+      .then((res) => { if (!canceled) setExists(res.ok); })
+      .catch(() => { if (!canceled) setExists(false); });
+    return () => { canceled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, nonce]);
   return [exists, setExists] as const;

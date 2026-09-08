@@ -91,7 +91,7 @@ export default function InkToolbar({
             <button
               key={c}
               type="button"
-              aria-label={`Colour ${c}`}
+              aria-label={`Color ${c}`}
               onClick={() => onToolChange({ ...tool, color: c })}
               className={cn(
                 "h-6 w-6 rounded-full border-2 transition-transform",

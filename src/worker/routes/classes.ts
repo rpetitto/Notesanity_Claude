@@ -231,7 +231,7 @@ app.patch("/api/classes/:id", handler(async (c) => {
     emoji?: string; clearCover?: boolean;
   }>();
   const cls = await db.prepare(`SELECT * FROM classes WHERE id = ?`).bind(classId).first<any>();
-  if (body.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(body.accentColor)) throw new HttpError(400, "Invalid colour");
+  if (body.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(body.accentColor)) throw new HttpError(400, "Invalid color");
   // One or two glyphs: enough for any emoji (including ZWJ sequences) without
   // letting the badge become a text field.
   const emoji = body.emoji === undefined ? cls.emoji : Array.from(body.emoji).slice(0, 3).join("");

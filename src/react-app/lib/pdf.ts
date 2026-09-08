@@ -59,12 +59,12 @@ export async function renderPageToCanvas(
   canvas: HTMLCanvasElement,
   scale: number,
   dpr: number,
-  signal?: { cancelled: boolean },
+  signal?: { canceled: boolean },
 ): Promise<void> {
   const doc = await loadPdf(url);
-  if (signal?.cancelled) return;
+  if (signal?.canceled) return;
   const page = await doc.getPage(sourceIndex + 1);
-  if (signal?.cancelled) return;
+  if (signal?.canceled) return;
 
   const viewport = page.getViewport({ scale: scale * dpr });
   canvas.width = Math.floor(viewport.width);
@@ -78,6 +78,6 @@ export async function renderPageToCanvas(
   try {
     await task.promise;
   } catch (err: any) {
-    if (err?.name !== "RenderingCancelledException") throw err;
+    if (err?.name !== "RenderingCanceledException") throw err;
   }
 }

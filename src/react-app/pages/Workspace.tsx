@@ -265,7 +265,7 @@ function ScopeToggle({
   );
 }
 
-/** Adding paper to your own notebook: which ruling, what colour, how many. */
+/** Adding paper to your own notebook: which ruling, what color, how many. */
 function AddPagesModal({
   busy, onClose, onAdd,
 }: { busy: boolean; onClose: () => void; onAdd: (b: { pattern: string; color: string; count: number }) => void }) {
@@ -295,7 +295,7 @@ function AddPagesModal({
         ))}
       </div>
 
-      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule colour</label>
+      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule color</label>
       <div className="flex flex-wrap gap-2">
         {PATTERN_COLORS.map((c) => (
           <button
@@ -660,10 +660,10 @@ export default function Workspace() {
               </Button>
             </>
           )}
-          {/* Marked work is finished: show that, don't offer to hand it in again. */}
+          {/* Graded work is finished: show that, don't offer to hand it in again. */}
           {assignment && marked && (
             <Chip tone="mint" icon={<CheckCheck className="h-4 w-4" strokeWidth={2.5} />}>
-              Marked and returned
+              Graded and returned
             </Chip>
           )}
           {assignment && !marked && !locked && (
@@ -723,13 +723,13 @@ export default function Workspace() {
         <div className="flex items-center gap-2 border-b-2 border-[#8a6a1f]/40 bg-[#f7e6bf] px-4 py-2 text-[16px] text-[#5c4611]">
           <Check className="h-4 w-4" strokeWidth={2.5} />
           Handed in{submission?.submittedAt ? ` ${formatDue(submission.submittedAt)}` : ""}
-          {canUnsubmit ? " — you can still take it back until it's marked." : " — your teacher is marking it."}
+          {canUnsubmit ? " — you can still take it back until it's graded." : " — your teacher is grading it."}
         </div>
       )}
       {marked && (
         <div className="flex items-center gap-2 border-b-2 border-pine/15 bg-mint/25 px-4 py-2 text-[16px] text-pine">
           <CheckCheck className="h-4 w-4" strokeWidth={2.5} />
-          This work is marked and back with you. Ask your teacher if you need it reopened.
+          This work is graded and back with you. Ask your teacher if you need it reopened.
         </div>
       )}
 

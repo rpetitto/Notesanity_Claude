@@ -322,7 +322,7 @@ export default function StudentHome() {
           counts={{
             todo: buckets.todo.length,
             "handed-in": buckets["handed-in"].length,
-            marked: buckets.marked.length,
+            graded: buckets.graded.length,
           }}
         />
 

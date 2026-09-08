@@ -54,7 +54,7 @@ export default function PageThumb({
 
   useEffect(() => {
     if (!visible || !canvasRef.current) return;
-    const signal = { cancelled: false };
+    const signal = { canceled: false };
     setReady(false);
     // Thumbnails render at 1x DPR; they're decorative and this halves the work.
     if (isPattern(pattern)) {
@@ -66,9 +66,9 @@ export default function PageThumb({
       return;
     }
     renderPageToCanvas(pdfUrl, sourceIndex, canvasRef.current, width / pageWidth, 1, signal)
-      .then(() => { if (!signal.cancelled) setReady(true); })
+      .then(() => { if (!signal.canceled) setReady(true); })
       .catch(() => { /* a broken preview shouldn't break the list */ });
-    return () => { signal.cancelled = true; };
+    return () => { signal.canceled = true; };
   }, [visible, pdfUrl, sourceIndex, width, pageWidth, pageHeight, pattern, patternColor]);
 
   return (

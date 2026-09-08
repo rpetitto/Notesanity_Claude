@@ -1,5 +1,5 @@
 /**
- * The notebook's page organiser.
+ * The notebook's page organizer.
  *
  * Pages live in a single ordered list; a section is just a label shared by a run
  * of consecutive pages. Dragging therefore only ever does two things — move a

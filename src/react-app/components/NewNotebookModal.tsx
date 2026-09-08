@@ -151,7 +151,7 @@ export default function NewNotebookModal({
         ))}
       </div>
 
-      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule colour</label>
+      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule color</label>
       <div className="flex flex-wrap gap-2">
         {PATTERN_COLORS.map((c) => (
           <button

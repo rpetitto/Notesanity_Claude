@@ -11,7 +11,7 @@ export default () =>
     path: "/",
     title: "Notesanity",
     description:
-      "Interactive notebooks for classrooms. Teachers build notebooks from PDFs or blank paper, students write in them with a pencil or a keyboard, and teachers mark the work in place.",
+      "Interactive notebooks for classrooms. Teachers build notebooks from PDFs or blank paper, students write in them with a pencil or a keyboard, and teachers grade the work in place.",
     body: `
 <section style="padding-top:64px">
   <div class="wrap">
@@ -19,7 +19,7 @@ export default () =>
     <h1>The notebook your class already uses,<br>with the paperwork taken out.</h1>
     <p class="lede">
       Build a notebook from a PDF, a Google Doc, or blank paper. Send it to your class.
-      Students write on it with a stylus or a keyboard, hand it in, and you mark it on the
+      Students write on it with a stylus or a keyboard, hand it in, and you grade it on the
       same page they wrote on — no scanning, no printing, no folder of downloads.
     </p>
     <p style="margin-top:28px;display:flex;gap:12px;flex-wrap:wrap">
@@ -48,7 +48,7 @@ export default () =>
         Drop text boxes, checkboxes, dropdowns, prompts, image uploads and audio recordings
         onto a page. A student can answer a question by talking to it.`)}
       ${feature("Mark where the work is", `
-        Annotate a student's page in your own colour, leave a comment, and return it with a
+        Annotate a student's page in your own color, leave a comment, and return it with a
         grade. Hover any mark to see when it was made.`)}
       ${feature("Nothing gets lost", `
         Work is saved as it's written and mirrored locally first, so a dropped Wi-Fi
@@ -71,7 +71,7 @@ export default () =>
       <div class="card"><h3>2 · Assign it</h3><p class="small quiet" style="margin:0">
         Pick the pages that make up the task, set a due date, and publish. Every student gets
         their own copy. Adding a student later backfills their work automatically.</p></div>
-      <div class="card"><h3>3 · Mark it</h3><p class="small quiet" style="margin:0">
+      <div class="card"><h3>3 · Grade it</h3><p class="small quiet" style="margin:0">
         Open the roster, move between students, and write on their page. Return it with a
         grade and a comment — or reopen it if they need another go.</p></div>
     </div>

@@ -137,7 +137,7 @@ type ChipTone = "default" | "mint" | "pine" | "warn" | "quiet";
 
 const CHIP_TONES: Record<ChipTone, string> = {
   default: "border-pine bg-white text-pine",
-  // "Done" never rides on colour alone — callers pair this with a tick or a word.
+  // "Done" never rides on color alone — callers pair this with a tick or a word.
   mint: "border-pine bg-mint text-pine",
   pine: "border-pine bg-pine text-oat",
   warn: "border-[#8a6a1f] bg-[#f7e6bf] text-[#5c4611]",

@@ -2,7 +2,7 @@
  * Generated page backgrounds (Layer 1, without a PDF).
  *
  * A blank page carries no source document — it stores a pattern name and a rule
- * colour, and the ruling is drawn here at paint time. That keeps it sharp at any
+ * color, and the ruling is drawn here at paint time. That keeps it sharp at any
  * zoom and any pixel density, costs no storage, and means a notebook's blank
  * pages weigh nothing next to its scanned ones.
  *
@@ -31,11 +31,11 @@ export const PATTERNS: { key: PatternKey; label: string; hint: string }[] = [
   { key: "music", label: "Music staff", hint: "Five-line staves" },
   { key: "engineering", label: "Engineering", hint: "1/10\" with border" },
   { key: "isometric", label: "Isometric", hint: "Triangular grid" },
-  { key: "coordinate", label: "Coordinate plane", hint: "Axes through centre" },
+  { key: "coordinate", label: "Coordinate plane", hint: "Axes through center" },
 ];
 
 /**
- * Rule colours: brand accents pulled right down in saturation.
+ * Rule colors: brand accents pulled right down in saturation.
  *
  * A rule is scaffolding, not content — it has to sit far enough back that pencil
  * and pen read cleanly on top of it, which is why these are tints rather than

@@ -12,7 +12,7 @@ import { layout } from "../layout.mjs";
  * jurisdiction.
  */
 
-const UPDATED = "8 September 2026";
+const UPDATED = "September 8, 2026";
 
 export default () =>
   layout({
@@ -97,7 +97,7 @@ export default () =>
       </p>
       <p>Three commitments hold regardless:</p>
       <ul>
-        <li>We will give schools at least a full term's notice before charging for anything they
+        <li>We will give schools at least a full semester's notice before charging for anything they
             currently use for free.</li>
         <li>You can export your work at any time, in the app or by asking us.</li>
         <li>We will not delete a school's data without instruction, except as described in the

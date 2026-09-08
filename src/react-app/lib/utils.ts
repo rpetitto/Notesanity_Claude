@@ -50,7 +50,7 @@ export const toLocalInput = (iso?: string | null) => {
 /**
  * Accent palette for classes and notebooks.
  *
- * Every colour here is muted enough to sit on Oat and hold its own beside Pine
+ * Every color here is muted enough to sit on Oat and hold its own beside Pine
  * and Mint. Mint itself is deliberately absent: it means "the action" or "done",
  * so letting a class adopt it would break that signal.
  */
@@ -65,7 +65,7 @@ const PALETTE = [
   "#4F7A3A", // moss
 ];
 
-/** Used wherever a class or notebook hasn't picked a colour yet. */
+/** Used wherever a class or notebook hasn't picked a color yet. */
 export const DEFAULT_ACCENT = "#2E7D6B";
 export function accentFor(seed: string): string {
   let h = 0;

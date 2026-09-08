@@ -20,6 +20,7 @@ import pricing from "../marketing/pages/pricing.mjs";
 import terms from "../marketing/pages/terms.mjs";
 import privacy from "../marketing/pages/privacy.mjs";
 import status from "../marketing/pages/status.mjs";
+import changelog from "../marketing/pages/changelog.mjs";
 
 const OUT = "dist/client";
 
@@ -30,6 +31,7 @@ const PAGES = [
   ["terms.html", terms],
   ["privacy.html", privacy],
   ["status.html", status],
+  ["changelog.html", changelog],
 ];
 
 let total = 0;
@@ -47,7 +49,7 @@ for (const [file, render] of PAGES) {
  * generated from the same list so a new page can't be added and then quietly
  * left out of the index.
  */
-const urls = ["/", "/help", "/pricing", "/privacy", "/terms", "/status"];
+const urls = ["/", "/help", "/pricing", "/privacy", "/terms", "/status", "/changelog"];
 writeFileSync(
   join(OUT, "sitemap.xml"),
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
@@ -59,7 +61,7 @@ writeFileSync(
 // per-student, so they are kept out of the index deliberately.
 writeFileSync(
   join(OUT, "robots.txt"),
-  `User-agent: *\nAllow: /$\nAllow: /help\nAllow: /pricing\nAllow: /privacy\nAllow: /terms\nAllow: /status\n` +
+  `User-agent: *\nAllow: /$\nAllow: /help\nAllow: /pricing\nAllow: /privacy\nAllow: /terms\nAllow: /status\nAllow: /changelog\n` +
     `Disallow: /api/\nDisallow: /classes\nDisallow: /notebooks\nDisallow: /assignments\nDisallow: /work\n` +
     `Disallow: /settings\nDisallow: /admin\n\nSitemap: https://notesanity.com/sitemap.xml\n`,
 );

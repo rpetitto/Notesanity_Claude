@@ -897,7 +897,7 @@ export default function NotebookEditor() {
   );
 }
 
-/** Small popover for customising the accent colour and cover image shown on the notebook's tile. */
+/** Small popover for customizing the accent color and cover image shown on the notebook's tile. */
 /** A live sample of one ruling, drawn with the same code that paints the page. */
 function PatternPreview({
   pattern, color, width = 64, ratio = 792 / 612,
@@ -917,7 +917,7 @@ function PatternPreview({
  * Insert blank pages.
  *
  * The pages are generated rather than uploaded, so the only choices are the
- * ruling, its colour, how many, and where they go. Size isn't offered: an
+ * ruling, its color, how many, and where they go. Size isn't offered: an
  * inserted sheet always takes the dimensions of the notebook it joins, which
  * is the only thing that keeps a notebook printable.
  */
@@ -963,7 +963,7 @@ function BlankPagesModal({
         ))}
       </div>
 
-      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule colour</label>
+      <label className="label-caps mb-2 mt-5 block text-pine/70">Rule color</label>
       <div className="flex flex-wrap gap-2">
         {PATTERN_COLORS.map((c) => (
           <button
@@ -1046,7 +1046,7 @@ function AppearancePopover({
     return () => document.removeEventListener("mousedown", onDown);
   }, [onClose]);
 
-  // Local colour for instant preview while dragging the OS picker; committed
+  // Local color for instant preview while dragging the OS picker; committed
   // to the server debounced so a drag doesn't fire a burst of racing PATCHes.
   const [localColor, setLocalColor] = useState(accentColor);
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1075,17 +1075,17 @@ function AppearancePopover({
     >
       <h3 className="font-display text-[16px] font-bold text-pine">Appearance</h3>
       <p className="mt-1 text-[16px] leading-relaxed text-pine/70">
-        The colour and cover image are how this notebook appears on its tile.
+        The color and cover image are how this notebook appears on its tile.
       </p>
 
       <div className="mt-3">
-        <label className="label-caps block text-pine/70">Colour</label>
+        <label className="label-caps block text-pine/70">Color</label>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {ACCENT_SWATCHES.map((c) => (
             <button
               key={c}
               type="button"
-              aria-label={`Colour ${c}`}
+              aria-label={`Color ${c}`}
               onClick={() => pickPreset(c)}
               className={cn(
                 "h-8 w-8 rounded-full border-2 transition-transform",
@@ -1098,7 +1098,7 @@ function AppearancePopover({
           ))}
           <label
             className="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-dashed border-pine/40 text-pine/50 hover:border-pine"
-            title="Custom colour"
+            title="Custom color"
           >
             <Palette className="h-3.5 w-3.5" strokeWidth={2.5} />
             <input
@@ -1110,7 +1110,7 @@ function AppearancePopover({
                 commitColor(color);
               }}
               className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              aria-label="Custom colour"
+              aria-label="Custom color"
             />
           </label>
         </div>

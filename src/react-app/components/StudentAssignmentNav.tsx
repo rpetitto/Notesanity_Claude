@@ -8,19 +8,19 @@
 
 import { cn } from "../lib/utils";
 
-export type WorkTab = "todo" | "handed-in" | "marked";
+export type WorkTab = "todo" | "handed-in" | "graded";
 
 export const WORK_TABS: { key: WorkTab; label: string }[] = [
   { key: "todo", label: "To do" },
   { key: "handed-in", label: "Handed in" },
-  { key: "marked", label: "Marked" },
+  { key: "graded", label: "Graded" },
 ];
 
 /** Empty copy per bucket, in the brand's voice — say it and get out of the way. */
 export const WORK_EMPTY: Record<WorkTab, string> = {
   todo: "Nothing due. Enjoy it.",
-  "handed-in": "Nothing waiting to be marked.",
-  marked: "No marked work yet.",
+  "handed-in": "Nothing waiting to be graded.",
+  graded: "No graded work yet.",
 };
 
 type Status = "not_started" | "in_progress" | "submitted" | "returned";
@@ -29,12 +29,12 @@ type Status = "not_started" | "in_progress" | "submitted" | "returned";
 export function bucketAssignments<T extends { status?: string; myStatus?: string }>(
   items: T[],
 ): Record<WorkTab, T[]> {
-  const out: Record<WorkTab, T[]> = { todo: [], "handed-in": [], marked: [] };
+  const out: Record<WorkTab, T[]> = { todo: [], "handed-in": [], graded: [] };
   for (const item of items) {
     // `/api/my/assignments` calls it `status`; a class's list calls it
     // `myStatus`, because there `status` means the assignment's own state.
     const status = (item.myStatus ?? item.status ?? "not_started") as Status;
-    if (status === "returned") out.marked.push(item);
+    if (status === "returned") out.graded.push(item);
     else if (status === "submitted") out["handed-in"].push(item);
     else out.todo.push(item);
   }

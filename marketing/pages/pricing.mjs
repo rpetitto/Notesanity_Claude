@@ -36,11 +36,11 @@ export default () =>
   <div class="wrap narrow">
     <div class="card" style="background:var(--mint)">
       <p style="margin:0 0 6px"><span class="beta">Beta</span></p>
-      <h2 style="margin-bottom:6px">£0 / $0</h2>
+      <h2 style="margin-bottom:6px">$0</h2>
       <p class="quiet" style="margin-bottom:20px">for everyone, for now</p>
       <ul style="list-style:none;padding:0;margin:0 0 22px">
         ${item("Unlimited teachers, students and classes")}
-        ${item("Unlimited notebooks, assignments and marking")}
+        ${item("Unlimited notebooks, assignments and grading")}
         ${item("PDF, Word, PowerPoint and Google Drive imports")}
         ${item("Students' own personal notebooks")}
         ${item("Google sign-in, sign-in links and passwords")}
@@ -57,7 +57,7 @@ export default () =>
     <p>
       It means the app is in real classrooms and being changed while it's there. Features arrive
       often, and occasionally something moves or is renamed. We think that's a fair trade for
-      software shaped by the teachers using it, but you should know it before you plan a term
+      software shaped by the teachers using it, but you should know it before you plan a semester
       around it.
     </p>
     <p>It does not mean your work is a trial. Everything you make is yours:</p>
@@ -65,7 +65,7 @@ export default () =>
       <li><b>Your data is exportable.</b> Any notebook can be saved as a PDF, and we'll produce a
           full export of a school's data on request — during the beta or after it.</li>
       <li><b>We'll give notice before anything costs money.</b> If we introduce paid plans, schools
-          already using Notesanity get at least a full term's notice, and nothing switches off
+          already using Notesanity get at least a full semester's notice, and nothing switches off
           without warning.</li>
       <li><b>We don't sell data, and there's no advertising.</b> Not during the beta, not after.
           See the <a href="/privacy">privacy notice</a>.</li>
@@ -93,7 +93,7 @@ export default () =>
     <p>
       Nothing you'll meet in normal teaching. There are technical ceilings — a notebook starts at
       up to 100 pages, uploads are capped at 25&nbsp;MB — and they're described in the
-      <a href="/help">help centre</a> where they apply.
+      <a href="/help">help center</a> where they apply.
     </p>
   </div>
 </section>`,

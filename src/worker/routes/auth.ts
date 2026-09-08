@@ -7,7 +7,7 @@
  * Sessions are opaque random ids looked up in the database, which is why no
  * signing secret is needed for the cookie to be unforgeable.
  *
- * One deliberate behaviour throughout: requesting a link or a reset returns the
+ * One deliberate behavior throughout: requesting a link or a reset returns the
  * same response whether or not the address exists. Otherwise the endpoint
  * becomes a way to find out which pupils and staff have accounts.
  */
@@ -121,7 +121,7 @@ export async function localSessionUserId(c: Context): Promise<string | null> {
 
 setLocalSessionResolver(localSessionUserId);
 
-const normalise = (e: string) => (e ?? "").trim().toLowerCase();
+const normalize = (e: string) => (e ?? "").trim().toLowerCase();
 const domainOf = (e: string) => e.split("@")[1] ?? "";
 const csv = (s: string) => s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
 
@@ -209,7 +209,7 @@ function appOrigin(c: Context): string {
 
 app.post("/api/auth/password/register", handler(async (c) => {
   const { email, password, name } = await c.req.json<{ email: string; password: string; name?: string }>();
-  const address = normalise(email);
+  const address = normalize(email);
   if (!address.includes("@")) throw new HttpError(400, "Enter a valid email address.");
   if (!password || password.length < MIN_PASSWORD) {
     throw new HttpError(400, `Choose a password of at least ${MIN_PASSWORD} characters.`);
@@ -234,7 +234,7 @@ app.post("/api/auth/password/register", handler(async (c) => {
 
 app.post("/api/auth/password/login", handler(async (c) => {
   const { email, password } = await c.req.json<{ email: string; password: string }>();
-  const address = normalise(email);
+  const address = normalize(email);
   const user = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(address).first<any>();
   const cred = user
     ? await db.prepare(`SELECT * FROM credentials WHERE user_id = ?`).bind(user.id).first<any>()
@@ -307,7 +307,7 @@ async function issueToken(address: string, purpose: string): Promise<string> {
 
 app.post("/api/auth/magic/request", handler(async (c) => {
   const { email: raw, purpose } = await c.req.json<{ email: string; purpose?: string }>();
-  const address = normalise(raw);
+  const address = normalize(raw);
   const kind = purpose === "reset" ? "reset" : "magic";
   if (!address.includes("@")) throw new HttpError(400, "Enter a valid email address.");
 
@@ -484,7 +484,7 @@ async function verifyGoogleIdToken(token: string, clientId: string): Promise<Goo
 
   const jwks = await fetch(GOOGLE_JWKS).then((r) => r.json() as Promise<{ keys: JsonWebKey[] & { kid: string }[] }>);
   const jwk = jwks.keys.find((k: any) => k.kid === header.kid);
-  if (!jwk) throw new HttpError(401, "Google signed that token with a key we don't recognise.");
+  if (!jwk) throw new HttpError(401, "Google signed that token with a key we don't recognize.");
 
   const key = await crypto.subtle.importKey(
     "jwk",
@@ -520,7 +520,7 @@ app.post("/api/auth/google", handler(async (c) => {
   if (!credential) throw new HttpError(400, "No Google credential was sent.");
 
   const claims = await verifyGoogleIdToken(credential, clientId);
-  const address = normalise(claims.email!);
+  const address = normalize(claims.email!);
 
   // Throws 403 with the domain message when the address belongs to no school,
   // which is the same answer the other sign-in routes give.

@@ -15,7 +15,7 @@ import { layout } from "../layout.mjs";
  * processing agreement is offered as standard.
  */
 
-const UPDATED = "8 September 2026";
+const UPDATED = "September 8, 2026";
 
 export default () =>
   layout({
@@ -91,7 +91,7 @@ export default () =>
         <tr><td>Typed answers, checkboxes, dropdowns</td><td>The work itself</td></tr>
         <tr><td>Images and audio a student uploads</td><td>Answers given as a photo or a recording</td></tr>
         <tr><td>Documents a teacher uploads</td><td>The notebooks they build lessons from</td></tr>
-        <tr><td>Grades, feedback and marking</td><td>Assessment, visible to the student and their teachers</td></tr>
+        <tr><td>Grades, feedback and grading</td><td>Assessment, visible to the student and their teachers</td></tr>
         <tr><td>Edit history</td><td>Who changed what and when, so a teacher can see how work progressed</td></tr>
       </table>
 
@@ -118,7 +118,7 @@ export default () =>
         <li><b>We do not use student work to train machine-learning models.</b></li>
         <li><b>We do not use third-party analytics or advertising trackers.</b> There are no
             tracking cookies in Notesanity; the only cookie is the one that keeps you signed in.</li>
-        <li><b>We do not build behavioural profiles</b> of students, or track them across sites.</li>
+        <li><b>We do not build behavioral profiles</b> of students, or track them across sites.</li>
       </ul>
 
       <h2 id="ferpa">4. FERPA</h2>

@@ -228,7 +228,7 @@ const MAX_BLANK_PAGES = 50;
  * Insert blank pages carrying a drawn ruling rather than a source document.
  *
  * There's no asset and no upload: the page stores the pattern name and rule
- * colour, and the client draws it. Size is taken from the notebook's existing
+ * color, and the client draws it. Size is taken from the notebook's existing
  * pages so an inserted sheet lines up with the ones around it, falling back to
  * US Letter for a notebook that has none yet.
  */
@@ -245,7 +245,7 @@ app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
   const pattern = body.pattern ?? "";
   if (!PAGE_PATTERNS.includes(pattern)) throw new HttpError(400, "Unknown page pattern");
   const color = (body.color ?? "").trim();
-  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule colour must be a hex value");
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule color must be a hex value");
   const count = Math.floor(body.count ?? 1);
   if (!Number.isFinite(count) || count < 1) throw new HttpError(400, "Add at least one page");
   if (count > MAX_BLANK_PAGES) throw new HttpError(400, `Add at most ${MAX_BLANK_PAGES} pages at a time`);
@@ -633,7 +633,7 @@ app.patch("/api/notebooks/:id", handler(async (c) => {
   const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
   const b = await c.req.json<{ title?: string; accentColor?: string; clearCover?: boolean }>();
-  if (b.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(b.accentColor)) throw new HttpError(400, "Invalid colour");
+  if (b.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(b.accentColor)) throw new HttpError(400, "Invalid color");
   await db
     .prepare(`UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, updated_at = ? WHERE id = ?`)
     .bind(
@@ -840,7 +840,7 @@ async function fillFromTemplate(notebookId: string, pages: number, pattern: stri
   await syncPageCount(notebookId);
 }
 
-/** The catalogue, so the client never hard-codes a second copy of it. */
+/** The catalog, so the client never hard-codes a second copy of it. */
 app.get("/api/notebook-templates", handler(async (c) => {
   const user = await requireUser(c);
   const audience = user.role === "teacher" ? "teacher" : "student";
@@ -859,7 +859,7 @@ app.post("/api/classes/:id/notebooks/blank", handler(async (c) => {
   const pattern = body.pattern ?? preset?.pattern ?? "";
   const color = body.color ?? preset?.color ?? "";
   if (!PAGE_PATTERNS.includes(pattern)) throw new HttpError(400, "Unknown page pattern");
-  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule colour must be a hex value");
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule color must be a hex value");
   if (!Number.isFinite(pages) || pages < 1) throw new HttpError(400, "A notebook needs at least one page");
   if (pages > MAX_TEMPLATE_PAGES) throw new HttpError(400, `A notebook can start with at most ${MAX_TEMPLATE_PAGES} pages`);
 
@@ -892,7 +892,7 @@ app.post("/api/my/personal-notebooks", handler(async (c) => {
   const pattern = body.pattern ?? preset?.pattern ?? "";
   const color = body.color ?? preset?.color ?? "";
   if (!PAGE_PATTERNS.includes(pattern)) throw new HttpError(400, "Unknown page pattern");
-  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule colour must be a hex value");
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule color must be a hex value");
   if (!Number.isFinite(pages) || pages < 1) throw new HttpError(400, "A notebook needs at least one page");
   if (pages > MAX_TEMPLATE_PAGES) throw new HttpError(400, `A notebook can start with at most ${MAX_TEMPLATE_PAGES} pages`);
 
@@ -1010,7 +1010,7 @@ app.post("/api/classes/:id/my-notebooks", handler(async (c) => {
   const pattern = body.pattern ?? preset?.pattern ?? "";
   const color = body.color ?? preset?.color ?? "";
   if (!PAGE_PATTERNS.includes(pattern)) throw new HttpError(400, "Unknown page pattern");
-  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule colour must be a hex value");
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(400, "Rule color must be a hex value");
   if (!Number.isFinite(pages) || pages < 1) throw new HttpError(400, "A notebook needs at least one page");
   if (pages > MAX_TEMPLATE_PAGES) throw new HttpError(400, `A notebook can start with at most ${MAX_TEMPLATE_PAGES} pages`);
 

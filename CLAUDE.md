@@ -55,6 +55,13 @@ working around it.
 - **`/api/status` really probes.** Keep it that way — a status page that reports
   a value someone set by hand is worse than none.
 
+## Public pages
+
+`marketing/` holds the website. When a user-visible change ships, the changelog,
+the landing page and the help center have to keep up with it — use the
+`notesanity-docs` skill, which says which of the three a given change touches and
+how entries are written.
+
 ## Brand
 
 Pine `#20302C`, mint `#7FD1AE`, oat `#F4EFE6`. Space Grotesk for display, Nunito

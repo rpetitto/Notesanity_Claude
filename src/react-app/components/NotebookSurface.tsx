@@ -100,7 +100,7 @@ export default function NotebookSurface({
     return map;
   }, [fields]);
 
-  // Report which page is centred so the caller can show "Page 3 of 12".
+  // Report which page is centerd so the caller can show "Page 3 of 12".
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   useEffect(() => {
     const el = containerRef.current;

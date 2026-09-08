@@ -71,7 +71,7 @@ export async function getToken(scope: string): Promise<string> {
         tokens.set(scope, { token: resp.access_token, expiresAt: Date.now() + (resp.expires_in ?? 3600) * 1000 });
         resolve(resp.access_token);
       },
-      error_callback: (err: any) => reject(new Error(err?.message ?? "Google authorization was cancelled")),
+      error_callback: (err: any) => reject(new Error(err?.message ?? "Google authorization was canceled")),
     });
     client.requestAccessToken({ prompt: cached ? "" : "consent" });
   });

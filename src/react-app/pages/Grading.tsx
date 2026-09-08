@@ -456,7 +456,7 @@ export default function Grading() {
             </Button>
           ) : allMarkedAndReturned ? (
             <Chip tone="mint" icon={<CheckCheck className="h-3.5 w-3.5" strokeWidth={2.5} />}>
-              All marked and returned
+              All graded and returned
             </Chip>
           ) : (
             <Button variant="secondary" disabled>

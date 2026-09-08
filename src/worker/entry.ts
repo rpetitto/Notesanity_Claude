@@ -59,7 +59,7 @@ export default {
       // `?signin=1` is how the marketing pages link to the app's sign-in, so it
       // has to reach the app even for a visitor with no session.
       // Two different ways of naming the same file, for a reason. The asset
-      // server normalises `.html` and `index` paths by redirecting, and passing
+      // server normalizes `.html` and `index` paths by redirecting, and passing
       // one of those redirects on would either move the visitor off `/` or, for
       // `index`, bounce them back to `/` and round again. So the app case asks
       // for the request as it stands — the root already resolves to the shell —
