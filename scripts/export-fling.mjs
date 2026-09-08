@@ -6,11 +6,23 @@
  * migration tool rather than something maintained — it exists to move this
  * data once, and to be re-runnable while that is being verified.
  *
- * `_migrations` is deliberately NOT carried across, and the order matters: the
- * new platform builds the schema by running its own migrations, and it decides
- * what to run by reading that table. Importing Fling's copy into an empty
- * database would announce that all seventeen had already been applied, and the
- * runner would skip creating every table. Schema first, then this data.
+ * `_migrations` is deliberately NOT carried across, and there are two ways to
+ * get the order wrong — I made the second mistake, so both are written down.
+ *
+ * Import it into an empty database and the runner is told all seventeen have
+ * run, so it creates no tables: an import that reports success and leaves
+ * nothing behind it.
+ *
+ * Build the schema by hand without recording those seventeen as applied, and
+ * the runner does the opposite — it runs them all against data that is already
+ * there. Three of them are data migrations, not schema ones, and
+ * `008_brand_accents` duly rewrote four rows' accent colours after they had
+ * been correctly imported.
+ *
+ * The only safe order is: let the migrations build the schema themselves, on an
+ * empty database, so `_migrations` is populated as a side effect of the work it
+ * describes. Then import this data. Then nothing re-runs, because the runner
+ * can see what has already happened.
  */
 
 import { execFileSync } from "node:child_process";
