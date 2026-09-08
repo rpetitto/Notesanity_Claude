@@ -20,6 +20,7 @@ import "./routes/notebooks";
 import "./routes/work";
 import "./routes/assignments";
 import "./routes/admin";
+import "./routes/status";
 import { drainMailQueue } from "./lib/mailqueue";
 
 /**
