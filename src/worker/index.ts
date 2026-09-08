@@ -10,7 +10,7 @@
  * API credentials.
  */
 
-import { app, auth, cron } from "flingit";
+import { app, auth, cron } from "./platform";
 
 import "./schema";
 import "./routes/auth";

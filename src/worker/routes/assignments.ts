@@ -1,4 +1,4 @@
-import { app, db } from "flingit";
+import { app, db } from "../platform";
 import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { logActivity } from "../lib/activity";

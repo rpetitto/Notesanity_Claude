@@ -23,15 +23,6 @@
     "GOOGLE_CLIENT_ID": "781612697082-2gddfu860fdrotddhm3dgjfsuaqetudu.apps.googleusercontent.com"
   },
 
-  // The application still imports the vendor's module names. Pointing them at
-  // our own platform means the migration touches no application code, and the
-  // two stacks stay comparable while the move is verified. The imports get
-  // rewritten to their real names at cutover, once there's nothing to compare.
-  "alias": {
-    "flingit": "./src/worker/platform/index.ts",
-    "flingit/plugin/email-send": "./src/worker/platform/email.ts"
-  },
-
   // The built SPA is served straight from the edge; only /api/* reaches the
   // Worker, so page loads cost no Worker invocation.
   "assets": {

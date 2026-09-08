@@ -12,8 +12,8 @@
  * becomes a way to find out which pupils and staff have accounts.
  */
 
-import { app, db } from "flingit";
-import { email as mailer } from "flingit/plugin/email-send";
+import { app, db } from "../platform";
+import { email as mailer } from "../platform/email";
 import { renderEmail } from "../lib/email";
 import { logMail } from "../lib/maillog";
 import { SUPERADMIN_EMAILS } from "../schema";

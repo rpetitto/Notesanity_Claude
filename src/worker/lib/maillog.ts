@@ -1,4 +1,4 @@
-import { db } from "flingit";
+import { db } from "../platform";
 import { now, uid } from "./session";
 
 /** Why a sign-in email did or didn't arrive. */

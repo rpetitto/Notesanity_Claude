@@ -1,5 +1,5 @@
-import { db } from "flingit";
-import { email as mailer } from "flingit/plugin/email-send";
+import { db } from "../platform";
+import { email as mailer } from "../platform/email";
 import { now, uid } from "./session";
 import { renderEmail, type EmailContent } from "./email";
 import { logMail } from "./maillog";

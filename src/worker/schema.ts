@@ -10,7 +10,7 @@
  *   so a page can always be slotted between two others without renumbering).
  */
 
-import { migrate, db } from "flingit";
+import { migrate, db } from "./platform";
 
 /**
  * Platform owners. Seeded by address so the role exists before they do, and

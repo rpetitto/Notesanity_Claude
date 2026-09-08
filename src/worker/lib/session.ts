@@ -1,4 +1,4 @@
-import { auth, db } from "flingit";
+import { auth, db } from "../platform";
 import type { Context } from "hono";
 
 export const uid = () => crypto.randomUUID();

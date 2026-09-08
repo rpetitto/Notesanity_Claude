@@ -14,7 +14,7 @@
  * them and explain what they affect.
  */
 
-import { app, db } from "flingit";
+import { app, db } from "../platform";
 import { HttpError, handler, now, param, requireUser, uid } from "../lib/session";
 import { SUPERADMIN_EMAILS } from "../schema";
 

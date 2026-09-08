@@ -1,4 +1,4 @@
-import { app, db } from "flingit";
+import { app, db } from "../platform";
 import { currentUser, handler, now, requireUser, HttpError } from "../lib/session";
 
 /** Who am I? Returns null (200) when signed out so the client can show the landing page. */

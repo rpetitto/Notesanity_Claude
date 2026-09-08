@@ -12,7 +12,7 @@
  * reads as "worked on page 3, 14:02–14:19" rather than sixty identical lines.
  */
 
-import { db } from "flingit";
+import { db } from "../platform";
 import { now, uid } from "./session";
 
 const COALESCE_MINUTES = 5;

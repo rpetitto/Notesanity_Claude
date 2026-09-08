@@ -1,4 +1,4 @@
-import { app, db, storage } from "flingit";
+import { app, db, storage } from "../platform";
 import {
   handler, now, uid, requireUser, requireTeacher, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { queueMail } from "../lib/mailqueue";
