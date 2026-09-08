@@ -10,14 +10,12 @@ export default defineConfig({
         emptyOutDir: true,
     },
     server: {
-        port: parseInt(process.env["FLING_VITE_PORT"] || "5173", 10),
+        port: 5173,
         strictPort: true,
-        watch: {
-            ignored: ["**/.fling/**"],
-        },
         proxy: {
             "/api": {
-                target: `http://localhost:${process.env["FLING_DEV_PORT"] || "3210"}`,
+                // `npm run dev` (wrangler) serves the API with the real bindings.
+                target: "http://localhost:8787",
                 changeOrigin: true,
             },
         },

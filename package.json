@@ -5,8 +5,9 @@
   "description": "Notesanity — interactive digital notebooks for classrooms.",
   "type": "module",
   "scripts": {
-    "dev": "fling dev",
-    "start": "fling dev",
+    "dev": "wrangler dev",
+    "dev:ui": "vite",
+    "deploy": "npm run build && wrangler deploy",
     "build": "vite build && node scripts/build-marketing.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b"
@@ -40,8 +41,5 @@
     "tailwindcss": "^4",
     "typescript": "~5.9.3",
     "vite": "^7.3.1"
-  },
-  "fling": {
-    "projectName": "gma9fw"
   }
 }

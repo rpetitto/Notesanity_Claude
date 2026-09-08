@@ -1,7 +1,4 @@
 # Fling
-.fling/secrets
-.fling/data/
-.fling/.dev-bundle/
 
 .claude/settings.local.json
 
