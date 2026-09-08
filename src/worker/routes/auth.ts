@@ -410,16 +410,20 @@ app.post("/api/auth/signout", handler(async (c) => {
 }));
 
 /**
- * Sign out of everything in one hop: drop the local session, then hand off to
- * Fling's own sign-out so a Google session is cleared too. The header links
- * here rather than to either one individually.
+ * Sign out, as a link the header can point at.
+ *
+ * This used to hand off to the platform's own sign-out afterwards, to clear a
+ * Google session alongside ours. There is no longer a second session to clear:
+ * Google proves identity once and we issue our own cookie, so dropping that
+ * cookie *is* signing out. The hand-off outlived the thing it handed off to
+ * and became a redirect to a POST-only route, which is a 404 to a browser.
  */
 app.get("/api/auth/leave", handler(async (c) => {
   const raw = c.req.header("Cookie") ?? "";
   const match = raw.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
   if (match) await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(match[1]).run();
   clearSessionCookie(c);
-  return c.redirect("/api/auth/signout", 302);
+  return c.redirect("/", 302);
 }));
 
 /** Which sign-in methods this account already has, for the Settings screen. */

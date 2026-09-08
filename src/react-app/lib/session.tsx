@@ -22,7 +22,8 @@ export function useSession() {
   };
 }
 
-export const signInHref = (redirect?: string) =>
-  `/api/auth/signin/google${redirect ? `?redirect=${encodeURIComponent(redirect)}` : ""}`;
-// Clears the local session first, then hands off to Google sign-out.
+/**
+ * Signing in is no longer a link to somewhere else — Google is asked in the
+ * page and answered by our own endpoint — so only signing out is a href.
+ */
 export const signOutHref = "/api/auth/leave";
