@@ -17,3 +17,6 @@ dist/
 # TypeScript build info
 *.tsbuildinfo
 tsconfig.*.tsbuildinfo
+
+# Local Cloudflare dev state (miniflare D1/R2 simulation)
+.wrangler/
