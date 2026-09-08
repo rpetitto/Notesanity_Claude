@@ -36,16 +36,15 @@
     {
       "binding": "DB",
       "database_name": "notesanity",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "e41a3e56-4ae1-4e54-ad2f-1e76ee95500c"
     }
   ],
 
-  "r2_buckets": [
-    {
-      "binding": "BUCKET",
-      "bucket_name": "notesanity-assets"
-    }
-  ],
+  // TEMPORARY: R2 needs a one-time enablement in the dashboard before a bucket
+  // can exist. Restored the moment it is on — PDFs and uploads need it.
+  // "r2_buckets": [
+  //   { "binding": "BUCKET", "bucket_name": "notesanity-assets" }
+  // ],
 
   // Matches the schedule the mail-queue drain registers in src/worker/index.ts.
   "triggers": {

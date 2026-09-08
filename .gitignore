@@ -20,3 +20,7 @@ tsconfig.*.tsbuildinfo
 
 # Local Cloudflare dev state (miniflare D1/R2 simulation)
 .wrangler/
+
+# Cloudflare credentials — never committed
+.cf-credentials
+.dev.vars
