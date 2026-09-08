@@ -11,7 +11,8 @@ import { useMutation } from "@tanstack/react-query";
 import { Mail, KeyRound, ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { signInHref, signOutHref } from "../lib/session";
+import { signOutHref } from "../lib/session";
+import { requestGoogleIdToken } from "../lib/google";
 import { Logo } from "../components/Shell";
 import { Button, Input, Label } from "../components/ui";
 import { cn } from "../lib/utils";
@@ -21,6 +22,27 @@ type Method = "link" | "password";
 export default function Landing({ error }: { error?: Error | null }) {
   const [params] = useSearchParams();
   const [method, setMethod] = useState<Method>("link");
+
+  const [googleBusy, setGoogleBusy] = useState(false);
+
+  /**
+   * Google proves who you are; the session is still ours. The token goes
+   * straight to our own endpoint, which verifies Google's signature and sets
+   * the same cookie a password login would — so everything downstream, from
+   * which school you land in to what role you get, is decided in one place.
+   */
+  const signInWithGoogle = async () => {
+    setGoogleBusy(true);
+    try {
+      const credential = await requestGoogleIdToken();
+      await api.post("/api/auth/google", { credential });
+      window.location.href = "/";
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
   const [register, setRegister] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -206,17 +228,20 @@ export default function Landing({ error }: { error?: Error | null }) {
                 <span className="h-[3px] flex-1 rounded-full bg-pine/15" />
               </div>
 
-              <a
-                href={signInHref("/")}
+              <button
+                type="button"
+                onClick={() => void signInWithGoogle()}
+                disabled={googleBusy}
                 className={cn(
                   "flex min-h-[52px] w-full items-center justify-center gap-3 rounded-full border-[3px] border-pine",
                   "bg-white font-display text-[17px] text-pine shadow-[4px_4px_0_0_var(--color-pine)]",
                   "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none",
+                  "disabled:opacity-70",
                 )}
               >
                 <GoogleG />
-                Continue with Google
-              </a>
+                {googleBusy ? "Signing in…" : "Continue with Google"}
+              </button>
             </>
           )}
         </div>

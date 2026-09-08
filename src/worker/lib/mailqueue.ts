@@ -32,7 +32,17 @@ const MAX_ATTEMPTS = 4;
  * headroom for sign-in links, which someone is actively waiting on and which
  * must not be starved by a bulk invite.
  */
-export async function drainMailQueue(limit = 2): Promise<{ sent: number; failed: number }> {
+/**
+ * How many queued messages go out per run.
+ *
+ * This was two, because the old platform allowed three sends a minute for the
+ * entire project and sign-in links had to fit in the gap left over. That
+ * ceiling is gone. Twenty a minute clears a class of twenty-five in about a
+ * minute instead of thirteen, and the provider's own rate limit — surfaced as
+ * a marker the loop below already understands — is what governs now, rather
+ * than a number guessed here.
+ */
+export async function drainMailQueue(limit = 20): Promise<{ sent: number; failed: number }> {
   const rows = await db
     .prepare(`SELECT * FROM mail_queue WHERE status = 'pending' ORDER BY created_at LIMIT ?`)
     .bind(limit)

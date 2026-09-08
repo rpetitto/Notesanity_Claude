@@ -429,3 +429,111 @@ app.get("/api/auth/methods", handler(async (c) => {
   const cred = await db.prepare(`SELECT user_id FROM credentials WHERE user_id = ?`).bind(userId).first();
   return c.json({ password: !!cred, local: true });
 }));
+
+// ------------------------------------------------------------------ google
+
+/**
+ * Sign in with Google.
+ *
+ * The browser does the Google half — it already loads Google's script for
+ * Classroom and Drive — and posts back the ID token it receives. This endpoint
+ * verifies that token's signature against Google's published keys and, if it
+ * holds up, issues exactly the same session a password login would.
+ *
+ * Verifying an ID token rather than running an authorization-code exchange
+ * means there is no client secret anywhere in this system: the client id is
+ * public by design, and the proof of identity is a JWT Google signed. One less
+ * credential to store, rotate, or leak.
+ *
+ * Google is a way of proving who you are, not a separate kind of account. It
+ * resolves to a user through the same `findOrCreateUser` as every other route,
+ * so domain rules, roles and which school someone lands in are decided in one
+ * place regardless of how they signed in.
+ */
+
+interface GoogleClaims {
+  iss: string;
+  aud: string;
+  exp: number;
+  email?: string;
+  email_verified?: boolean | string;
+  name?: string;
+  picture?: string;
+}
+
+const GOOGLE_ISSUERS = ["accounts.google.com", "https://accounts.google.com"];
+const GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs";
+
+const b64url = (s: string) => {
+  const pad = s.length % 4 ? "=".repeat(4 - (s.length % 4)) : "";
+  const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad);
+  return Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+};
+
+/** Verify a Google ID token and return its claims, or throw. */
+async function verifyGoogleIdToken(token: string, clientId: string): Promise<GoogleClaims> {
+  const parts = token.split(".");
+  if (parts.length !== 3) throw new HttpError(401, "That Google sign-in couldn't be read.");
+
+  const header = JSON.parse(new TextDecoder().decode(b64url(parts[0]))) as { kid?: string; alg?: string };
+  if (header.alg !== "RS256") throw new HttpError(401, "Unexpected Google token algorithm.");
+
+  const jwks = await fetch(GOOGLE_JWKS).then((r) => r.json() as Promise<{ keys: JsonWebKey[] & { kid: string }[] }>);
+  const jwk = jwks.keys.find((k: any) => k.kid === header.kid);
+  if (!jwk) throw new HttpError(401, "Google signed that token with a key we don't recognise.");
+
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    jwk as JsonWebKey,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+  const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64url(parts[2]), signed);
+  if (!valid) throw new HttpError(401, "That Google sign-in failed verification.");
+
+  const claims = JSON.parse(new TextDecoder().decode(b64url(parts[1]))) as GoogleClaims;
+
+  // A valid signature only says Google issued it — these say it was issued to
+  // us, recently, for a real address. Skipping `aud` in particular would let a
+  // token minted for any other Google app sign someone in here.
+  if (!GOOGLE_ISSUERS.includes(claims.iss)) throw new HttpError(401, "That token didn't come from Google.");
+  if (claims.aud !== clientId) throw new HttpError(401, "That Google sign-in was issued for a different app.");
+  if (claims.exp * 1000 < Date.now()) throw new HttpError(401, "That Google sign-in has expired — try again.");
+  if (!claims.email) throw new HttpError(401, "That Google account has no email address.");
+  if (claims.email_verified === false || claims.email_verified === "false") {
+    throw new HttpError(401, "That Google account's email isn't verified.");
+  }
+  return claims;
+}
+
+app.post("/api/auth/google", handler(async (c) => {
+  const clientId = (c.env as Record<string, string | undefined>)?.GOOGLE_CLIENT_ID ?? "";
+  if (!clientId) throw new HttpError(503, "Google sign-in isn't configured for this deployment.");
+
+  const { credential } = await c.req.json<{ credential?: string }>();
+  if (!credential) throw new HttpError(400, "No Google credential was sent.");
+
+  const claims = await verifyGoogleIdToken(credential, clientId);
+  const address = normalise(claims.email!);
+
+  // Throws 403 with the domain message when the address belongs to no school,
+  // which is the same answer the other sign-in routes give.
+  const user = await findOrCreateUser(address, claims.name);
+
+  // Google is the authority on these two, so keep them fresh on every sign-in.
+  await db
+    .prepare(`UPDATE users SET name = ?, picture = ?, last_seen_at = ? WHERE id = ?`)
+    .bind(claims.name?.trim() || user.name, claims.picture ?? user.picture ?? null, now(), user.id)
+    .run();
+
+  await startSession(c, user.id);
+  return c.json({ ok: true });
+}));
+
+/** Whether the sign-in page should offer the Google button. */
+app.get("/api/auth/google/config", handler(async (c) => {
+  const clientId = (c.env as Record<string, string | undefined>)?.GOOGLE_CLIENT_ID ?? "";
+  return c.json({ enabled: !!clientId, clientId });
+}));

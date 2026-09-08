@@ -311,3 +311,39 @@ export async function driveFileAsPdf(file: DriveFile): Promise<Blob> {
   }
   return await res.blob();
 }
+
+/* ---------- signing in ---------- */
+
+/**
+ * Ask Google who this is, and hand the proof to our own server.
+ *
+ * This returns an ID token — a JWT Google has signed — rather than running an
+ * OAuth redirect. The server verifies that signature and issues its own
+ * session, which means no client secret exists anywhere in the system and the
+ * user never leaves the page.
+ */
+export async function requestGoogleIdToken(): Promise<string> {
+  if (!CLIENT_ID) throw new Error("Google sign-in isn't configured for this deployment.");
+  await loadGis();
+
+  return new Promise<string>((resolve, reject) => {
+    window.google.accounts.id.initialize({
+      client_id: CLIENT_ID,
+      callback: (resp: { credential?: string }) => {
+        if (resp?.credential) resolve(resp.credential);
+        else reject(new Error("Google didn't return a sign-in."));
+      },
+      // The address is what identifies the account here, so the picker is
+      // always shown rather than silently reusing a previous choice — a shared
+      // classroom machine must not sign the next person in as the last one.
+      auto_select: false,
+      cancel_on_tap_outside: true,
+    });
+
+    window.google.accounts.id.prompt((notification: any) => {
+      if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+        reject(new Error("Google sign-in was dismissed. Try again, or use a sign-in link."));
+      }
+    });
+  });
+}

@@ -25,9 +25,10 @@ import { drainMailQueue } from "./lib/mailqueue";
 /**
  * Queued mail goes out a few at a time, every minute.
  *
- * The platform ceiling is three sends a minute for the whole project. Draining
- * below that on purpose leaves room for sign-in links, which someone is
- * actively waiting on and which must not queue behind a class invite.
+ * Sign-in links are sent immediately rather than queued, because someone is
+ * waiting on them; this drains the invitations, which are not urgent but are
+ * numerous. The old two-per-minute trickle existed to fit under a platform
+ * ceiling that no longer applies.
  */
 cron("drain-mail-queue", "* * * * *", async () => {
   const { sent, failed } = await drainMailQueue();
