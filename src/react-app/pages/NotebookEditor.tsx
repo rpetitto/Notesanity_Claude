@@ -5,11 +5,12 @@ import {
   ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
   MoreHorizontal, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
+  FolderOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type FieldRec, type PageRec } from "../lib/api";
 import { readPageSizes } from "../lib/pdf";
-import { convertToPdf, needsConversion } from "../lib/google";
+import { convertToPdf, driveFileAsPdf, hasDrivePicker, needsConversion, pickDriveFile } from "../lib/google";
 import {
   PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
   renderPatternToCanvas, type PatternKey,
@@ -456,6 +457,68 @@ export default function NotebookEditor() {
     }
   };
 
+  /**
+   * Add pages from a file already in the teacher's Drive.
+   *
+   * Ends in the same `addPages` as a file off the disk — the picker hands back
+   * a PDF, and from there there is nothing different about it. Worth having
+   * because the document a worksheet lives in is usually in Drive and not on
+   * the machine the teacher is holding.
+   */
+  const addPagesFromDrive = async () => {
+    try {
+      setBusyMessage("Opening Drive…");
+      const picked = await pickDriveFile();
+      if (!picked) return;
+      setBusyMessage("Fetching…");
+      const blob = await driveFileAsPdf(picked);
+      const base = picked.name.replace(/\.[^.]+$/, "");
+      await addPages(new File([blob], `${base}.pdf`, { type: "application/pdf" }));
+    } catch (e) {
+      const m = (e as Error).message;
+      // Same likeliest cause as everywhere else the picker is opened: the
+      // school's Google project doesn't have the Picker API turned on.
+      toast.error(
+        /picker|api key|developer key|403/i.test(m)
+          ? "Couldn't open Google Drive. Notesanity's Google project needs the Picker API enabled (and an API key set)."
+          : m,
+      );
+    } finally {
+      setBusyMessage("");
+    }
+  };
+
+  /**
+   * The three ways to add pages, in the order they're reached for: blank paper
+   * first because it needs nothing, then a file, then Drive — which is only
+   * offered where the school's Google project can actually open the picker.
+   */
+  const ADD_PAGE_ITEMS: MenuItem[] = [
+    {
+      label: "Blank pages",
+      icon: Rows3,
+      hint: "Lined, graph, dot grid, staves…",
+      onClick: () => setBlankOpen(true),
+      disabled: !!busyMessage,
+    },
+    {
+      label: "Upload a file",
+      icon: Upload,
+      hint: "PDF, Word or PowerPoint",
+      onClick: () => addPagesRef.current?.click(),
+      disabled: !!busyMessage,
+    },
+    ...(hasDrivePicker
+      ? [{
+          label: "From Google Drive",
+          icon: FolderOpen,
+          hint: "Pick a file without downloading it",
+          onClick: () => void addPagesFromDrive(),
+          disabled: !!busyMessage,
+        }]
+      : []),
+  ];
+
   const createAssignmentFromSelection = () => {
     const ids = allPages.filter((p) => selection.has(p.id) && !p.archived).map((p) => p.id);
     if (ids.length === 0) {
@@ -607,12 +670,24 @@ export default function NotebookEditor() {
           >
             <Palette className="h-5 w-5" strokeWidth={2.5} /> Appearance
           </Button>
-          <Button variant="secondary" data-tour="nb-add-pages" onClick={() => addPagesRef.current?.click()} disabled={!!busyMessage} className="hidden xl:inline-flex">
-            <Plus className="h-5 w-5" strokeWidth={2.5} /> {busyMessage || "Add pages"}
-          </Button>
-          <Button variant="secondary" onClick={() => setBlankOpen(true)} disabled={!!busyMessage} className="hidden xl:inline-flex">
-            <Rows3 className="h-5 w-5" strokeWidth={2.5} /> Blank pages
-          </Button>
+          {/* One verb, three sources. Blank paper, a file and Drive were three
+              buttons competing for the same header row while saying the same
+              thing — the question is never "which button", it's "where are the
+              pages coming from", which is what a menu asks. */}
+          <ActionMenu
+            tour="nb-add-pages"
+            label="Add pages"
+            trigger={
+              <>
+                {busyMessage
+                  ? <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2.5} />
+                  : <Plus className="h-5 w-5" strokeWidth={2.5} />}
+                {busyMessage || "Add pages"}
+                <ChevronDown className="h-4 w-4" strokeWidth={2.5} />
+              </>
+            }
+            items={ADD_PAGE_ITEMS}
+          />
           <Button
             variant="secondary"
             data-tour="nb-annotate"
@@ -622,12 +697,14 @@ export default function NotebookEditor() {
           >
             <Pen className="h-5 w-5" strokeWidth={2.5} /> Annotate
           </Button>
-          <MoreMenu
-            items={[
-              { label: "Appearance", icon: Palette, onClick: () => setAppearanceOpen(true) },
-              { label: busyMessage || "Add pages", icon: Plus, onClick: () => addPagesRef.current?.click(), disabled: !!busyMessage },
-              { label: "Blank pages", icon: Rows3, onClick: () => setBlankOpen(true), disabled: !!busyMessage },
-            ]}
+          {/* Adding pages is its own button on every width now, so the only
+              thing left to fold away on a narrow screen is Appearance. */}
+          <ActionMenu
+            tour="nb-more"
+            label="More actions"
+            className="xl:hidden"
+            trigger={<MoreHorizontal className="h-5 w-5" strokeWidth={2.5} />}
+            items={[{ label: "Appearance", icon: Palette, onClick: () => setAppearanceOpen(true) }]}
           />
           {/* Only once students actually have the notebook. On a draft nothing
               has been sent yet, so "not sent" says nothing — and next to the
@@ -1431,46 +1508,77 @@ function RichTextEditor({
   );
 }
 
+interface MenuItem {
+  label: string;
+  icon: typeof Plus;
+  onClick: () => void;
+  disabled?: boolean;
+  /** Second line, for a choice whose consequence isn't obvious from its name. */
+  hint?: string;
+}
+
 /**
- * Secondary header actions, folded into one button.
+ * A header button that opens a short list of actions.
  *
- * A tablet is the working surface here, not a wide desktop, and six competing
- * buttons wrapped the header onto a second and third row — chrome that ate half
- * the screen the page is supposed to occupy. The actions stay one tap away and
- * spelled out; they just stop claiming permanent space.
+ * A tablet is the working surface here, not a wide desktop, and buttons that
+ * each claim permanent space wrapped the header onto a second and third row —
+ * chrome eating the screen the page is supposed to occupy. Used twice: to fold
+ * the ways of adding pages behind the one verb they share, and to keep the
+ * secondary actions one tap away on a narrow screen.
  */
-function MoreMenu({ items }: { items: { label: string; icon: typeof Plus; onClick: () => void; disabled?: boolean }[] }) {
+function ActionMenu({
+  items, trigger, label, className, tour,
+}: {
+  items: MenuItem[];
+  trigger: React.ReactNode;
+  label: string;
+  className?: string;
+  tour?: string;
+}) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [open]);
+
   return (
-    <div data-tour="nb-more" className="relative shrink-0 xl:hidden">
+    <div data-tour={tour} className={cn("relative shrink-0", className)}>
       <Button
         variant="secondary"
-        aria-label="More actions"
+        aria-label={label}
+        aria-haspopup="menu"
         aria-expanded={open}
         onPointerDown={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
       >
-        <MoreHorizontal className="h-5 w-5" strokeWidth={2.5} />
+        {trigger}
       </Button>
       {open && (
         <div
+          role="menu"
           onPointerDown={(e) => e.stopPropagation()}
-          className="absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-[16px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)]"
+          className="absolute right-0 top-full z-40 mt-2 w-[min(19rem,calc(100vw-24px))] overflow-hidden rounded-[16px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)]"
         >
-          {items.map(({ label, icon: Icon, onClick, disabled }) => (
+          {items.map(({ label: item, icon: Icon, onClick, disabled, hint }) => (
             <button
-              key={label}
+              key={item}
               type="button"
+              role="menuitem"
               disabled={disabled}
               onClick={() => { setOpen(false); onClick(); }}
-              className="flex h-12 w-full items-center gap-2.5 px-4 text-left font-display text-[17px] font-bold text-pine hover:bg-oat disabled:opacity-50"
+              className="flex w-full items-start gap-2.5 px-4 py-3 text-left hover:bg-oat disabled:opacity-50"
             >
-              <Icon className="h-5 w-5 shrink-0" strokeWidth={2.5} /> {label}
+              <Icon className="mt-0.5 h-5 w-5 shrink-0 text-pine" strokeWidth={2.5} />
+              <span className="min-w-0">
+                <span className="block font-display text-[17px] font-bold text-pine">{item}</span>
+                {hint && <span className="block text-[16px] leading-snug text-pine/65">{hint}</span>}
+              </span>
             </button>
           ))}
         </div>

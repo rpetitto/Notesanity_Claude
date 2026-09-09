@@ -109,8 +109,8 @@ export const TOURS: Record<string, TourStep[]> = {
       target: "class-student-notebooks",
       title: "Notebooks students make",
       body:
-        "Anything a student starts in this class shows up here. You can read them; you can't " +
-        "write in them, and they're never assigned.",
+        "Anything a student starts in this class shows up here. You can read them, and write on " +
+        "any page the student opens to you — never more than that, and never assigned.",
     },
   ],
 
@@ -130,11 +130,11 @@ export const TOURS: Record<string, TourStep[]> = {
         "heading in your own handwriting.",
     },
     {
-      target: ["nb-add-pages", "nb-more"],
+      target: "nb-add-pages",
       title: "More paper, any time",
       body:
-        "Add another document's worth of pages, or blank paper in the ruling you want — lined, " +
-        "graph, dot grid, staves.",
+        "Blank paper in the ruling you want, a PDF or document off your machine, or a file " +
+        "straight out of your Google Drive.",
     },
     {
       target: ["nb-rail", "nb-pages-button"],
@@ -209,8 +209,8 @@ export const TOURS: Record<string, TourStep[]> = {
       target: "class-my-notebook",
       title: "Your own notebook for this class",
       body:
-        "Notes that live with the class rather than with you. Your teacher can read them, but " +
-        "can't write in them or grade them.",
+        "Notes that live with the class rather than with you. Your teacher can read them, and " +
+        "write on any page you open to them — nothing is graded here.",
     },
   ],
 
