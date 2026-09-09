@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, PanelLeft, Pencil, Plus, Send, Undo2 } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, PanelLeft, Pencil, PenSquare, Plus, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
-import { parseLayer } from "../lib/ink";
+import { parseLayer, TEACHER_COLORS } from "../lib/ink";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
 import NotebookSurface, { type LayerMap, type ZoomMode } from "../components/NotebookSurface";
@@ -97,6 +97,9 @@ function PageRail({
           <span className="mt-0.5 block text-[16px] text-pine/55">
             #{number}
             {assigned && <span className="font-bold text-pine"> · assigned</span>}
+            {/* Said on both sides of the same page: the student sees what
+                they've opened, the teacher sees where their pen works. */}
+            {page.teacher_annotate ? <span className="font-bold text-pine"> · teacher can write</span> : null}
           </span>
         </span>
       </button>
@@ -201,6 +204,106 @@ function PageOptionsModal({
       <div className="mt-6 flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
         <Button variant="primary" onClick={() => onSave({ label: label.trim(), groupName: group.trim() })} disabled={busy}>
+          {busy ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Which pages the teacher may write on.
+ *
+ * A list with checkboxes rather than a switch per page in the rail: deciding
+ * this is a sitting-down decision about the notebook — "these three, not the
+ * rest" — and doing it one page at a time from a menu buries it. Saving sends
+ * only what changed, so a student who ticks one box doesn't rewrite the
+ * permission on every other page.
+ */
+function TeacherAccessModal({
+  pages, busy, onClose, onSave,
+}: {
+  pages: PageRec[];
+  busy: boolean;
+  onClose: () => void;
+  onSave: (open: string[], close: string[]) => void;
+}) {
+  const [open, setOpen] = useState<Set<string>>(
+    () => new Set(pages.filter((p) => p.teacher_annotate).map((p) => p.id)),
+  );
+  const was = useMemo(
+    () => new Set(pages.filter((p) => p.teacher_annotate).map((p) => p.id)),
+    [pages],
+  );
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  const changed = pages.some((p) => open.has(p.id) !== was.has(p.id));
+
+  return (
+    <Modal onClose={onClose} title="Let your teacher write on…">
+      <p className="mb-4 text-[16px] text-pine/70">
+        This notebook is yours. Your teacher can already read it — tick a page to let them write
+        on it too, in their own color. They still can't change what you wrote, and untick it any
+        time to close it again.
+      </p>
+
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <span className="label-caps text-pine/60">
+          {open.size} of {pages.length} open
+        </span>
+        <div className="flex gap-2">
+          <Button size="sm" variant="secondary" onClick={() => setOpen(new Set(pages.map((p) => p.id)))}>
+            All pages
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setOpen(new Set())}>
+            None
+          </Button>
+        </div>
+      </div>
+
+      <ul className="max-h-[46vh] overflow-y-auto rounded-[12px] border-[3px] border-pine">
+        {pages.map((page, i) => {
+          const on = open.has(page.id);
+          return (
+            <li key={page.id} className="border-b-2 border-pine/12 last:border-b-0">
+              <label className="flex min-h-[52px] cursor-pointer items-center gap-3 px-3 py-2 hover:bg-oat">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggle(page.id)}
+                  className="h-5 w-5 shrink-0 accent-[#20302C]"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[16px] font-bold text-pine">
+                    {page.label || `Page ${i + 1}`}
+                  </span>
+                  {page.group_name ? (
+                    <span className="block truncate text-[16px] text-pine/60">{page.group_name}</span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 text-[16px] text-pine/55">#{i + 1}</span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button
+          variant="primary"
+          disabled={busy || !changed}
+          onClick={() =>
+            onSave(
+              pages.filter((p) => open.has(p.id) && !was.has(p.id)).map((p) => p.id),
+              pages.filter((p) => !open.has(p.id) && was.has(p.id)).map((p) => p.id),
+            )
+          }
+        >
           {busy ? "Saving…" : "Save"}
         </Button>
       </div>
@@ -401,6 +504,17 @@ export default function Workspace() {
   const readOnly = Boolean(data?.readOnly);
 
   /**
+   * A student's own notebook inside a class, and the two sides of it.
+   *
+   * `ownsStudentNotebook` is the student: theirs to decide who may write in it.
+   * `annotating` is a teacher of that class on a page the student opened — a
+   * reader everywhere else in this screen, which is why `readOnly` stays true
+   * and only the pen is handed back.
+   */
+  const ownsStudentNotebook = data?.notebook.kind === "student" && !readOnly;
+  const annotating = Boolean(readOnly && data?.canAnnotate);
+
+  /**
    * Naming and sectioning belongs to whoever owns the notebook. That is the
    * student in their own book, and nobody in a notebook the teacher built —
    * there the pages are the teacher's, and the server refuses anyway.
@@ -410,6 +524,36 @@ export default function Workspace() {
 
   const [editingPage, setEditingPage] = useState<PageRec | null>(null);
   const [editingSection, setEditingSection] = useState<{ name: string; pageIds: string[] } | null>(null);
+  const [accessOpen, setAccessOpen] = useState(false);
+
+  /**
+   * Open and close pages to the teacher in one save.
+   *
+   * Two calls rather than one endpoint taking both lists: the bulk route
+   * already applies one action to a selection, and a student changing their
+   * mind about three pages is not worth a third shape of request.
+   */
+  const saveAccess = useMutation({
+    mutationFn: async ({ open, close }: { open: string[]; close: string[] }) => {
+      if (open.length) {
+        await api.post(`/api/notebooks/${notebookId}/pages/bulk`, { pageIds: open, action: "open-to-teacher" });
+      }
+      if (close.length) {
+        await api.post(`/api/notebooks/${notebookId}/pages/bulk`, { pageIds: close, action: "close-to-teacher" });
+      }
+      return { open: open.length, close: close.length };
+    },
+    onSuccess: async ({ open, close }) => {
+      await qc.invalidateQueries({ queryKey: ["work", notebookId] });
+      setAccessOpen(false);
+      toast.success(
+        open && close ? "Teacher access updated"
+          : open ? `${open} page${open === 1 ? "" : "s"} open to your teacher`
+          : `${close} page${close === 1 ? "" : "s"} closed`,
+      );
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
 
   const savePage = useMutation({
@@ -441,13 +585,25 @@ export default function Workspace() {
 
   const work = useNotebookWork({
     notebookId,
-    writeTarget: locked || readOnly ? null : "student",
+    // The teacher invited onto a page writes on the teacher layer, exactly as
+    // they would when grading. Which pages accept it is decided per page below.
+    writeTarget: annotating ? "teacher" : locked || readOnly ? null : "student",
     data,
   });
 
   const [tool, setTool] = useState<ToolState>({
     kind: "select", color: "#202124", width: 2.5, stamp: "⭐", fontSize: 14, erase: "quick",
   });
+
+  // A teacher invited into a student's notebook writes in the grading palette,
+  // the way they would anywhere else they mark. Set once, when we learn that's
+  // the situation — after that the color is theirs to change.
+  const paletteSet = useRef(false);
+  useEffect(() => {
+    if (!annotating || paletteSet.current) return;
+    paletteSet.current = true;
+    setTool((t) => ({ ...t, color: TEACHER_COLORS[0] }));
+  }, [annotating]);
   const [fingerDraw, setFingerDraw] = useState<boolean>(() => {
     try { return localStorage.getItem(FINGER_KEY) === "1"; } catch { return false; }
   });
@@ -546,6 +702,12 @@ export default function Workspace() {
    * to a class notebook, which belongs to the teacher who published it.
    */
   const isPersonal = (data as any)?.notebook?.kind === "personal";
+
+  const openToTeacher = useMemo(
+    () => new Set(pages.filter((p) => p.teacher_annotate).map((p) => p.id)),
+    [pages],
+  );
+
   const [blankOpen, setBlankOpen] = useState(false);
   const [exporting, setExporting] = useState("");
 
@@ -652,6 +814,14 @@ export default function Workspace() {
         </div>
 
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {ownsStudentNotebook && (
+            <Button variant="secondary" onClick={() => setAccessOpen(true)}>
+              <PenSquare className="h-4 w-4" strokeWidth={2.5} />
+              {openToTeacher.size > 0
+                ? `Teacher can write on ${openToTeacher.size}`
+                : "Let your teacher write"}
+            </Button>
+          )}
           {isPersonal && (
             <>
               <Button variant="secondary" onClick={() => setBlankOpen(true)}>
@@ -706,6 +876,15 @@ export default function Workspace() {
         />
       )}
 
+      {accessOpen && (
+        <TeacherAccessModal
+          pages={pages}
+          busy={saveAccess.isPending}
+          onClose={() => setAccessOpen(false)}
+          onSave={(open, close) => saveAccess.mutate({ open, close })}
+        />
+      )}
+
       {editingSection && (
         <SectionRenameModal
           name={editingSection.name}
@@ -719,7 +898,15 @@ export default function Workspace() {
       {readOnly && (
         <div className="flex items-center gap-2 border-b-2 border-pine/15 bg-oat px-4 py-2 text-[16px] text-pine/80">
           <Eye className="h-4 w-4" strokeWidth={2.5} />
-          {data.student?.name ? `${data.student.name}'s own notebook` : "A student's own notebook"} — you can read it, but it isn't yours to write in or assign.
+          {data.student?.name ? `${data.student.name}'s own notebook` : "A student's own notebook"} —{" "}
+          {annotating && openToTeacher.size > 0 ? (
+            <>
+              they've opened {openToTeacher.size} page{openToTeacher.size === 1 ? "" : "s"} for you to
+              write on, marked in the list. The rest is theirs to read only, and none of it is assigned.
+            </>
+          ) : (
+            <>you can read it, but it isn't yours to write in or assign.</>
+          )}
         </div>
       )}
       {locked && !marked && (
@@ -750,9 +937,21 @@ export default function Workspace() {
       {/* No pen where there is nothing to write on: handed-in work, or someone
           else's notebook. Offering a tool that silently does nothing is worse
           than not offering it. */}
-      {!locked && !readOnly && (
+      {/* Offering a pen that silently does nothing is worse than not offering
+          it, and the toolbar is a single row for the whole notebook — so where
+          the pen doesn't work, the page says so. */}
+      {annotating && openToTeacher.size > 0 && visiblePage && !openToTeacher.has(visiblePage) && (
+        <div className="flex items-center gap-2 border-b-2 border-[#8a6a1f]/40 bg-[#f7e6bf] px-4 py-2 text-[16px] text-[#5c4611]">
+          <Eye className="h-4 w-4" strokeWidth={2.5} />
+          This page isn't one of the ones opened to you — your pen won't write here.
+        </div>
+      )}
+
+      {(annotating ? openToTeacher.size > 0 : !locked && !readOnly) && (
         <div className="overflow-x-auto">
           <InkToolbar
+            teacherPalette={annotating}
+            allowComments={annotating}
             tool={tool}
             onToolChange={setTool}
             fingerDraw={fingerDraw}
@@ -854,7 +1053,11 @@ export default function Workspace() {
             teacherLayers={work.teacherLayers}
           masterLayers={masterLayers}
             fieldValues={work.fieldValues}
-            writeTarget={locked || readOnly ? null : "student"}
+            writeTarget={
+              annotating
+                ? (pageId) => (openToTeacher.has(pageId) ? "teacher" : null)
+                : locked || readOnly ? null : "student"
+            }
             tool={tool}
             fingerDraw={fingerDraw}
             zoom={zoom}
@@ -872,9 +1075,8 @@ export default function Workspace() {
 
       {/* Only where there is something to be shown how to use: not over
           handed-in work, and not in a notebook the viewer can only read. */}
-      {!readOnly && !locked && !editingPage && !editingSection && !blankOpen && !mobileRailOpen && (
-        <Tour place="notebook" />
-      )}
+      {!readOnly && !locked && !editingPage && !editingSection && !blankOpen && !mobileRailOpen &&
+        !accessOpen && <Tour place="notebook" />}
     </div>
   );
 }

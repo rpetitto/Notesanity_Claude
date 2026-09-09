@@ -39,9 +39,11 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "September 9, 2026",
-    "A short walkthrough the first time you land on a screen.",
+    "A short walkthrough, and a way to ask your teacher to write on a page.",
     [
       ["new", "The first time you open your home screen, a class, or a notebook, a short guided tour points out what each button does. Teachers and students get different ones, because they're looking at different things. Skip it or finish it and it won't come back — and you can start all of them over from <b>Settings</b> if you want another look."],
+      ["new", "A student can open pages of their own class notebook to their teacher. Choose <b>Let your teacher write</b>, tick the pages, and the teacher gets a pen on those pages and no others. They still can't change what the student wrote, and unticking closes a page again."],
+      ["better", "Dragging a page to a new place in a notebook shows it there straight away instead of waiting for the save. Saving the new order is also one request now rather than one per page, so a fifty-page notebook rearranges in about the time a five-page one used to."],
     ],
   ],
   [

@@ -96,6 +96,11 @@ export interface PageRec {
    */
   pattern?: string;
   pattern_color?: string;
+  /**
+   * Student-owned notebooks only: the owner has opened this page for a teacher
+   * of the class to write on. 0 or absent everywhere else.
+   */
+  teacher_annotate?: number;
 }
 
 export interface FieldRec {
@@ -144,6 +149,12 @@ export interface WorkResponse {
   isTeacher: boolean;
   /** Set when the viewer may read this notebook but not write in it. */
   readOnly?: boolean;
+  /**
+   * Set for a teacher of the class looking into a student's own notebook: they
+   * may write on the pages whose `teacher_annotate` the student has turned on,
+   * and nothing else. Always paired with `readOnly`.
+   */
+  canAnnotate?: boolean;
 }
 
 export interface AssignmentSummary {

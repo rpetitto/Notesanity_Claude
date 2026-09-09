@@ -95,7 +95,14 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   // A student's own notebook in a class is nobody else's to write in. The
   // owner works in it exactly as they would a personal notebook; a teacher of
   // the class may read it, which is what `readOnly` carries to the callers that
-  // save — there is no teacher layer here and no marking.
+  // save — there is no marking here and no grade.
+  //
+  // The one exception is the student's own doing: they can open individual
+  // pages for their teacher to write on. `canAnnotate` says the caller is that
+  // teacher; which pages they were invited onto is a per-page question, asked
+  // where the writing happens. `readOnly` stays true either way, because
+  // everything else — the answers, the responses, the notebook itself — is
+  // still not theirs.
   if (nb.kind === "student") {
     const { user: u, isTeacher: teachesClass } = await requireClassMember(c, nb.class_id);
     const owns = nb.owner_id === u.id;
@@ -104,7 +111,10 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
       throw new HttpError(403, "That notebook belongs to one student");
     }
     const instance = await ensureInstance(nb, nb.owner_id, false);
-    return { nb, user: u, isTeacher: false, instance, studentId: nb.owner_id, readOnly: !owns };
+    return {
+      nb, user: u, isTeacher: false, instance, studentId: nb.owner_id,
+      readOnly: !owns, canAnnotate: !owns && teachesClass,
+    };
   }
 
   // In a personal notebook the owner is the one writing, not a teacher looking
@@ -124,7 +134,7 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   }
 
   const instance = await ensureInstance(nb, studentId, nb.kind !== "personal");
-  return { nb, user, isTeacher, instance, studentId, readOnly: false };
+  return { nb, user, isTeacher, instance, studentId, readOnly: false, canAnnotate: false };
 }
 
 /**
@@ -166,11 +176,12 @@ async function ensureInstance(nb: any, studentId: string, checkEnrolment: boolea
  */
 app.get("/api/notebooks/:id/work", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { nb, isTeacher, instance, studentId, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
+  const { nb, isTeacher, instance, studentId, readOnly, canAnnotate } = await resolveInstance(c, param(c, "id"), studentParam);
 
   const pages = await db
     .prepare(
-      `SELECT id, seq, asset_key, source_index, width, height, label, group_name, pattern, pattern_color
+      `SELECT id, seq, asset_key, source_index, width, height, label, group_name, pattern, pattern_color,
+              teacher_annotate
          FROM pages WHERE notebook_id = ? AND archived = 0 ORDER BY seq`,
     )
     .bind(nb.id)
@@ -241,6 +252,9 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     // A teacher looking into a student's own notebook is a reader. Told plainly
     // here so the client doesn't offer a pen whose every save would be refused.
     readOnly,
+    // ...except on the pages the student opened up. The pages carry
+    // `teacher_annotate`, so the client can offer the pen exactly there.
+    canAnnotate,
     canEditStudentLayer: !readOnly && (!isTeacher || studentId === (await requireUser(c)).id),
   });
 }));
@@ -254,8 +268,7 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
  */
 app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { user, isTeacher, instance, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
-  if (readOnly) throw new HttpError(403, "This is the student's own notebook — you can read it, not write in it");
+  const { user, isTeacher, instance, readOnly, canAnnotate } = await resolveInstance(c, param(c, "id"), studentParam);
   const pageId = param(c, "pageId");
   const body = await c.req.json<{
     kind: "student" | "teacher";
@@ -271,7 +284,34 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   }>();
   const kind = body.kind === "teacher" ? "teacher" : "student";
 
-  if (kind === "teacher" && !isTeacher) throw new HttpError(403, "Only teachers can add grading markup");
+  // A reader may write in exactly one circumstance: they teach the class, the
+  // notebook is the student's own, this is the teacher layer, and the student
+  // opened this page. Checked here rather than in `resolveInstance` because
+  // it is a fact about a page, and this is the only route that writes to one.
+  if (readOnly) {
+    const invited = kind === "teacher" && canAnnotate
+      ? await db
+          .prepare(`SELECT 1 FROM pages WHERE id = ? AND notebook_id = ? AND teacher_annotate = 1`)
+          .bind(pageId, instance.notebook_id)
+          .first()
+      : null;
+    if (!invited) {
+      throw new HttpError(
+        403,
+        !canAnnotate
+          ? "This is the student's own notebook — you can read it, not write in it"
+          : kind === "student"
+            // Being invited onto a page is permission to add your own marks to
+            // it, never to alter what the student wrote.
+            ? "That's the student's own writing — yours goes on the teacher layer"
+            : "This page isn't open for you to write on — the student decides which pages are.",
+      );
+    }
+  }
+
+  if (kind === "teacher" && !isTeacher && !canAnnotate) {
+    throw new HttpError(403, "Only teachers can add grading markup");
+  }
   if (kind === "student" && isTeacher && instance.student_id !== user.id) {
     throw new HttpError(403, "Teachers annotate on the teacher layer, not the student's");
   }

@@ -659,3 +659,23 @@ migrate("019_user_tours", async () => {
     )
   `).run();
 });
+
+/**
+ * Per-page permission for a teacher to write on a student's own notebook.
+ *
+ * Only meaningful on a notebook a student made for themselves (`kind` =
+ * 'student'), where the standing rule is that a teacher of the class may read
+ * and nothing more. This is the student lifting that rule for one page at a
+ * time — "look at this bit" — rather than for the book.
+ *
+ * A column on `pages` rather than a grants table because a student notebook's
+ * pages belong to it alone: there is exactly one row per page either way, and
+ * this way a deleted page cannot leave a permission behind it. It stays 0 on
+ * every page of a class or personal notebook, where nothing reads it.
+ */
+migrate("020_page_teacher_annotate", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(pages)`).all<{ name: string }>();
+  if (!(cols.results ?? []).some((c) => c.name === "teacher_annotate")) {
+    await db.prepare(`ALTER TABLE pages ADD COLUMN teacher_annotate INTEGER NOT NULL DEFAULT 0`).run();
+  }
+});

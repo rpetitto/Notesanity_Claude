@@ -318,11 +318,43 @@ export default function NotebookEditor() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /**
+   * Reordering, applied to the list before the server hears about it.
+   *
+   * A drop is a direct manipulation: the page has to be where it was dropped
+   * the instant it lands, or the list reads as broken however fast the request
+   * is. The entries already carry the whole new order, so the cache can be
+   * rewritten from them and the refetch afterwards only confirms it. On a
+   * failure the previous order is put back and the error is shown, rather than
+   * leaving a lie on screen.
+   */
   const arrangePages = useMutation({
     mutationFn: (entries: ArrangeEntry[]) =>
       api.post(`/api/notebooks/${notebookId}/pages/arrange`, { pages: entries }),
-    onSuccess: () => invalidate(),
-    onError: (e: Error) => toast.error(e.message),
+    onMutate: async (entries: ArrangeEntry[]) => {
+      await qc.cancelQueries({ queryKey: ["notebook", notebookId] });
+      const previous = qc.getQueryData<NotebookResponse>(["notebook", notebookId]);
+      qc.setQueryData<NotebookResponse>(["notebook", notebookId], (old) => {
+        if (!old) return old;
+        const byId = new Map(old.pages.map((p) => [p.id, p]));
+        const moved = entries
+          .map((e, i) => {
+            const page = byId.get(e.id);
+            return page && { ...page, seq: i + 1, group_name: e.groupName ?? page.group_name };
+          })
+          .filter(Boolean) as typeof old.pages;
+        // Archived pages aren't in the drag list and mustn't be dropped from
+        // the cache by reordering the ones that are.
+        const untouched = old.pages.filter((p) => !entries.some((e) => e.id === p.id));
+        return { ...old, pages: [...moved, ...untouched] };
+      });
+      return { previous };
+    },
+    onError: (e: Error, _entries, context) => {
+      if (context?.previous) qc.setQueryData(["notebook", notebookId], context.previous);
+      toast.error(e.message);
+    },
+    onSettled: () => invalidate(),
   });
 
   const deletePages = useMutation({
@@ -597,10 +629,16 @@ export default function NotebookEditor() {
               { label: "Blank pages", icon: Rows3, onClick: () => setBlankOpen(true), disabled: !!busyMessage },
             ]}
           />
-          {hasUnpublishedAnnotations && (
-            <span className="hidden xl:inline-flex">
+          {/* Only once students actually have the notebook. On a draft nothing
+              has been sent yet, so "not sent" says nothing — and next to the
+              "Published" chip it read as a second, contradictory status. */}
+          {hasUnpublishedAnnotations && notebook.status === "published" && (
+            <span
+              className="hidden xl:inline-flex"
+              title="You've written on these pages since the last update. Press Update student notebooks to send it to them."
+            >
               <Chip tone="warn" icon={<Pen className="h-4 w-4" strokeWidth={2.5} />}>
-                Unpublished annotations
+                Your writing isn't sent yet
               </Chip>
             </span>
           )}

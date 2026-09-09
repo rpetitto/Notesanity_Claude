@@ -32,6 +32,8 @@ export function buildLayerMaps(layers: LayerRec[]) {
  */
 export type ZoomMode = "page" | "width" | number;
 
+export type WriteTarget = "student" | "teacher" | null;
+
 interface Props {
   notebookId: string;
   pages: PageRec[];
@@ -41,7 +43,12 @@ interface Props {
   /** Published teacher template annotations, keyed by page id — painted below student ink, never editable. */
   masterLayers?: LayerMap;
   fieldValues: Record<string, FieldValue>;
-  writeTarget: "student" | "teacher" | null;
+  /**
+   * Which layer this session writes to, or `null` for read-only. A function is
+   * asked per page: a student can open individual pages of their own notebook
+   * to their teacher, so writability is a property of the page, not the screen.
+   */
+  writeTarget: WriteTarget | ((pageId: string) => WriteTarget);
   tool: ToolState;
   fingerDraw: boolean;
   zoom: ZoomMode;
@@ -140,7 +147,9 @@ export default function NotebookSurface({
     <div ref={containerRef} className="h-full overflow-auto bg-oat" style={{ overscrollBehavior: "contain" }}>
       {header}
       <div className="flex flex-col items-center gap-6 px-4 py-6">
-        {pages.map((page, i) => (
+        {pages.map((page, i) => {
+          const target = typeof writeTarget === "function" ? writeTarget(page.id) : writeTarget;
+          return (
           <div
             key={page.id}
             ref={(node) => { pageRefs.current[page.id] = node; }}
@@ -160,8 +169,8 @@ export default function NotebookSurface({
                 studentLayer={studentLayers[page.id] ?? emptyLayer()}
                 teacherLayer={teacherLayers[page.id] ?? emptyLayer()}
                 masterLayer={masterLayers?.[page.id]}
-                onLayerChange={writeTarget ? handleLayerChange(page.id) : undefined}
-                writeTarget={writeTarget}
+                onLayerChange={target ? handleLayerChange(page.id) : undefined}
+                writeTarget={target}
                 tool={tool}
                 fingerDraw={fingerDraw}
                 fieldsEditable={fieldsEditable}
@@ -173,7 +182,8 @@ export default function NotebookSurface({
               />
             </LazyPage>
           </div>
-        ))}
+          );
+        })}
         <div className="h-16" />
       </div>
     </div>

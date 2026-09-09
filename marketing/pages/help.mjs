@@ -150,8 +150,15 @@ const BODY = () => `
       ],
       [
         "What can a teacher do with a student's own notebook?",
-        `Read it. Nothing else — a teacher can't write in one, add pages to it, or set it as an
-         assignment, and classmates can't see it at all.`,
+        `Read it — and write on any page the student has opened to them. Nothing else: a teacher
+         can't change what the student wrote, add pages, or set the notebook as an assignment,
+         and classmates can't see it at all.`,
+      ],
+      [
+        "How do I let my teacher write on a page?",
+        `Open your notebook and choose <b>Let your teacher write</b> at the top, then tick the
+         pages you want. Their writing goes on top of yours in their own color, they can't change
+         what you wrote, and unticking a page closes it again.`,
       ],
       [
         "Can students name and organize their own pages?",

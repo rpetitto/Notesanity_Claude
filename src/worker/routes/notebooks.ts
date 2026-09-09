@@ -295,14 +295,26 @@ app.patch("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
     .bind(param(c, "pageId"), nb.id)
     .first<any>();
   if (!page) throw new HttpError(404, "Page not found");
-  const body = await c.req.json<{ archived?: boolean; label?: string; seq?: number; groupName?: string }>();
+  const body = await c.req.json<{
+    archived?: boolean; label?: string; seq?: number; groupName?: string;
+    /** Student-owned notebooks only: let a teacher of the class write on this page. */
+    teacherAnnotate?: boolean;
+  }>();
+  // Only the owner of a student notebook reaches this route at all (a teacher
+  // of the class is `isTeacher: false` here), so the caller is already the
+  // right person. Refusing it elsewhere keeps the flag from acquiring a second
+  // meaning on notebooks where nothing reads it.
+  if (body.teacherAnnotate !== undefined && nb.kind !== "student") {
+    throw new HttpError(400, "Only a student's own notebook can be opened up page by page");
+  }
   await db
-    .prepare(`UPDATE pages SET archived = ?, label = ?, seq = ?, group_name = ? WHERE id = ?`)
+    .prepare(`UPDATE pages SET archived = ?, label = ?, seq = ?, group_name = ?, teacher_annotate = ? WHERE id = ?`)
     .bind(
       body.archived === undefined ? page.archived : body.archived ? 1 : 0,
       body.label ?? page.label,
       body.seq ?? page.seq,
       body.groupName === undefined ? page.group_name : body.groupName,
+      body.teacherAnnotate === undefined ? page.teacher_annotate ?? 0 : body.teacherAnnotate ? 1 : 0,
       page.id,
     )
     .run();
@@ -326,10 +338,13 @@ app.post("/api/notebooks/:id/pages/bulk", handler(async (c) => {
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
   const { pageIds, action, groupName } = await c.req.json<{
     pageIds: string[];
-    action: "group" | "ungroup" | "archive" | "restore" | "delete";
+    action: "group" | "ungroup" | "archive" | "restore" | "delete" | "open-to-teacher" | "close-to-teacher";
     groupName?: string;
   }>();
   if (!Array.isArray(pageIds) || pageIds.length === 0) throw new HttpError(400, "No pages selected");
+  if ((action === "open-to-teacher" || action === "close-to-teacher") && nb.kind !== "student") {
+    throw new HttpError(400, "Only a student's own notebook can be opened up page by page");
+  }
 
   if (action === "delete") {
     const result = await deletePages(nb.id, pageIds);
@@ -348,6 +363,11 @@ app.post("/api/notebooks/:id/pages/bulk", handler(async (c) => {
       await db.prepare(`UPDATE pages SET group_name = '' WHERE id = ?`).bind(pid).run();
     } else if (action === "archive" || action === "restore") {
       await db.prepare(`UPDATE pages SET archived = ? WHERE id = ?`).bind(action === "archive" ? 1 : 0, pid).run();
+    } else if (action === "open-to-teacher" || action === "close-to-teacher") {
+      await db
+        .prepare(`UPDATE pages SET teacher_annotate = ? WHERE id = ?`)
+        .bind(action === "open-to-teacher" ? 1 : 0, pid)
+        .run();
     }
   }
 
@@ -439,24 +459,25 @@ app.post("/api/notebooks/:id/pages/arrange", handler(async (c) => {
   const { pages } = await c.req.json<{ pages: { id: string; groupName?: string }[] }>();
   if (!Array.isArray(pages) || pages.length === 0) throw new HttpError(400, "No pages to arrange");
 
-  let seq = 1;
-  for (const p of pages) {
-    const owned = await db
-      .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
-      .bind(p.id, nb.id)
-      .first();
-    if (!owned) continue;
-    if (p.groupName === undefined) {
-      await db.prepare(`UPDATE pages SET seq = ? WHERE id = ?`).bind(seq, p.id).run();
-    } else {
-      await db
-        .prepare(`UPDATE pages SET seq = ?, group_name = ? WHERE id = ?`)
-        .bind(seq, p.groupName, p.id)
-        .run();
-    }
-    seq++;
-  }
-  await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
+  /*
+   * One batch, not a round-trip per page.
+   *
+   * Dragging one page sends the whole order — that is what makes `seq` a
+   * simple 1..n — so a fifty-page notebook was fifty selects and fifty updates,
+   * each paying the database's latency in turn. A drop took long enough that
+   * the list looked stuck. The ownership check moves into the UPDATE's WHERE
+   * clause, which is where it was really being asked anyway: a page id from
+   * another notebook now matches nothing instead of being skipped.
+   */
+  const statements = pages.map((p, i) =>
+    p.groupName === undefined
+      ? db.prepare(`UPDATE pages SET seq = ? WHERE id = ? AND notebook_id = ?`).bind(i + 1, p.id, nb.id)
+      : db
+          .prepare(`UPDATE pages SET seq = ?, group_name = ? WHERE id = ? AND notebook_id = ?`)
+          .bind(i + 1, p.groupName, p.id, nb.id),
+  );
+  statements.push(db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id));
+  await db.batch(statements);
   return c.json({ ok: true, arranged: pages.length });
 }));
 
