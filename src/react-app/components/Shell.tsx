@@ -77,6 +77,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
               <Link
                 key={to}
                 to={to}
+                data-tour={`nav-${to.slice(1)}`}
                 className={cn(
                   "flex min-h-[44px] shrink-0 items-center gap-2 rounded-full border-[3px] px-4 font-display text-[16px] font-bold transition-colors",
                   pathname.startsWith(to)
@@ -118,6 +119,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
             <Link
               key={to}
               to={to}
+              data-tour={`nav-${to.slice(1)}-mobile`}
               className={cn(
                 // `min-w-0` is what lets a long label shrink; without it the
                 // row's min-content width pushed the bar past the viewport.

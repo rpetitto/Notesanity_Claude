@@ -633,3 +633,29 @@ migrate("018_contact_requests", async () => {
   `).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_contact_created ON contact_requests(created_at DESC)`).run();
 });
+
+/**
+ * Which guided tours a person has finished or waved away.
+ *
+ * One row per tour they are done with; the absence of a row is what makes a
+ * tour run. Keyed by role as well as place — `teacher.class` and
+ * `student.class` are different tours of the same screen — so a student who is
+ * later promoted to teacher is shown around again rather than left with the
+ * tour of a screen they no longer see.
+ *
+ * `status` distinguishes finishing from skipping, and `step` records how far
+ * they got. Neither changes what the app does; they are here because "everyone
+ * quits on step 3" is the only way to find out that step 3 is wrong.
+ */
+migrate("019_user_tours", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS user_tours (
+      user_id TEXT NOT NULL,
+      tour TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'completed',
+      step INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, tour)
+    )
+  `).run();
+});

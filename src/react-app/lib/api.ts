@@ -59,6 +59,12 @@ export interface Me {
   isAdmin: boolean;
   /** Platform owner: sees and edits across every school. */
   isSuperadmin?: boolean;
+  /**
+   * Guided tours this person has finished or skipped, as `role.place` keys.
+   * Carried on the session rather than fetched separately so a tour can decide
+   * whether to run in the same tick the screen renders.
+   */
+  toursSeen?: string[];
 }
 
 export interface ClassSummary {

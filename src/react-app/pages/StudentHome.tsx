@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, KeyRound, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
+import Tour from "../components/Tour";
 import { StudentAssignmentCard, type StudentAssignmentData } from "./ClassView";
 import StudentAssignmentNav, {
   WORK_EMPTY, bucketAssignments, type WorkTab,
@@ -181,7 +182,7 @@ function MyNotebooks() {
   const notebooks = data?.notebooks ?? [];
 
   return (
-    <section className="mb-8">
+    <section className="mb-8" data-tour="my-notebooks">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="label-caps text-pine/70">My notebooks</h2>
         <Button variant="secondary" onClick={() => setNewOpen(true)}>
@@ -279,7 +280,7 @@ export default function StudentHome() {
     <Shell>
       <div className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-2xl text-pine">My work</h1>
-        <Button variant="primary" onClick={() => setJoinOpen(true)}>
+        <Button variant="primary" data-tour="join-class" onClick={() => setJoinOpen(true)}>
           <KeyRound className="h-4 w-4" strokeWidth={2.5} />
           Join a class
         </Button>
@@ -315,16 +316,17 @@ export default function StudentHome() {
       <section>
         <h2 className="label-caps mb-3 text-pine/70">Assignments</h2>
 
-        <StudentAssignmentNav
-          className="mb-5"
-          value={workTab}
-          onChange={setWorkTab}
-          counts={{
-            todo: buckets.todo.length,
-            "handed-in": buckets["handed-in"].length,
-            graded: buckets.graded.length,
-          }}
-        />
+        <div data-tour="assignment-tabs" className="mb-5 inline-block max-w-full">
+          <StudentAssignmentNav
+            value={workTab}
+            onChange={setWorkTab}
+            counts={{
+              todo: buckets.todo.length,
+              "handed-in": buckets["handed-in"].length,
+              graded: buckets.graded.length,
+            }}
+          />
+        </div>
 
         {assignmentsQ.isLoading && <Spinner />}
         {assignmentsQ.error && <ErrorNote error={assignmentsQ.error as Error} />}
@@ -344,6 +346,8 @@ export default function StudentHome() {
       </section>
 
       {joinOpen && <JoinClassModal onClose={() => setJoinOpen(false)} />}
+
+      {!joinOpen && <Tour place="home" />}
     </Shell>
   );
 }

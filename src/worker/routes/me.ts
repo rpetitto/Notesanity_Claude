@@ -6,13 +6,56 @@ app.get("/api/me", handler(async (c) => {
   const user = await currentUser(c);
   if (!user) return c.json({ user: null });
   const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id).first<any>();
+  // Tours ride along with the session rather than being fetched separately. A
+  // guide that arrives a moment after the screen does is a guide that pops up
+  // over something the person had already started reading.
+  const tours = await db
+    .prepare(`SELECT tour FROM user_tours WHERE user_id = ?`)
+    .bind(user.id)
+    .all<{ tour: string }>();
   return c.json({
     user: {
       id: user.id, email: user.email, name: user.name, picture: user.picture,
       role: user.role, isAdmin: !!user.is_admin, isSuperadmin: !!user.is_superadmin,
+      toursSeen: (tours.results ?? []).map((r) => r.tour),
     },
     org: org ? { name: org.name, primaryDomain: org.primary_domain } : null,
   });
+}));
+
+/**
+ * Mark a guided tour finished or skipped.
+ *
+ * Idempotent, because the client calls it on the way out of the tour and that
+ * can happen twice — Escape and the Skip button both close it. Whichever
+ * arrives first wins, and the later one only moves `step` forward.
+ */
+app.post("/api/me/tours", handler(async (c) => {
+  const user = await requireUser(c);
+  const body = await c.req.json<{ tour?: string; status?: string; step?: number }>();
+  const tour = String(body.tour ?? "").trim().slice(0, 60);
+  if (!/^[a-z]+\.[a-z]+$/.test(tour)) throw new HttpError(400, "Unknown tour");
+  const status = body.status === "dismissed" ? "dismissed" : "completed";
+  const step = Number.isFinite(body.step) ? Math.max(0, Math.min(99, Math.floor(body.step as number))) : 0;
+
+  await db
+    .prepare(
+      `INSERT INTO user_tours (user_id, tour, status, step, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, tour) DO UPDATE SET
+         step = MAX(user_tours.step, excluded.step),
+         updated_at = excluded.updated_at`,
+    )
+    .bind(user.id, tour, status, step, now())
+    .run();
+  return c.json({ ok: true });
+}));
+
+/** Start the guides over — the way back from a tour someone skipped too early. */
+app.delete("/api/me/tours", handler(async (c) => {
+  const user = await requireUser(c);
+  await db.prepare(`DELETE FROM user_tours WHERE user_id = ?`).bind(user.id).run();
+  return c.json({ ok: true });
 }));
 
 /** First-run role choice, only available while the account is still 'pending'. */

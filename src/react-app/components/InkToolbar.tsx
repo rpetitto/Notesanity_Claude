@@ -66,7 +66,7 @@ export default function InkToolbar({
       className="flex snap-x items-center gap-2 overflow-x-auto border-b border-pine/20 bg-white/95 px-3 py-2 backdrop-blur 2xl:flex-wrap 2xl:overflow-visible"
       style={{ touchAction: "manipulation", scrollbarWidth: "thin" }}
     >
-      <div className="flex shrink-0 items-center gap-1 rounded-lg bg-oat p-1">
+      <div data-tour="ink-tools" className="flex shrink-0 items-center gap-1 rounded-lg bg-oat p-1">
         {TOOLS.map(({ kind, icon: Icon, label }) => (
           <button
             key={kind}
@@ -171,6 +171,7 @@ export default function InkToolbar({
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <button
           type="button"
+          data-tour="finger-draw"
           onClick={() => onFingerDrawChange(!fingerDraw)}
           title={fingerDraw ? "Finger draws — tap to switch back to scrolling" : "Finger scrolls — tap to draw with finger"}
           className={cn(

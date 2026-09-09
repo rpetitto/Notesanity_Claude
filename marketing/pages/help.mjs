@@ -75,6 +75,12 @@ const BODY = () => `
          entirely and is the most reliable route at a school.`,
       ],
       [
+        "Can I see the walkthrough again?",
+        `Yes. The short tours that appear the first time you open your home screen, a class or a
+         notebook can be started over under <b>Settings</b> &rarr; <b>Guided tours</b>. Skipping
+         one only hides it until you ask for it back.`,
+      ],
+      [
         "Who can create an account?",
         `Only addresses on a domain your school has approved. The first person to sign in sets
          the school up; after that an admin decides which domains count as staff and which as

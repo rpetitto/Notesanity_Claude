@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Plus, Users, BookOpen, Import } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
+import Tour from "../components/Tour";
 import { Button, Input, Label, Modal } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
@@ -221,12 +222,12 @@ export default function TeacherHome() {
             them, so they drop to their own line rather than push the page. */}
         <div className="flex flex-wrap items-center gap-2">
           {hasGoogleClientId && (
-            <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>
+            <Button type="button" variant="secondary" data-tour="import-classroom" onClick={() => setImportOpen(true)}>
               <Import className="h-4 w-4" strokeWidth={2.5} />
               Import from Classroom
             </Button>
           )}
-          <Button type="button" variant="primary" onClick={() => setNewClassOpen(true)}>
+          <Button type="button" variant="primary" data-tour="new-class" onClick={() => setNewClassOpen(true)}>
             <Plus className="h-4 w-4" strokeWidth={2.5} />
             New class
           </Button>
@@ -257,6 +258,10 @@ export default function TeacherHome() {
 
       {newClassOpen && <NewClassModal onClose={() => setNewClassOpen(false)} />}
       {importOpen && <ImportClassroomModal onClose={() => setImportOpen(false)} />}
+
+      {/* Only while nothing else is open: a spotlight over a modal would ring
+          the form rather than the button the step is talking about. */}
+      {!newClassOpen && !importOpen && <Tour place="home" />}
     </Shell>
   );
 }

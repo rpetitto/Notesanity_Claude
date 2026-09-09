@@ -12,6 +12,7 @@ import StudentAssignmentNav, {
   WORK_EMPTY, bucketAssignments, type WorkTab,
 } from "../components/StudentAssignmentNav";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
+import Tour from "../components/Tour";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
@@ -938,13 +939,13 @@ export default function ClassView() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {isTeacher && (
-              <Button type="button" variant="secondary" onClick={() => setCustomizeOpen(true)}>
+              <Button type="button" variant="secondary" data-tour="class-customize" onClick={() => setCustomizeOpen(true)}>
                 <Palette className="h-4 w-4" strokeWidth={2.5} />
                 Customize
               </Button>
             )}
             {isTeacher && joinCode && (
-              <div className="flex items-center gap-2">
+              <div data-tour="join-code" className="flex items-center gap-2">
                 <span className="flex items-center gap-2 rounded-full border-[3px] border-pine bg-oat px-4 py-2 font-display text-[17px] tracking-[0.3em] text-pine">
                   {joinCode}
                 </span>
@@ -967,7 +968,7 @@ export default function ClassView() {
       </Card>
 
       <div className="mb-5 flex items-center gap-3 overflow-x-auto">
-        <div className="flex gap-1 rounded-full border-[3px] border-pine bg-white p-1">
+        <div data-tour="class-tabs" className="flex gap-1 rounded-full border-[3px] border-pine bg-white p-1">
           {TABS.filter((t) => t.key !== "roster" || isTeacher).map(({ key, label, studentLabel, icon: Icon }) => {
             const todoCount = key === "assignments" && !isTeacher ? studentBuckets.todo.length : 0;
             return (
@@ -1000,7 +1001,7 @@ export default function ClassView() {
 
       {tab === "notebooks" && (
         <div className="space-y-8">
-          <section>
+          <section data-tour="class-notebooks">
             {/* One input for both places the buttons appear, so it can't fall
                 out of the tree when the toolbar above the grid is hidden. */}
             {isTeacher && (
@@ -1016,7 +1017,7 @@ export default function ClassView() {
                 where a teacher is already looking — repeating them above it
                 would just be the same row twice. */}
             {isTeacher && classNotebooks.length > 0 && (
-              <div className="mb-4 flex flex-wrap justify-end gap-2">{notebookActions}</div>
+              <div data-tour="notebook-actions" className="mb-4 flex flex-wrap justify-end gap-2">{notebookActions}</div>
             )}
             {classNotebooks.length === 0 ? (
               <EmptyState
@@ -1024,7 +1025,7 @@ export default function ClassView() {
                 body={isTeacher
                   ? "Start from blank paper, or build one from a PDF, Word or PowerPoint file — yours or one in your Drive."
                   : "Your teacher hasn't shared a notebook with this class yet."}
-                action={isTeacher ? <div className="flex flex-wrap justify-center gap-2">{notebookActions}</div> : undefined}
+                action={isTeacher ? <div data-tour="notebook-actions" className="flex flex-wrap justify-center gap-2">{notebookActions}</div> : undefined}
               />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1038,7 +1039,7 @@ export default function ClassView() {
           {/* A student's own notebook lives here alongside the coursework, but
               outside it: the teacher can read it and nothing more. */}
           <section>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-t-2 border-pine/12 pt-6">
+            <div data-tour="class-student-notebooks" className="mb-3 flex flex-wrap items-center justify-between gap-3 border-t-2 border-pine/12 pt-6">
               <div className="min-w-0">
                 <h2 className="font-display text-[20px] text-pine">
                   {isTeacher ? "Student notebooks" : "My notebooks"}
@@ -1050,7 +1051,7 @@ export default function ClassView() {
                 </p>
               </div>
               {!isTeacher && (
-                <Button type="button" variant="primary" onClick={() => setMyNotebookOpen(true)} className="shrink-0">
+                <Button type="button" variant="primary" data-tour="class-my-notebook" onClick={() => setMyNotebookOpen(true)} className="shrink-0">
                   <Plus className="h-4 w-4" strokeWidth={2.5} />
                   New notebook
                 </Button>
@@ -1268,6 +1269,12 @@ export default function ClassView() {
           onClose={() => setReviewingStudent(null)}
         />
       )}
+
+      {/* The tour talks about what's on the notebooks tab, so it waits for
+          that tab and for a clear screen rather than ringing a modal. */}
+      {tab === "notebooks" &&
+        !inviteOpen && !coTeacherOpen && !newNotebookOpen && !myNotebookOpen &&
+        !customizeOpen && !reviewingStudent && <Tour place="class" />}
     </Shell>
   );
 }

@@ -11,6 +11,7 @@ import { useBackTo } from "../lib/useBackTo";
 import NotebookSurface, { type LayerMap, type ZoomMode } from "../components/NotebookSurface";
 import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
+import Tour from "../components/Tour";
 import type { ToolState } from "../components/PageCanvas";
 import { ErrorNote, Spinner, FlingBadge } from "../components/Shell";
 import { Button, Chip, IconButton, Input, Modal } from "../components/ui";
@@ -623,6 +624,7 @@ export default function Workspace() {
         </button>
         <button
           type="button"
+          data-tour="nb-pages-button"
           onClick={() => setMobileRailOpen(true)}
           className={cn(BUTTON_ROW, "sm:hidden")}
           aria-label="Show pages"
@@ -669,6 +671,7 @@ export default function Workspace() {
           {assignment && !marked && !locked && (
             <Button
               variant="primary"
+              data-tour="turn-in"
               onClick={() => {
                 if (confirm("Turn in this assignment? These pages lock once you do.")) {
                   submit.mutate();
@@ -817,7 +820,7 @@ export default function Workspace() {
 
       <div className="relative flex min-h-0 flex-1">
         {railOpen && (
-          <aside className="hidden w-[244px] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 sm:block">
+          <aside data-tour="nb-rail" className="hidden w-[244px] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 sm:block">
             {assignedIds.size > 0 && (
               <ScopeToggle showAll={showAllPages} onChange={setShowAllPages} />
             )}
@@ -866,6 +869,12 @@ export default function Workspace() {
         </div>
       </div>
       <FlingBadge />
+
+      {/* Only where there is something to be shown how to use: not over
+          handed-in work, and not in a notebook the viewer can only read. */}
+      {!readOnly && !locked && !editingPage && !editingSection && !blankOpen && !mobileRailOpen && (
+        <Tour place="notebook" />
+      )}
     </div>
   );
 }

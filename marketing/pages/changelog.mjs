@@ -38,6 +38,13 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 9, 2026",
+    "A short walkthrough the first time you land on a screen.",
+    [
+      ["new", "The first time you open your home screen, a class, or a notebook, a short guided tour points out what each button does. Teachers and students get different ones, because they're looking at different things. Skip it or finish it and it won't come back — and you can start all of them over from <b>Settings</b> if you want another look."],
+    ],
+  ],
+  [
     "September 8, 2026",
     "Notesanity moved to its own infrastructure, and got a website.",
     [

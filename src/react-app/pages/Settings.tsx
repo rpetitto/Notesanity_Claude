@@ -1,10 +1,32 @@
-import { LogOut } from "lucide-react";
+import { LogOut, RotateCcw } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { useSession, signOutHref } from "../lib/session";
-import { ButtonLink, Card, Chip } from "../components/ui";
+import { api } from "../lib/api";
+import { Button, ButtonLink, Card, Chip } from "../components/ui";
 
 export default function Settings() {
   const { user, isLoading } = useSession();
+  const qc = useQueryClient();
+
+  /**
+   * Clear the record of which tours have been seen.
+   *
+   * The cached session is corrected in place as well as on the server —
+   * otherwise the guides wouldn't come back until the session query went
+   * stale, which reads as the button having done nothing.
+   */
+  const replay = useMutation({
+    mutationFn: () => api.del("/api/me/tours"),
+    onSuccess: () => {
+      qc.setQueryData(["me"], (old: any) =>
+        old?.user ? { ...old, user: { ...old.user, toursSeen: [] } } : old,
+      );
+      toast.success("The tours will show again");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   if (isLoading) {
     return (
@@ -39,6 +61,23 @@ export default function Settings() {
           <LogOut className="h-4 w-4" strokeWidth={2.5} />
           Sign out
         </ButtonLink>
+      </Card>
+
+      <Card className="mb-6 p-5">
+        <h2 className="font-display text-[17px] text-pine">Guided tours</h2>
+        <p className="mt-1 text-[16px] text-pine/70">
+          The short walkthroughs of your home screen, a class and a notebook. Start them over and
+          you'll see each one again the next time you open that screen.
+        </p>
+        <Button
+          variant="secondary"
+          className="mt-3"
+          disabled={replay.isPending}
+          onClick={() => replay.mutate()}
+        >
+          <RotateCcw className="h-4 w-4" strokeWidth={2.5} />
+          {replay.isPending ? "Resetting…" : "Show the tours again"}
+        </Button>
       </Card>
 
       {/* School-wide administration lives on the Admin page now, so this page

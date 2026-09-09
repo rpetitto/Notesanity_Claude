@@ -17,6 +17,7 @@ import {
 import PageCanvas, { type ToolState } from "../components/PageCanvas";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
 import InkToolbar from "../components/InkToolbar";
+import Tour from "../components/Tour";
 import { emptyLayer, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData } from "../lib/ink";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
@@ -544,6 +545,7 @@ export default function NotebookEditor() {
         </IconButton>
         <button
           type="button"
+          data-tour="nb-pages-button"
           onClick={() => setPagesDrawerOpen(true)}
           className={cn(BUTTON_ROW, "sm:hidden")}
         >
@@ -573,7 +575,7 @@ export default function NotebookEditor() {
           >
             <Palette className="h-5 w-5" strokeWidth={2.5} /> Appearance
           </Button>
-          <Button variant="secondary" onClick={() => addPagesRef.current?.click()} disabled={!!busyMessage} className="hidden xl:inline-flex">
+          <Button variant="secondary" data-tour="nb-add-pages" onClick={() => addPagesRef.current?.click()} disabled={!!busyMessage} className="hidden xl:inline-flex">
             <Plus className="h-5 w-5" strokeWidth={2.5} /> {busyMessage || "Add pages"}
           </Button>
           <Button variant="secondary" onClick={() => setBlankOpen(true)} disabled={!!busyMessage} className="hidden xl:inline-flex">
@@ -581,6 +583,7 @@ export default function NotebookEditor() {
           </Button>
           <Button
             variant="secondary"
+            data-tour="nb-annotate"
             onClick={() => { setTool("none"); setAnnotateMode((v) => !v); }}
             aria-pressed={annotateMode}
             className={cn(annotateMode && "border-pine bg-pine text-oat hover:bg-pine")}
@@ -601,7 +604,7 @@ export default function NotebookEditor() {
               </Chip>
             </span>
           )}
-          <Button variant="primary" onClick={() => publish.mutate()} disabled={publish.isPending}>
+          <Button variant="primary" data-tour="nb-publish" onClick={() => publish.mutate()} disabled={publish.isPending}>
             <Send className="h-5 w-5" strokeWidth={2.5} />
             {notebook.status === "published" ? "Update student notebooks" : "Publish to students"}
           </Button>
@@ -646,7 +649,7 @@ export default function NotebookEditor() {
       {/* Annotate is a mode: while it is on, the field palette has nothing to
           do and only costs a row of an already short screen. */}
       {!annotateMode && (
-      <div className="flex items-center gap-2 overflow-x-auto border-b-2 border-pine/12 bg-white px-3 py-2 [&>*]:shrink-0">
+      <div data-tour="nb-fields" className="flex items-center gap-2 overflow-x-auto border-b-2 border-pine/12 bg-white px-3 py-2 [&>*]:shrink-0">
         <span className="label-caps text-pine/60">Student fills in:</span>
         {([
           { k: "text", label: "Text box", icon: TypeIcon },
@@ -717,7 +720,7 @@ export default function NotebookEditor() {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
+        <aside data-tour="nb-rail" className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
           {sidePanelBody(false)}
         </aside>
 
@@ -893,6 +896,12 @@ export default function NotebookEditor() {
           />
         )}
       </div>
+
+      {/* Held back until nothing is layered over the editor: a spotlight cut
+          through a drawer or an inspector would ring the wrong thing. */}
+      {!blankOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && (
+        <Tour place="notebook" />
+      )}
     </div>
   );
 }
@@ -1401,7 +1410,7 @@ function MoreMenu({ items }: { items: { label: string; icon: typeof Plus; onClic
     return () => window.removeEventListener("pointerdown", close);
   }, [open]);
   return (
-    <div className="relative shrink-0 xl:hidden">
+    <div data-tour="nb-more" className="relative shrink-0 xl:hidden">
       <Button
         variant="secondary"
         aria-label="More actions"
