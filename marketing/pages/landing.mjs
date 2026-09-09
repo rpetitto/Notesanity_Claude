@@ -156,6 +156,90 @@ const HERO_CSS = `
 }
 </style>`;
 
+/**
+ * The three steps, each with a small drawing of what that step looks like.
+ *
+ * Drawn rather than screenshotted for the same reasons as the hero, and kept
+ * deliberately schematic: a page, a stack of copies, a check mark. They are
+ * there to make the three steps scannable at a glance, not to be read — which
+ * is why they carry no words a translation would need and are hidden from
+ * screen readers entirely. The heading beside each one already says it.
+ */
+
+/** A sheet of paper with the house 4px offset shadow, drawn as a second rect. */
+const sheet = (x, y, w, h, fill = "#fff", r = 12) =>
+  `<rect x="${x + 4}" y="${y + 4}" width="${w}" height="${h}" rx="${r}" fill="#20302C"/>` +
+  `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${fill}" stroke="#20302C" stroke-width="3"/>`;
+
+/** Faint ruling, the same weight the hero panels use. */
+const rules = (x, w, ys) =>
+  `<g stroke="rgba(32,48,44,.18)" stroke-width="2" stroke-linecap="round">${ys
+    .map((y) => `<path d="M${x} ${y}h${w}"/>`)
+    .join("")}</g>`;
+
+const STEP_BUILD = `
+<svg viewBox="0 0 140 112" role="presentation">
+  ${sheet(10, 8, 86, 96)}
+  ${rules(22, 62, [28, 40])}
+  ${scribble(["M24 28c8-5 15 3 23-1s14-4 22-1"], "#20302C", 2.4)}
+  <!-- an answer box dropped onto the page, which is the whole move -->
+  <rect x="24" y="56" width="58" height="32" rx="9" fill="#7FD1AE" stroke="#20302C" stroke-width="3"/>
+  ${rules(34, 38, [70, 80])}
+  <!-- the thing you press to add another -->
+  <circle cx="106" cy="82" r="17" fill="#F4EFE6" stroke="#20302C" stroke-width="3"/>
+  <path d="M106 74v16M98 82h16" stroke="#20302C" stroke-width="3" stroke-linecap="round"/>
+</svg>`;
+
+const STEP_ASSIGN = `
+<svg viewBox="0 0 140 112" role="presentation">
+  ${sheet(8, 16, 48, 64)}
+  ${rules(18, 28, [32, 42, 52])}
+  <!-- the due date that goes out with it -->
+  <rect x="8" y="88" width="48" height="18" rx="9" fill="#7FD1AE" stroke="#20302C" stroke-width="3"/>
+  <g stroke="#20302C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M62 50h14"/><path d="M71 44l7 6-7 6"/>
+  </g>
+  <!-- one copy per student, which is what publishing actually does -->
+  ${sheet(84, 12, 34, 46, "#F4EFE6", 8)}
+  ${sheet(90, 28, 34, 46, "#F4EFE6", 8)}
+  ${sheet(96, 44, 34, 46, "#fff", 8)}
+  ${rules(104, 18, [58, 68])}
+</svg>`;
+
+const STEP_GRADE = `
+<svg viewBox="0 0 140 112" role="presentation">
+  ${sheet(10, 8, 86, 96)}
+  ${rules(22, 62, [30, 44])}
+  ${scribble(["M24 30c9-5 16 3 24-1s15-4 22-1", "M24 44c11-4 18 3 28-1s16-3 22-1"], "#20302C", 2.4)}
+  <!-- the teacher's mark, in the red they'd actually reach for -->
+  ${scribble(["M28 68l12 13 26-31"], "#A3341F", 6)}
+  <rect x="70" y="76" width="62" height="28" rx="14" fill="#7FD1AE" stroke="#20302C" stroke-width="3"/>
+  <text x="101" y="95" text-anchor="middle"
+        style="font-family:var(--display);font-weight:700;font-size:16px;fill:#20302C">18/20</text>
+</svg>`;
+
+const STEPS_CSS = `
+<style>
+/* Top-aligned by default: on a narrow screen the paragraph runs to seven lines
+   and a centered drawing floats away from the heading it belongs to. Once the
+   text is short enough for that not to happen, centering looks better. */
+.step{display:flex;gap:20px;align-items:flex-start}
+@media(min-width:720px){.step{align-items:center}}
+.step-art{flex:0 0 118px}
+.step-art svg{display:block;width:100%;height:auto}
+.step h3{margin-bottom:6px}
+@media(max-width:560px){.step{gap:14px}.step-art{flex-basis:92px}}
+</style>`;
+
+const step = (title, art, body) => `
+  <div class="card step">
+    <div class="step-art" aria-hidden="true">${art}</div>
+    <div>
+      <h3>${title}</h3>
+      <p class="small quiet" style="margin:0">${body}</p>
+    </div>
+  </div>`;
+
 export default () =>
   layout({
     path: "/",
@@ -170,7 +254,7 @@ ${HERO_CSS}
       <p class="eyebrow">For teachers and their classes</p>
       <h1>The <span class="rot"
             data-words="notebooks,workbooks,packets,journals,eBooks,handouts">notebooks</span><br>
-          your class already uses&nbsp;—<br>with nothing to print, collect, or lose.</h1>
+          your class already uses<br>with nothing to print, collect, or lose.</h1>
       <p class="lede">
         Build one from a PDF, a Google Doc, or blank paper. Send it to your class.
         Students write on it with a stylus or a keyboard, hand it in, and you grade it on the
@@ -216,20 +300,30 @@ ${HERO_CSS}
   </div>
 </section>
 
+${STEPS_CSS}
 <section>
   <div class="wrap narrow">
     <p class="eyebrow">How a lesson goes</p>
     <h2>Three steps, and then it's just a notebook.</h2>
     <div class="grid" style="gap:16px;margin-top:24px">
-      <div class="card"><h3>1 · Build it</h3><p class="small quiet" style="margin:0">
-        Bring in a worksheet or start from blank paper. Add prompts and answer boxes where you
-        want them. Group pages into sections so "the practice set" means something.</p></div>
-      <div class="card"><h3>2 · Assign it</h3><p class="small quiet" style="margin:0">
-        Pick the pages that make up the task, set a due date, and publish. Every student gets
-        their own copy. Adding a student later backfills their work automatically.</p></div>
-      <div class="card"><h3>3 · Grade it</h3><p class="small quiet" style="margin:0">
-        Open the roster, move between students, and write on their page. Return it with a
-        grade and a comment — or reopen it if they need another go.</p></div>
+      ${step(
+        "1 · Build it",
+        STEP_BUILD,
+        `Bring in a worksheet or start from blank paper. Add prompts and answer boxes where you
+         want them. Group pages into sections so "the practice set" means something.`,
+      )}
+      ${step(
+        "2 · Assign it",
+        STEP_ASSIGN,
+        `Pick the pages that make up the task, set a due date, and publish. Every student gets
+         their own copy. Adding a student later backfills their work automatically.`,
+      )}
+      ${step(
+        "3 · Grade it",
+        STEP_GRADE,
+        `Open the roster, move between students, and write on their page. Return it with a
+         grade and a comment — or reopen it if they need another go.`,
+      )}
     </div>
   </div>
 </section>
