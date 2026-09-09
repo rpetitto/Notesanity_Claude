@@ -170,7 +170,7 @@ ${HERO_CSS}
       <p class="eyebrow">For teachers and their classes</p>
       <h1>The <span class="rot"
             data-words="notebooks,workbooks,packets,journals,eBooks,handouts">notebooks</span><br>
-          your class already uses,<br>with nothing to print, collect, or lose.</h1>
+          your class already uses&nbsp;—<br>with nothing to print, collect, or lose.</h1>
       <p class="lede">
         Build one from a PDF, a Google Doc, or blank paper. Send it to your class.
         Students write on it with a stylus or a keyboard, hand it in, and you grade it on the
@@ -244,7 +244,7 @@ ${HERO_CSS}
       </p>
       <p style="margin:0;display:flex;gap:12px;flex-wrap:wrap">
         <a class="btn" href="/?signin=1">Start free</a>
-        <a class="btn" href="mailto:support@notesanity.com">Talk to us</a>
+        <a class="btn" href="/contact">Talk to us</a>
       </p>
     </div>
   </div>

@@ -16,17 +16,40 @@ const qa = (q, a) => `
     <div style="margin-top:12px" class="quiet">${a}</div>
   </details>`;
 
-const group = (title, items) => `
-  <h2 id="${title.toLowerCase().replace(/[^a-z]+/g, "-")}">${title}</h2>
-  ${items.map(([q, a]) => qa(q, a)).join("")}`;
+/** Every Q&A on the page, collected as it renders, for the FAQ schema. */
+const ALL = [];
 
-export default () =>
-  layout({
+const group = (title, items) => (ALL.push(...items), `
+  <h2 id="${title.toLowerCase().replace(/[^a-z]+/g, "-")}">${title}</h2>
+  ${items.map(([q, a]) => qa(q, a)).join("")}`);
+
+const stripTags = (html) =>
+  String(html).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+
+export default () => {
+  // The body is built first: `group()` fills ALL as it renders, so the schema
+  // below is generated from exactly the questions the page shows. They cannot
+  // drift, because one is a function of the other.
+  const body = BODY();
+  return layout({
+    schema: {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: ALL.map(([q, a]) => ({
+        "@type": "Question",
+        name: stripTags(q),
+        acceptedAnswer: { "@type": "Answer", text: stripTags(a) },
+      })),
+    },
     path: "/help",
     title: "Help center",
     description:
       "Answers about building notebooks, assigning work, grading, students' own notebooks, sign-in and offline behavior in Notesanity.",
-    body: `
+    body,
+  });
+};
+
+const BODY = () => `
 <section>
   <div class="wrap narrow">
     <p class="eyebrow">Help center</p>
@@ -186,5 +209,4 @@ export default () =>
       </p>
     </div>
   </div>
-</section>`,
-  });
+</section>`;

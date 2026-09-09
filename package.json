@@ -8,7 +8,7 @@
     "dev": "wrangler dev",
     "dev:ui": "vite",
     "deploy": "npm run build && wrangler deploy",
-    "build": "vite build && node scripts/build-marketing.mjs",
+    "build": "vite build && node scripts/build-marketing.mjs && node scripts/build-og-image.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b"
   },

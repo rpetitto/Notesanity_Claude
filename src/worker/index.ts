@@ -21,6 +21,7 @@ import "./routes/work";
 import "./routes/assignments";
 import "./routes/admin";
 import "./routes/status";
+import "./routes/contact";
 import { drainMailQueue } from "./lib/mailqueue";
 
 /**

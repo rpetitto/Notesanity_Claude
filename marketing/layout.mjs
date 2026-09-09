@@ -116,6 +116,81 @@ export const LOGO = `<svg width="30" height="30" viewBox="0 0 64 64" fill="none"
   </g>
 </svg>`;
 
+/**
+ * What this is, in a form a machine can read.
+ *
+ * The practical reason to care: an assistant summarizing "notebook apps for
+ * classrooms" reads structured data far more reliably than it infers meaning
+ * from prose, and being described accurately is the whole game. It is on every
+ * page so the facts don't depend on which one gets found.
+ */
+const SITE_SCHEMA = `<script type="application/ld+json">${JSON.stringify({
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://notesanity.com/#org",
+      name: "Notesanity",
+      url: "https://notesanity.com",
+      email: "support@notesanity.com",
+      description:
+        "Notesanity makes interactive notebooks for classrooms. Teachers build notebooks from PDFs, documents or blank paper; students write on them with a stylus or a keyboard; teachers grade the work on the same page it was written on.",
+      contactPoint: {
+        "@type": "ContactPoint",
+        email: "support@notesanity.com",
+        contactType: "customer support",
+        areaServed: "US",
+        availableLanguage: "English",
+      },
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://notesanity.com/#site",
+      url: "https://notesanity.com",
+      name: "Notesanity",
+      publisher: { "@id": "https://notesanity.com/#org" },
+      inLanguage: "en-US",
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://notesanity.com/#app",
+      name: "Notesanity",
+      applicationCategory: "EducationalApplication",
+      applicationSubCategory: "Digital interactive notebooks",
+      operatingSystem: "Web browser, iPadOS, Chromebook",
+      url: "https://notesanity.com",
+      publisher: { "@id": "https://notesanity.com/#org" },
+      description:
+        "Interactive digital notebooks for K-12 classrooms. Import a PDF, Word document, PowerPoint or Google Drive file, or start from blank paper — lined, graph, dot grid, music staves, engineering, isometric or coordinate. Students annotate with a stylus or keyboard, answer prompts, upload images and record audio. Teachers assign specific pages, annotate student work in place, and return grades and feedback.",
+      audience: {
+        "@type": "EducationalAudience",
+        educationalRole: ["teacher", "student", "administrator"],
+      },
+      featureList: [
+        "Build notebooks from PDF, Word, PowerPoint or Google Drive files",
+        "Blank paper templates including lined, graph, dot grid and music staves",
+        "Pressure-sensitive stylus ink with palm rejection",
+        "Highlighter that snaps straight along lines of text",
+        "Quick and manual eraser modes",
+        "Text boxes, checkboxes, dropdowns, prompts, image uploads and audio answers",
+        "Assign specific pages with due dates",
+        "Annotate and grade student work in place",
+        "Students keep their own personal notebooks",
+        "Offline-tolerant autosave",
+        "Google sign-in, email sign-in links and passwords",
+        "FERPA and COPPA-aware handling of student data",
+      ],
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+        description: "Free for every teacher, class and school during the beta.",
+        availability: "https://schema.org/InStock",
+      },
+    },
+  ],
+})}</script>`;
+
 const NAV = [
   { href: "/help", label: "Help" },
   { href: "/pricing", label: "Pricing" },
@@ -131,7 +206,7 @@ export const esc = (s) =>
  * `path` drives the current-page marker in the nav; `description` is what a
  * search result and a link preview actually show, so every page sets one.
  */
-export function layout({ path, title, description, body, wide = false }) {
+export function layout({ path, title, description, body, schema = null, wide = false }) {
   const full = path === "/" ? "Notesanity — interactive notebooks for classrooms" : `${title} · Notesanity`;
   const canonical = `https://notesanity.com${path === "/" ? "" : path}`;
   const nav = NAV.map(
@@ -157,6 +232,12 @@ export function layout({ path, title, description, body, wide = false }) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Nunito:wght@400;600;700&display=swap">
+<meta property="og:image" content="https://notesanity.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:image" content="https://notesanity.com/og.png">
+${SITE_SCHEMA}
+${schema ? `<script type="application/ld+json">${JSON.stringify(schema)}</script>` : ""}
 <style>${CSS}</style>
 </head>
 <body>
@@ -201,6 +282,7 @@ ${body}
         <ul>
           <li><a href="/help">Help center</a></li>
           <li><a href="/changelog">Changelog</a></li>
+          <li><a href="/contact">Contact us</a></li>
           <li><a href="mailto:support@notesanity.com">support@notesanity.com</a></li>
         </ul>
       </div>

@@ -606,3 +606,30 @@ migrate("017_layer_chunks", async () => {
   `).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_layer_chunks_layer ON layer_chunks(layer_id, seq)`).run();
 });
+
+/**
+ * Enquiries from the public contact form.
+ *
+ * Stored as well as emailed. Email is the useful half — someone should be told
+ * a district is asking — but it is also the half that can fail silently, and a
+ * lead that existed only in a message the provider dropped is a lead nobody
+ * knows was lost. The row is the record; the email is the notification.
+ */
+migrate("018_contact_requests", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS contact_requests (
+      id TEXT PRIMARY KEY,
+      role TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL,
+      region TEXT NOT NULL DEFAULT '',
+      organization TEXT NOT NULL DEFAULT '',
+      interest TEXT NOT NULL DEFAULT '',
+      heard_from TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_contact_created ON contact_requests(created_at DESC)`).run();
+});
