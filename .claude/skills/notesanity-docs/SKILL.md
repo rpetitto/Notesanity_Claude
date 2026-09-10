@@ -74,8 +74,11 @@ Before adding a card, check whether an existing one should absorb it — six
 sharp cards beat nine vague ones. If the page reaches nine, something on it has
 stopped being a headline.
 
-The three-step "How a lesson goes" section describes the core loop: build,
-assign, grade. It should only change if that loop changes.
+The four-step "How a lesson goes" section describes the core loop: build, push,
+assign, grade. It should only change if that loop changes — and keep the steps
+distinct: pushing is what gives every student a copy, assigning is what makes
+some of those pages a task with a due date. They ran together as one step once,
+and the section read as if a notebook could only reach a class by being homework.
 
 ## Help center
 

@@ -157,13 +157,13 @@ const HERO_CSS = `
 </style>`;
 
 /**
- * The three steps, each with a small drawing of what that step looks like.
+ * The four steps, each with a small drawing of what that step looks like.
  *
  * Drawn rather than screenshotted for the same reasons as the hero, and kept
  * deliberately schematic: a page, a stack of copies, a check mark. They are
- * there to make the three steps scannable at a glance, not to be read — which
- * is why they carry no words a translation would need and are hidden from
- * screen readers entirely. The heading beside each one already says it.
+ * there to make the steps scannable at a glance, not to be read — which is why
+ * they carry no words a translation would need and are hidden from screen
+ * readers entirely. The heading beside each one already says it.
  */
 
 /** A sheet of paper with the house 4px offset shadow, drawn as a second rect. */
@@ -190,20 +190,44 @@ const STEP_BUILD = `
   <path d="M106 74v16M98 82h16" stroke="#20302C" stroke-width="3" stroke-linecap="round"/>
 </svg>`;
 
-const STEP_ASSIGN = `
+const STEP_PUSH = `
 <svg viewBox="0 0 140 112" role="presentation">
-  ${sheet(8, 16, 48, 64)}
-  ${rules(18, 28, [32, 42, 52])}
-  <!-- the due date that goes out with it -->
-  <rect x="8" y="88" width="48" height="18" rx="9" fill="#7FD1AE" stroke="#20302C" stroke-width="3"/>
-  <g stroke="#20302C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M62 50h14"/><path d="M71 44l7 6-7 6"/>
-  </g>
+  ${sheet(6, 20, 46, 62)}
+  ${rules(16, 26, [36, 46, 56])}
   <!-- one copy per student, which is what publishing actually does -->
-  ${sheet(84, 12, 34, 46, "#F4EFE6", 8)}
-  ${sheet(90, 28, 34, 46, "#F4EFE6", 8)}
+  ${sheet(84, 8, 34, 46, "#F4EFE6", 8)}
+  ${sheet(90, 26, 34, 46, "#F4EFE6", 8)}
   ${sheet(96, 44, 34, 46, "#fff", 8)}
   ${rules(104, 18, [58, 68])}
+  <!-- Two arrows, not one: the press that sends it is the press that sends it
+       again next week. A circular "refresh" glyph was the obvious alternative
+       and was illegible at 118px, which is the only size this is ever drawn. -->
+  <g stroke="#20302C" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M58 44h16"/><path d="M68 37l8 7-8 7"/>
+    <path d="M58 66h16"/><path d="M68 59l8 7-8 7"/>
+  </g>
+</svg>`;
+
+const STEP_ASSIGN = `
+<svg viewBox="0 0 140 112" role="presentation">
+  <!-- some of the pages, not all of them: an assignment is a selection -->
+  ${sheet(4, 2, 32, 38, "#fff", 8)}
+  ${sheet(46, 2, 32, 38, "#fff", 8)}
+  ${sheet(88, 2, 32, 38, "#F4EFE6", 8)}
+  ${rules(11, 18, [16, 26])}
+  ${rules(53, 18, [16, 26])}
+  <g fill="#7FD1AE" stroke="#20302C" stroke-width="3">
+    <circle cx="34" cy="38" r="11"/><circle cx="76" cy="38" r="11"/>
+  </g>
+  ${scribble(["M29 38l3.5 4 7-8", "M71 38l3.5 4 7-8"], "#20302C", 3)}
+  <!-- and the date they're due, which is the other half of setting a task.
+       The two rings and the band under them are what make a rounded green card
+       read as a calendar at this size; without them it is just a pill. -->
+  <g stroke="#20302C" stroke-width="4" stroke-linecap="round">
+    <path d="M56 54v14M84 54v14"/>
+  </g>
+  ${sheet(42, 62, 56, 42, "#7FD1AE", 9)}
+  <path d="M42 78h56" stroke="#20302C" stroke-width="3.5"/>
 </svg>`;
 
 const STEP_GRADE = `
@@ -305,7 +329,7 @@ ${STEPS_CSS}
 <section>
   <div class="wrap narrow">
     <p class="eyebrow">How a lesson goes</p>
-    <h2>Three steps, and then it's just a notebook.</h2>
+    <h2>Four steps, and then it's just a notebook.</h2>
     <div class="grid" style="gap:16px;margin-top:24px">
       ${step(
         "1 · Build it",
@@ -314,13 +338,21 @@ ${STEPS_CSS}
          want them. Group pages into sections so "the practice set" means something.`,
       )}
       ${step(
-        "2 · Assign it",
-        STEP_ASSIGN,
-        `Pick the pages that make up the task, set a due date, and publish. Every student gets
-         their own copy. Adding a student later backfills their work automatically.`,
+        "2 · Push it",
+        STEP_PUSH,
+        `One press sends it to the class, and every student gets their own copy. Fix a typo or
+         add a page next week and the same press updates every copy — their writing stays
+         exactly where they put it.`,
       )}
       ${step(
-        "3 · Grade it",
+        "3 · Assign it",
+        STEP_ASSIGN,
+        `Not every notebook is homework. When one is, pick the pages that make up the task and
+         set a due date — those pages come back to you to be graded. A student who joins late
+         gets caught up automatically.`,
+      )}
+      ${step(
+        "4 · Grade it",
         STEP_GRADE,
         `Open the roster, move between students, and write on their page. Return it with a
          grade and a comment — or reopen it if they need another go.`,

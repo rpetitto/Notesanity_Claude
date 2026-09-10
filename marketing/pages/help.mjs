@@ -108,6 +108,14 @@ const BODY = () => `
          part of the page rather than something to answer.`,
       ],
       [
+        "How does a notebook reach my students?",
+        `Press <b>Publish to students</b> and every student in the class gets their own copy.
+         Change something later — a typo, an extra page — and <b>Update student notebooks</b>
+         sends the change to all of them at once; their writing stays exactly where they put it.
+         Publishing is separate from assigning: a notebook can sit with a class to be written in
+         without ever being homework.`,
+      ],
+      [
         "Can I reorganize pages after students have started?",
         `Yes. Pages carry a permanent identity, so renaming, regrouping and reordering them
          doesn't disturb work already written on them. Inserting a page inside a section keeps
@@ -118,9 +126,10 @@ const BODY = () => `
     ${group("Assigning and grading", [
       [
         "How do I set work?",
-        `Create an assignment, choose which pages of the notebook it covers, set a due date and
-         publish. Each student gets their own copy. A student who joins later is caught up
-         automatically, and you're asked which past assignments should apply to them.`,
+        `Publish the notebook to the class first, then create an assignment over it: choose which
+         of its pages the task covers and set a due date. Those pages are the ones that come back
+         to you to be graded. A student who joins later is caught up automatically, and you're
+         asked which past assignments should apply to them.`,
       ],
       [
         "How do I grade?",
