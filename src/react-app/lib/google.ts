@@ -338,12 +338,112 @@ export async function requestGoogleIdToken(): Promise<string> {
       // classroom machine must not sign the next person in as the last one.
       auto_select: false,
       cancel_on_tap_outside: true,
+      // Required rather than optional now: Chrome has moved One Tap onto FedCM,
+      // and without opting in the prompt is refused by the browser rather than
+      // shown — which arrives here looking exactly like a person dismissing it.
+      use_fedcm_for_prompt: true,
     });
 
-    window.google.accounts.id.prompt((notification: any) => {
-      if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
-        reject(new Error("Google sign-in was dismissed. Try again, or use a sign-in link."));
-      }
+    window.google.accounts.id.prompt((n: any) => {
+      if (n?.isNotDisplayed?.()) reject(new Error(notDisplayedMessage(n.getNotDisplayedReason?.())));
+      else if (n?.isSkippedMoment?.()) reject(new Error(skippedMessage(n.getSkippedReason?.())));
     });
   });
+}
+
+/**
+ * Why the prompt never appeared, in words that suggest what to do about it.
+ *
+ * This used to be one sentence for every outcome — "Google sign-in was
+ * dismissed. Try again." — which was wrong most of the time it was shown.
+ * `isNotDisplayed` means the prompt was never put on screen at all: there was
+ * nothing to dismiss, and trying again does the same nothing. The reason
+ * Google hands back is the only way to tell a browser policy from a signed-out
+ * account from a misconfigured origin, so it decides the advice.
+ */
+function notDisplayedMessage(reason?: string): string {
+  switch (reason) {
+    case "opt_out_or_no_session":
+      return "You're not signed in to Google in this browser. Sign in to your Google account first, or use a sign-in link instead.";
+    case "suppressed_by_user":
+      return "Google has stopped offering its sign-in prompt on this site because it was closed a few times. Use a sign-in link, or clear this site's cookies to reset it.";
+    case "browser_not_supported":
+      return "This browser doesn't support Google's sign-in prompt. Use a sign-in link or a password instead.";
+    case "secure_http_required":
+      return "Google sign-in needs a secure (https) connection.";
+    case "unregistered_origin":
+    case "invalid_client":
+    case "missing_client_id":
+      return "Google sign-in isn't set up correctly for this site. Use a sign-in link — and let us know, because this one is ours to fix.";
+    default:
+      return "Google's sign-in prompt couldn't open — a browser setting or extension usually blocks it. Use a sign-in link instead.";
+  }
+}
+
+/** Skipped moments: some of these really are the person, and some aren't. */
+function skippedMessage(reason?: string): string {
+  switch (reason) {
+    case "user_cancel":
+    case "tap_outside":
+      return "Google sign-in was closed before it finished. Try again, or use a sign-in link.";
+    case "issuing_failed":
+      return "Google couldn't issue a sign-in for that account. Use a sign-in link instead.";
+    default:
+      // auto_cancel and anything new: not the person's doing, so don't say it was.
+      return "Google's sign-in didn't complete. Try again, or use a sign-in link.";
+  }
+}
+
+/**
+ * Google's own sign-in button, rendered into `container`.
+ *
+ * The One Tap prompt above is a *suggestion* the browser is free to refuse —
+ * and increasingly does, for third-party cookie policy, FedCM migration, or
+ * Google's own cooldown after a couple of dismissals. A rendered button is a
+ * real button: clicking it opens the account chooser directly, with none of
+ * that heuristics layer in front of it. That makes it the reliable path, so it
+ * is the one the sign-in screen actually puts under the pointer.
+ *
+ * Returns a teardown for the resize observer the caller should run on unmount.
+ */
+export async function mountGoogleButton(
+  container: HTMLElement,
+  onCredential: (credential: string) => void,
+  onError: (message: string) => void,
+): Promise<() => void> {
+  if (!CLIENT_ID) throw new Error("Google sign-in isn't configured for this deployment.");
+  await loadGis();
+
+  window.google.accounts.id.initialize({
+    client_id: CLIENT_ID,
+    callback: (resp: { credential?: string }) => {
+      if (resp?.credential) onCredential(resp.credential);
+      else onError("Google didn't return a sign-in.");
+    },
+    auto_select: false,
+    cancel_on_tap_outside: true,
+    use_fedcm_for_prompt: true,
+  });
+
+  // Google caps its button at 400px and ignores anything wider, so the overlay
+  // is measured rather than assumed — it has to line up with the brand button
+  // underneath it at every screen size.
+  const draw = () => {
+    const width = Math.min(400, Math.round(container.getBoundingClientRect().width) || 320);
+    container.innerHTML = "";
+    window.google.accounts.id.renderButton(container, {
+      type: "standard",
+      theme: "outline",
+      size: "large",
+      shape: "pill",
+      text: "continue_with",
+      logo_alignment: "center",
+      width,
+    });
+  };
+  draw();
+
+  const observer = new ResizeObserver(() => draw());
+  observer.observe(container);
+  return () => observer.disconnect();
 }

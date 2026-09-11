@@ -5,14 +5,14 @@
  * would actually say out loud to a colleague.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { Mail, KeyRound, ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { signOutHref } from "../lib/session";
-import { requestGoogleIdToken } from "../lib/google";
+import { hasGoogleClientId, mountGoogleButton, requestGoogleIdToken } from "../lib/google";
 import { Logo } from "../components/Shell";
 import { Button, Input, Label } from "../components/ui";
 import { cn } from "../lib/utils";
@@ -30,7 +30,23 @@ export default function Landing({ error }: { error?: Error | null }) {
    * straight to our own endpoint, which verifies Google's signature and sets
    * the same cookie a password login would — so everything downstream, from
    * which school you land in to what role you get, is decided in one place.
+   *
+   * Two routes arrive here: Google's own rendered button (the reliable one,
+   * overlaid on ours below) and the One Tap prompt (the fallback, for when
+   * that button never mounted).
    */
+  const completeGoogle = async (credential: string) => {
+    setGoogleBusy(true);
+    try {
+      await api.post("/api/auth/google", { credential });
+      window.location.href = "/";
+    } catch (e) {
+      toast.error((e as Error).message);
+      setGoogleBusy(false);
+    }
+  };
+
+  /** The fallback path: only runs if Google's own button never mounted. */
   const signInWithGoogle = async () => {
     setGoogleBusy(true);
     try {
@@ -39,10 +55,38 @@ export default function Landing({ error }: { error?: Error | null }) {
       window.location.href = "/";
     } catch (e) {
       toast.error((e as Error).message);
-    } finally {
       setGoogleBusy(false);
     }
   };
+
+  const googleMountRef = useRef<HTMLDivElement>(null);
+  /**
+   * Whether Google's own button actually rendered into the overlay.
+   *
+   * This gates the overlay's pointer events, and it is not a nicety: an empty
+   * overlay still sits over the brand button and still swallows every click,
+   * so if Google's script fails to load — a school proxy, a blocked domain, a
+   * bad minute on the network — the sign-in button would silently do nothing
+   * at all. Worse than the problem this was written to fix. Clicks only go to
+   * the overlay once there is something in it to receive them.
+   */
+  const [googleMounted, setGoogleMounted] = useState(false);
+  useEffect(() => {
+    const el = googleMountRef.current;
+    if (!el || !hasGoogleClientId) return;
+    let teardown: (() => void) | undefined;
+    let dead = false;
+    mountGoogleButton(el, (credential) => void completeGoogle(credential), (m) => toast.error(m))
+      .then((off) => {
+        if (dead) { off(); return; }
+        teardown = off;
+        setGoogleMounted(true);
+      })
+      // The overlay stays inert and the brand button underneath keeps working
+      // through the prompt path, which is the honest fallback.
+      .catch(() => {});
+    return () => { dead = true; teardown?.(); };
+  }, []);
   const [register, setRegister] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -228,20 +272,38 @@ export default function Landing({ error }: { error?: Error | null }) {
                 <span className="h-[3px] flex-1 rounded-full bg-pine/15" />
               </div>
 
-              <button
-                type="button"
-                onClick={() => void signInWithGoogle()}
-                disabled={googleBusy}
-                className={cn(
-                  "flex min-h-[52px] w-full items-center justify-center gap-3 rounded-full border-[3px] border-pine",
-                  "bg-white font-display text-[17px] text-pine shadow-[4px_4px_0_0_var(--color-pine)]",
-                  "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none",
-                  "disabled:opacity-70",
-                )}
-              >
-                <GoogleG />
-                {googleBusy ? "Signing in…" : "Continue with Google"}
-              </button>
+              {/* Google's own button, invisible, sits exactly on top of ours.
+                  The click it receives is a real one on a real Google element —
+                  which is the whole point: the account chooser opens directly
+                  instead of going through the One Tap prompt the browser is
+                  free to refuse. Ours stays underneath as the thing you see,
+                  so the brand survives the reliability fix. Where Google's
+                  script can't load at all, the overlay never appears and the
+                  button underneath is a working fallback on its own. */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => void signInWithGoogle()}
+                  disabled={googleBusy}
+                  className={cn(
+                    "flex min-h-[52px] w-full items-center justify-center gap-3 rounded-full border-[3px] border-pine",
+                    "bg-white font-display text-[17px] text-pine shadow-[4px_4px_0_0_var(--color-pine)]",
+                    "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none",
+                    "disabled:opacity-70",
+                  )}
+                >
+                  <GoogleG />
+                  {googleBusy ? "Signing in…" : "Continue with Google"}
+                </button>
+                <div
+                  ref={googleMountRef}
+                  aria-hidden
+                  className={cn(
+                    "absolute inset-0 overflow-hidden opacity-0",
+                    (!googleMounted || googleBusy) && "pointer-events-none",
+                  )}
+                />
+              </div>
             </>
           )}
         </div>

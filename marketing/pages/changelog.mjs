@@ -38,6 +38,15 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 11, 2026",
+    "A sign-in fix, and a notebook nobody should have seen yet.",
+    [
+      ["fixed", "<b>Students could see notebooks their teacher hadn't published.</b> A class notebook still in draft was listed in the class and could be opened. Drafts are now the teacher's alone until they press Publish — and an assignment can't be set over one, which was the third way in."],
+      ["fixed", "Signing in with Google failed for some people with &ldquo;Google sign-in was dismissed&rdquo; even when nothing had been dismissed. The button now opens Google's account chooser directly instead of relying on a prompt the browser is free to refuse."],
+      ["better", "When Google sign-in genuinely can't run, the message says why and what to do — whether you're signed out of Google, a browser setting is blocking it, or Google has stopped offering the prompt on this site."],
+    ],
+  ],
+  [
     "September 9, 2026",
     "A short walkthrough, and a way to ask your teacher to write on a page.",
     [

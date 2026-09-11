@@ -116,6 +116,12 @@ const BODY = () => `
          without ever being homework.`,
       ],
       [
+        "Can students see a notebook I'm still building?",
+        `No. A notebook is a draft until you press <b>Publish to students</b>, and a draft is yours
+         alone — it isn't listed in the class, can't be opened by a link, and can't be set as an
+         assignment. Publish it when it's ready and the class gets it.`,
+      ],
+      [
         "Can I reorganize pages after students have started?",
         `Yes. Pages carry a permanent identity, so renaming, regrouping and reordering them
          doesn't disturb work already written on them. Inserting a page inside a section keeps

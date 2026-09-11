@@ -42,6 +42,12 @@ async function notebookAccess(c: any, notebookId: string) {
   }
 
   const { user, isTeacher } = await requireClassMember(c, nb.class_id);
+  // A draft is the teacher's private workbench. Until they publish it, it does
+  // not exist as far as a student is concerned — 404 rather than 403, because
+  // "you may not see this" still tells them a notebook is there and what it's
+  // called, and a half-built worksheet is exactly the thing a class shouldn't
+  // be reading over the teacher's shoulder.
+  if (!isTeacher && nb.status !== "published") throw new HttpError(404, "Notebook not found");
   return { nb, user, isTeacher };
 }
 

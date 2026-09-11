@@ -128,6 +128,10 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
       })()
     : await requireClassMember(c, nb.class_id);
 
+  // Same rule as the notebook routes: a class notebook a teacher hasn't
+  // published yet isn't a thing a student can open, by link or by guess.
+  if (!isTeacher && nb.status !== "published") throw new HttpError(404, "Notebook not found");
+
   const studentId = studentIdParam && isTeacher ? studentIdParam : user.id;
   if (studentIdParam && !isTeacher && studentIdParam !== user.id) {
     throw new HttpError(403, "You can only open your own notebook");

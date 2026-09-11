@@ -195,9 +195,13 @@ app.get("/api/classes/:id", handler(async (c) => {
           -- A student's own notebook is theirs and their teacher's to see;
           -- classmates never see each other's.
           AND (n.kind = 'class' OR ? = 1 OR n.owner_id = ?)
+          -- And a class notebook still in draft belongs to the teacher alone
+          -- until they publish it. A student's own notebook has no draft state
+          -- to be in, so this only ever hides the teacher's unfinished work.
+          AND (? = 1 OR n.kind <> 'class' OR n.status = 'published')
         ORDER BY n.created_at DESC`,
     )
-    .bind(classId, isTeacher ? 1 : 0, user.id)
+    .bind(classId, isTeacher ? 1 : 0, user.id, isTeacher ? 1 : 0)
     .all();
 
   const teachers = await db

@@ -90,7 +90,7 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
               n.cover_key IS NOT NULL AS notebook_has_cover
          FROM assignments a
          JOIN notebooks n ON n.id = a.notebook_id
-        WHERE a.class_id = ? ${isTeacher ? "" : "AND a.status = 'active' AND (a.release_at IS NULL OR a.release_at <= datetime('now'))"}
+        WHERE a.class_id = ? ${isTeacher ? "" : "AND a.status = 'active' AND n.status = 'published' AND (a.release_at IS NULL OR a.release_at <= datetime('now'))"}
         ORDER BY COALESCE(a.due_at, a.created_at) DESC`,
     )
     .bind(classId)
@@ -151,6 +151,9 @@ app.post("/api/classes/:id/assignments", handler(async (c) => {
 
   const id = uid();
   const status = b.status === "active" ? "active" : "draft";
+  // Checked before the insert, not after: a refusal that leaves an active
+  // assignment behind is the exact state this is here to prevent.
+  if (status === "active") await requirePublishedNotebook(b.notebookId);
   await db
     .prepare(
       `INSERT INTO assignments (id, class_id, notebook_id, title, instructions, page_ids, release_at, due_at, grading, points_max, status, created_at, updated_at)
@@ -165,6 +168,28 @@ app.post("/api/classes/:id/assignments", handler(async (c) => {
   if (status === "active") await ensureSubmissions(id, classId);
   return c.json({ assignment: { id } });
 }));
+
+/**
+ * Refuse to set work over a notebook the class can't open yet.
+ *
+ * Activating an assignment is what puts a notebook in front of students, so it
+ * is the third door into a draft — the other two being the class listing and a
+ * direct link. Draft assignments over draft notebooks are fine and useful:
+ * both are the teacher's unfinished work, and neither is visible. It is only
+ * the moment of going active that has to insist the notebook went first.
+ */
+async function requirePublishedNotebook(notebookId: string) {
+  const nb = await db
+    .prepare(`SELECT status FROM notebooks WHERE id = ?`)
+    .bind(notebookId)
+    .first<{ status: string }>();
+  if (nb?.status !== "published") {
+    throw new HttpError(
+      400,
+      "That notebook hasn't been published to students yet — publish it first, then set the work.",
+    );
+  }
+}
 
 /** Create a submission row for every active student, so the dashboard is complete from the start. */
 async function ensureSubmissions(assignmentId: string, classId: string) {
@@ -191,6 +216,7 @@ app.patch("/api/assignments/:id", handler(async (c) => {
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
   const b = await c.req.json<any>();
   const status = b.status ?? a.status;
+  if (status === "active") await requirePublishedNotebook(a.notebook_id);
   await db
     .prepare(
       `UPDATE assignments SET title = ?, instructions = ?, page_ids = ?, release_at = ?, due_at = ?,
@@ -796,7 +822,8 @@ app.get("/api/my/assignments", handler(async (c) => {
          JOIN classes c ON c.id = a.class_id
          JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active' AND e.role = 'student'
          JOIN notebooks n ON n.id = a.notebook_id
-        WHERE a.status = 'active' AND (a.release_at IS NULL OR a.release_at <= datetime('now')) AND c.archived = 0
+        WHERE a.status = 'active' AND n.status = 'published'
+          AND (a.release_at IS NULL OR a.release_at <= datetime('now')) AND c.archived = 0
         ORDER BY COALESCE(a.due_at, a.created_at)`,
     )
     .bind(user.id)
