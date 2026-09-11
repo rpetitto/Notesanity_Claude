@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { Plus, Users, BookOpen, Import } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { Archive, Plus, RotateCcw, Settings2, Users, BookOpen, Import } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
-import { Button, Input, Label, Modal } from "../components/ui";
+import { Button, Input, Label, Menu, Modal, type MenuItem } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
 import { DEFAULT_ACCENT } from "../lib/utils";
@@ -15,6 +15,8 @@ import { DEFAULT_ACCENT } from "../lib/utils";
  * endpoint, so cards probe the cover image directly and fall back on error. */
 interface ClassRow extends ClassSummary {
   emoji?: string;
+  room?: string;
+  archived?: number;
 }
 
 /** Close a modal on Escape while it's open. */
@@ -29,7 +31,7 @@ function useEscapeClose(active: boolean, onClose: () => void) {
   }, [active, onClose]);
 }
 
-function ClassCard({ cls }: { cls: ClassRow }) {
+function ClassCard({ cls, menu }: { cls: ClassRow; menu?: MenuItem[] }) {
   const [coverFailed, setCoverFailed] = useState(false);
   const accent = cls.accent_color || DEFAULT_ACCENT;
   return (
@@ -57,8 +59,11 @@ function ClassCard({ cls }: { cls: ClassRow }) {
           )}
           <div className="min-w-0 flex-1">
             <div className="truncate font-display text-[17px] text-pine">{cls.name}</div>
-            <div className="truncate text-[16px] text-pine/70">{cls.section || " "}</div>
+            <div className="truncate text-[16px] text-pine/70">
+              {[cls.section, cls.room].filter(Boolean).join(" · ") || " "}
+            </div>
           </div>
+          {menu && menu.length > 0 && <Menu items={menu} className="-mr-1" />}
         </div>
         <div className="mt-4 flex items-center gap-4 text-[16px] text-pine/70">
           <span className="flex items-center gap-1.5">
@@ -209,17 +214,63 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function TeacherHome() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [showArchived, setShowArchived] = useState(false);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["classes"],
-    queryFn: () => api.get<{ classes: ClassRow[] }>("/api/classes"),
+    queryKey: ["classes", showArchived ? "archived" : "active"],
+    queryFn: () =>
+      api.get<{ classes: ClassRow[] }>(`/api/classes${showArchived ? "?archived=1" : ""}`),
   });
   const [newClassOpen, setNewClassOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
+  const setArchived = useMutation({
+    mutationFn: ({ classId, archived }: { classId: string; archived: boolean }) =>
+      api.patch(`/api/classes/${classId}`, { archived }),
+    onSuccess: async (_r, { archived }) => {
+      await qc.invalidateQueries({ queryKey: ["classes"] });
+      toast.success(archived ? "Class archived" : "Class is back");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  /**
+   * Archiving is offered here; deleting is not.
+   *
+   * Deleting a class needs its name typed back, and a card in a grid is the
+   * wrong place to ask for that — it belongs on the class itself, where the
+   * person has already navigated to the thing they mean. The menu points there.
+   */
+  const classMenu = (cls: ClassRow): MenuItem[] => [
+    {
+      label: cls.archived ? "Bring the class back" : "Archive class",
+      icon: cls.archived
+        ? <RotateCcw className="h-5 w-5" strokeWidth={2.5} />
+        : <Archive className="h-5 w-5" strokeWidth={2.5} />,
+      hint: cls.archived
+        ? "Back on everyone's list, and writable again."
+        : "Its notebooks and assignments go too. Students keep read-only access.",
+      onClick: () => {
+        if (cls.archived || window.confirm(
+          `Archive "${cls.name}"? Its notebooks and assignments go with it, and you can bring it all back.`,
+        )) setArchived.mutate({ classId: cls.id, archived: !cls.archived });
+      },
+    },
+    {
+      label: "Open class settings",
+      icon: <Settings2 className="h-5 w-5" strokeWidth={2.5} />,
+      hint: "Details, cover, and deleting if it comes to that.",
+      onClick: () => navigate(`/classes/${cls.id}`),
+    },
+  ];
+
   return (
     <Shell>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-[32px] text-pine">Classes</h1>
+        <h1 className="font-display text-[32px] text-pine">
+          {showArchived ? "Archived classes" : "Classes"}
+        </h1>
         {/* The two actions are wider than a handset once the title is beside
             them, so they drop to their own line rather than push the page. */}
         <div className="flex flex-wrap items-center gap-2">
@@ -229,31 +280,44 @@ export default function TeacherHome() {
               Import from Classroom
             </Button>
           )}
-          <Button type="button" variant="primary" data-tour="new-class" onClick={() => setNewClassOpen(true)}>
-            <Plus className="h-4 w-4" strokeWidth={2.5} />
-            New class
+          <Button type="button" variant="secondary" onClick={() => setShowArchived((v) => !v)}>
+            <Archive className="h-4 w-4" strokeWidth={2.5} />
+            {showArchived ? "Back to my classes" : "Archived"}
           </Button>
+          {!showArchived && (
+            <Button type="button" variant="primary" data-tour="new-class" onClick={() => setNewClassOpen(true)}>
+              <Plus className="h-4 w-4" strokeWidth={2.5} />
+              New class
+            </Button>
+          )}
         </div>
       </div>
 
       {isLoading && <Spinner />}
       {error && <ErrorNote error={error as Error} />}
       {!isLoading && !error && data && data.classes.length === 0 && (
-        <EmptyState
-          title="No classes yet"
-          body="Create your first class to start building notebooks for your students."
-          action={
-            <Button type="button" variant="primary" onClick={() => setNewClassOpen(true)}>
-              <Plus className="h-4 w-4" strokeWidth={2.5} />
-              New class
-            </Button>
-          }
-        />
+        showArchived ? (
+          <EmptyState
+            title="Nothing archived"
+            body="Classes you archive end up here, with everything in them kept."
+          />
+        ) : (
+          <EmptyState
+            title="No classes yet"
+            body="Create your first class to start building notebooks for your students."
+            action={
+              <Button type="button" variant="primary" onClick={() => setNewClassOpen(true)}>
+                <Plus className="h-4 w-4" strokeWidth={2.5} />
+                New class
+              </Button>
+            }
+          />
+        )
       )}
       {!isLoading && !error && data && data.classes.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.classes.map((cls) => (
-            <ClassCard key={cls.id} cls={cls} />
+            <ClassCard key={cls.id} cls={cls} menu={classMenu(cls)} />
           ))}
         </div>
       )}

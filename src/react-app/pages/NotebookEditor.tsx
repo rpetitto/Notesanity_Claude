@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
-  FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
+  CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
   MoreHorizontal, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
   FolderOpen,
 } from "lucide-react";
@@ -329,6 +329,28 @@ export default function NotebookEditor() {
    * failure the previous order is put back and the error is shown, rather than
    * leaving a lie on screen.
    */
+  /**
+   * Duplicate one or more pages.
+   *
+   * Sequential rather than parallel on purpose: each copy is slotted in behind
+   * its original, and two copies racing for the same gap in `seq` would land in
+   * an order nobody asked for.
+   */
+  const duplicatePages = useMutation({
+    mutationFn: async (pageIds: string[]) => {
+      for (const pageId of pageIds) {
+        await api.post(`/api/notebooks/${notebookId}/pages/${pageId}/duplicate`);
+      }
+      return pageIds.length;
+    },
+    onSuccess: (count) => {
+      invalidate();
+      setSelection(new Set());
+      toast.success(count === 1 ? "Page duplicated" : `${count} pages duplicated`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const arrangePages = useMutation({
     mutationFn: (entries: ArrangeEntry[]) =>
       api.post(`/api/notebooks/${notebookId}/pages/arrange`, { pages: entries }),
@@ -588,6 +610,7 @@ export default function NotebookEditor() {
           onRename={(id, label) => patchPage.mutate({ id, label })}
           onArchiveToggle={(id, archived) => patchPage.mutate({ id, archived })}
           onDelete={(id) => confirmDelete([id])}
+          onDuplicate={(id) => duplicatePages.mutate([id])}
           onArrange={(entries) => arrangePages.mutate(entries)}
           onRenameGroup={(from, to) => {
             const ids = allPages.filter((p) => (p.group_name ?? "") === from).map((p) => p.id);
@@ -967,6 +990,14 @@ export default function NotebookEditor() {
                 className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat"
               >
                 <FolderPlus className="h-3.5 w-3.5" strokeWidth={2.5} /> Group
+              </button>
+              <button
+                onClick={() => duplicatePages.mutate(Array.from(selection))}
+                disabled={duplicatePages.isPending}
+                title="Copy each page, with its boxes, in behind the original"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
+              >
+                <CopyPlus className="h-3.5 w-3.5" strokeWidth={2.5} /> Duplicate
               </button>
               <button
                 onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "archive" })}

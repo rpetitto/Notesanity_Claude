@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  BookOpen, Check, ClipboardList, Copy, Eye, FolderOpen, GraduationCap, Palette, Plus, RefreshCw, Upload, UserPlus, UserX, Users,
+  Archive, BookOpen, Check, ClipboardList, Copy, Eye, FolderOpen, GraduationCap, Palette, Plus,
+  RefreshCw, RotateCcw, Settings2, Trash2, Upload, UserPlus, UserX, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import Gradebook from "./Gradebook";
@@ -14,7 +15,7 @@ import StudentAssignmentNav, {
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
-import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Modal, Textarea } from "../components/ui";
+import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Menu, Modal, Textarea, type MenuItem } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
@@ -40,6 +41,12 @@ interface ClassDetail {
   join_code: string;
   joinCode?: string;
   archived: number;
+  /** Optional details a teacher keeps about the class; blank until filled in. */
+  description?: string;
+  room?: string;
+  level?: string;
+  year?: string;
+  subject?: string;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +80,8 @@ interface ClassNotebook {
   kind?: string;
   owner_id?: string;
   owner_name?: string | null;
+  /** Put away by the teacher: hidden from students, still here for them. */
+  archived?: number;
 }
 
 interface TeacherRow {
@@ -321,6 +330,36 @@ function CustomizeModal({
   const fileRef = useRef<HTMLInputElement | null>(null);
   useEscapeClose(onClose);
 
+  /**
+   * The written details, saved together on one button rather than per field.
+   *
+   * Emoji and color save the moment they're picked because picking one *is*
+   * the decision. Typing isn't: saving each keystroke's worth of a description
+   * would put a write behind every pause for thought.
+   */
+  const [tab, setTab] = useState<"details" | "style">("details");
+  const [details, setDetails] = useState({
+    description: cls.description ?? "",
+    section: cls.section ?? "",
+    level: cls.level ?? "",
+    subject: cls.subject ?? "",
+    year: cls.year ?? "",
+    room: cls.room ?? "",
+  });
+  const detailsDirty =
+    details.description !== (cls.description ?? "") ||
+    details.section !== (cls.section ?? "") ||
+    details.level !== (cls.level ?? "") ||
+    details.subject !== (cls.subject ?? "") ||
+    details.year !== (cls.year ?? "") ||
+    details.room !== (cls.room ?? "");
+
+  const saveDetails = useMutation({
+    mutationFn: () => api.patch(`/api/classes/${classId}`, details),
+    onSuccess: async () => { await invalidate(); toast.success("Class details saved"); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const invalidate = () =>
     Promise.all([
       qc.invalidateQueries({ queryKey: ["class", classId] }),
@@ -374,8 +413,86 @@ function CustomizeModal({
     e.target.value = "";
   };
 
+  const field = (
+    key: keyof typeof details,
+    label: string,
+    placeholder: string,
+    long = false,
+  ) => (
+    <div>
+      <Label htmlFor={`cls-${key}`}>{label}</Label>
+      {long ? (
+        <Textarea
+          id={`cls-${key}`}
+          rows={2}
+          value={details[key]}
+          onChange={(e) => setDetails((d) => ({ ...d, [key]: e.target.value }))}
+          placeholder={placeholder}
+          className="mt-1.5"
+        />
+      ) : (
+        <Input
+          id={`cls-${key}`}
+          value={details[key]}
+          onChange={(e) => setDetails((d) => ({ ...d, [key]: e.target.value }))}
+          placeholder={placeholder}
+          className="mt-1.5"
+        />
+      )}
+    </div>
+  );
+
   return (
-    <Modal onClose={onClose} title="Customize class">
+    <Modal onClose={onClose} title="Class settings">
+      {/* Two tabs rather than one long scroll. They are also two different
+          kinds of decision — what the class *is* versus what it looks like —
+          and the written half is the half people come back to edit. */}
+      <div className="mb-5 flex gap-1 rounded-full border-[3px] border-pine p-1">
+        {([
+          { key: "details" as const, label: "Details", icon: Settings2 },
+          { key: "style" as const, label: "Style", icon: Palette },
+        ]).map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={cn(
+              "flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full font-display text-[16px] transition-colors",
+              tab === key ? "bg-pine text-oat" : "text-pine hover:bg-pine/8",
+            )}
+          >
+            <Icon className="h-4 w-4" strokeWidth={2.5} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className={cn(tab === "details" ? "" : "hidden")}>
+        <p className="mb-3 text-[16px] text-pine/65">
+          All optional — whatever you'd write on the board.
+          {cls.source === "classroom" && " What Google Classroom knew is already filled in."}
+        </p>
+        <div className="space-y-3">
+          {field("description", "Description", "What this class is, in a line", true)}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {field("section", "Section", "Period 3")}
+            {field("level", "Level(s)", "8th grade")}
+            {field("subject", "Subject", "Technology")}
+            {field("year", "Year", "2026–27")}
+          </div>
+          {field("room", "Room", "MS201")}
+        </div>
+        <Button
+          variant="primary"
+          className="mt-4 w-full"
+          disabled={!detailsDirty || saveDetails.isPending}
+          onClick={() => saveDetails.mutate()}
+        >
+          {saveDetails.isPending ? "Saving…" : "Save details"}
+        </Button>
+      </div>
+
+      <div className={cn(tab === "style" ? "" : "hidden")}>
       <div className="mb-5">
         <Label>Emoji</Label>
         <Input
@@ -482,6 +599,7 @@ function CustomizeModal({
           className="hidden"
           onChange={onFile}
         />
+      </div>
       </div>
     </Modal>
   );
@@ -655,12 +773,62 @@ export function StudentAssignmentCard({ a }: { a: StudentAssignmentData }) {
  * students' own, so the two read as the same kind of thing — a byline is the
  * only difference a teacher sees.
  */
-function NotebookCard({ nb, to, byline }: { nb: ClassNotebook; to: string; byline?: string }) {
+/**
+ * Deleting a class, with the name typed back.
+ *
+ * A confirm dialog is the right weight for deleting one notebook nobody has
+ * opened. It is the wrong weight for this: a term's worth of writing by thirty
+ * people, gone, with no undo and nothing to restore from. Typing the name is a
+ * few seconds that can only be spent deliberately, which is the point.
+ */
+function DeleteClassModal({
+  name, busy, onClose, onConfirm,
+}: { name: string; busy: boolean; onClose: () => void; onConfirm: () => void }) {
+  const [typed, setTyped] = useState("");
+  const matches = typed.trim().toLowerCase() === name.trim().toLowerCase();
+  return (
+    <Modal onClose={onClose} title="Delete this class?">
+      <div className="rounded-[14px] border-[3px] border-[#a3341f] bg-[#a3341f]/8 p-4 text-[16px] text-[#7d2716]">
+        This deletes <span className="font-bold">{name}</span> and everything in it: every notebook,
+        every page your students wrote on, every assignment and every grade. It cannot be undone.
+        <div className="mt-2">
+          If you only want it off your list, <span className="font-bold">archive it instead</span> —
+          that keeps all of it and students can still read it.
+        </div>
+      </div>
+      <label className="label-caps mb-1 mt-5 block text-pine/70" htmlFor="del-class">
+        Type the class name to confirm
+      </label>
+      <Input
+        id="del-class"
+        value={typed}
+        onChange={(e) => setTyped(e.target.value)}
+        placeholder={name}
+        autoFocus
+        autoComplete="off"
+      />
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="danger" disabled={!matches || busy} onClick={onConfirm}>
+          {busy ? "Deleting…" : "Delete for good"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function NotebookCard({
+  nb, to, byline, menu,
+}: { nb: ClassNotebook; to: string; byline?: string; menu?: MenuItem[] }) {
   const accent = nb.accent_color || DEFAULT_ACCENT;
   return (
     <Link
       to={to}
-      className="group overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--color-pine)]"
+      className={cn(
+        "group relative overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--color-pine)]",
+        // A notebook that's been put away reads as put away.
+        nb.archived && "opacity-70",
+      )}
     >
       <div className="h-2" style={{ background: accent }} />
       <div className="flex gap-3 p-4">
@@ -690,9 +858,13 @@ function NotebookCard({ nb, to, byline }: { nb: ClassNotebook; to: string; bylin
             {nb.kind !== "student" && (
               <Chip tone={nb.status === "published" ? "mint" : "quiet"} className="capitalize">{nb.status}</Chip>
             )}
+            {!!nb.archived && <Chip tone="warn">Archived</Chip>}
             <span className="text-[16px] text-pine/50">{relativeTime(nb.updated_at)}</span>
           </div>
         </div>
+        {/* Sits inside the card, which is a link — the menu stops its own
+            presses from reaching it so opening the menu doesn't navigate. */}
+        {menu && menu.length > 0 && <Menu items={menu} className="-mr-1 -mt-1" />}
       </div>
     </Link>
   );
@@ -817,6 +989,79 @@ export default function ClassView() {
     },
     onError: (err: Error) => toast.error(err.message),
   });
+
+  /* ---------------- putting notebooks and the class away ---------------- */
+
+  const setNotebookArchived = useMutation({
+    mutationFn: ({ notebookId, archived }: { notebookId: string; archived: boolean }) =>
+      api.patch(`/api/notebooks/${notebookId}`, { archived }),
+    onSuccess: async (_r, { archived }) => {
+      await qc.invalidateQueries({ queryKey: ["class", id] });
+      toast.success(archived ? "Archived — students no longer see it" : "Back with the class");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteNotebook = useMutation({
+    mutationFn: (notebookId: string) => api.del(`/api/notebooks/${notebookId}`),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["class", id] });
+      toast.success("Notebook deleted");
+    },
+    // The server refuses a published notebook, and says why. Worth showing in
+    // full: it names archiving as the thing they probably wanted.
+    onError: (e: Error) => toast.error(e.message, { duration: 8000 }),
+  });
+
+  const [deleteClassOpen, setDeleteClassOpen] = useState(false);
+  const deleteClass = useMutation({
+    mutationFn: (name: string) => api.del(`/api/classes/${id}?confirm=${encodeURIComponent(name)}`),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["classes"] });
+      toast.success("Class deleted");
+      navigate("/classes");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const setClassArchived = useMutation({
+    mutationFn: (archived: boolean) => api.patch(`/api/classes/${id}`, { archived }),
+    onSuccess: async (_r, archived) => {
+      await qc.invalidateQueries({ queryKey: ["classes"] });
+      await qc.invalidateQueries({ queryKey: ["class", id] });
+      toast.success(archived ? "Class archived" : "Class is back");
+      if (archived) navigate("/classes");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  /** The menu hanging off one notebook card. */
+  const notebookMenu = (nb: ClassNotebook): MenuItem[] => {
+    if (!isTeacher || nb.kind === "student") return [];
+    const archived = !!nb.archived;
+    return [
+      {
+        label: archived ? "Bring back to the class" : "Archive",
+        icon: archived ? <RotateCcw className="h-5 w-5" strokeWidth={2.5} /> : <Archive className="h-5 w-5" strokeWidth={2.5} />,
+        hint: archived
+          ? "Students see it again, with their work as they left it."
+          : "Puts it away for the class. Nobody's work is lost, and you can bring it back.",
+        onClick: () => setNotebookArchived.mutate({ notebookId: nb.id, archived: !archived }),
+      },
+      {
+        label: "Delete",
+        icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
+        danger: true,
+        hint: nb.status === "published"
+          ? "Not while students have copies — archive it instead."
+          : "Gone for good. Only possible before it's published.",
+        disabled: nb.status === "published",
+        onClick: () => {
+          if (window.confirm(`Delete "${nb.title}"? This can't be undone.`)) deleteNotebook.mutate(nb.id);
+        },
+      },
+    ];
+  };
 
   const copyCode = async (code: string) => {
     try {
@@ -944,6 +1189,40 @@ export default function ClassView() {
                 Customize
               </Button>
             )}
+            {isTeacher && (
+              <Menu
+                label="Class actions"
+                items={[
+                  {
+                    label: "Class details",
+                    icon: <Settings2 className="h-5 w-5" strokeWidth={2.5} />,
+                    hint: "Description, room, level, year and subject.",
+                    onClick: () => setCustomizeOpen(true),
+                  },
+                  {
+                    label: cls.archived ? "Bring the class back" : "Archive class",
+                    icon: cls.archived
+                      ? <RotateCcw className="h-5 w-5" strokeWidth={2.5} />
+                      : <Archive className="h-5 w-5" strokeWidth={2.5} />,
+                    hint: cls.archived
+                      ? "Back on everyone's list, and writable again."
+                      : "Notebooks, assignments and grades go with it. Students keep read-only access from their archive.",
+                    onClick: () => {
+                      if (cls.archived || window.confirm(
+                        `Archive "${cls.name}"? Its notebooks and assignments go with it. Students keep read-only access, and you can bring it all back.`,
+                      )) setClassArchived.mutate(!cls.archived);
+                    },
+                  },
+                  {
+                    label: "Delete class",
+                    icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
+                    danger: true,
+                    hint: "Every notebook, every page of student work, every grade. No undo.",
+                    onClick: () => setDeleteClassOpen(true),
+                  },
+                ]}
+              />
+            )}
             {isTeacher && joinCode && (
               <div data-tour="join-code" className="flex items-center gap-2">
                 <span className="flex items-center gap-2 rounded-full border-[3px] border-pine bg-oat px-4 py-2 font-display text-[17px] tracking-[0.3em] text-pine">
@@ -1030,7 +1309,12 @@ export default function ClassView() {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {classNotebooks.map((nb) => (
-                  <NotebookCard key={nb.id} nb={nb} to={isTeacher ? `/notebooks/${nb.id}/edit` : `/notebooks/${nb.id}`} />
+                  <NotebookCard
+                    key={nb.id}
+                    nb={nb}
+                    to={isTeacher ? `/notebooks/${nb.id}/edit` : `/notebooks/${nb.id}`}
+                    menu={notebookMenu(nb)}
+                  />
                 ))}
               </div>
             )}
@@ -1267,6 +1551,15 @@ export default function ClassView() {
           student={reviewingStudent}
           assignments={backfillQ.data?.assignments ?? []}
           onClose={() => setReviewingStudent(null)}
+        />
+      )}
+
+      {deleteClassOpen && (
+        <DeleteClassModal
+          name={cls.name}
+          busy={deleteClass.isPending}
+          onClose={() => setDeleteClassOpen(false)}
+          onConfirm={() => deleteClass.mutate(cls.name)}
         />
       )}
 

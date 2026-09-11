@@ -38,6 +38,18 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 12, 2026",
+    "Tidying up: archiving, duplicating, clearing and exporting.",
+    [
+      ["new", "<b>Archive a notebook or a whole class.</b> Archiving a notebook puts it away for the class — nobody's work is lost and you can bring it back. Archiving a class takes its notebooks, assignments and grades with it; students keep read-only access from a new <b>Archived classes</b> section, so last term's notes are still there to read."],
+      ["new", "<b>Delete a notebook or a class.</b> A notebook can be deleted while it's still a draft; once students have copies it can only be archived, because deleting it would delete their writing too. Deleting a class asks you to type its name, because it takes everything."],
+      ["new", "<b>Duplicate a page</b>, with its answer boxes and your own ink, from the icon beside the page name — or several at once from the selection bar."],
+      ["new", "<b>Clear page</b>, on the eraser. It takes every stroke, note and stamp off the page and empties the answer boxes without removing the boxes themselves."],
+      ["new", "<b>Export a notebook</b> as a PDF — download it, or save it straight to your Google Drive. Teachers and students both."],
+      ["new", "A class can carry a description, room, section, level, year and subject. Google Classroom fills in what it knows on import."],
+    ],
+  ],
+  [
     "September 11, 2026",
     "A sign-in fix, and a notebook nobody should have seen yet.",
     [

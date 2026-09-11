@@ -149,6 +149,8 @@ export interface WorkResponse {
   isTeacher: boolean;
   /** Set when the viewer may read this notebook but not write in it. */
   readOnly?: boolean;
+  /** Why it's read-only, in a sentence the screen can show as-is. */
+  readOnlyReason?: string;
   /**
    * Set for a teacher of the class looking into a student's own notebook: they
    * may write on the pages whose `teacher_annotate` the student has turned on,

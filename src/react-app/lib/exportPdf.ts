@@ -29,12 +29,22 @@ export interface ExportPage {
   layers: LayerData[];
 }
 
-export async function exportNotebookPdf(
+/** A filename a filesystem and a Drive will both accept. */
+export const pdfFileName = (title: string) =>
+  `${title.replace(/[^\w\d\-. ]+/g, "").trim() || "notebook"}.pdf`;
+
+/**
+ * Render the notebook and hand back the PDF itself.
+ *
+ * Separated from saving it because the file now has two destinations — the
+ * machine in front of you, or the teacher's Drive — and only the last step
+ * differs. Everything expensive happens once, either way.
+ */
+export async function renderNotebookPdf(
   notebookId: string,
-  title: string,
   pages: ExportPage[],
   onProgress?: (done: number, total: number) => void,
-): Promise<void> {
+): Promise<Blob> {
   const { jsPDF } = await import("jspdf");
   let doc: InstanceType<typeof jsPDF> | null = null;
 
@@ -72,7 +82,26 @@ export async function exportNotebookPdf(
   }
 
   if (!doc) throw new Error("This notebook has no pages to export.");
-  doc.save(`${title.replace(/[^\w\d\-. ]+/g, "").trim() || "notebook"}.pdf`);
+  return doc.output("blob");
+}
+
+/** Render and download, which is what most people mean by "export". */
+export async function exportNotebookPdf(
+  notebookId: string,
+  title: string,
+  pages: ExportPage[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<void> {
+  const blob = await renderNotebookPdf(notebookId, pages, onProgress);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = pdfFileName(title);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoked on the next tick: too early and Safari cancels its own download.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 /** Gather the layers belonging to one page, newest kinds painted last. */

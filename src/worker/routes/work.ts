@@ -82,6 +82,11 @@ async function writeTail(layerId: string, chunks: string[]) {
   }
 }
 
+const ARCHIVED_REASON =
+  "This class has been archived — everything in it can be read, and nothing in it can be changed.";
+const OTHERS_NOTEBOOK_REASON =
+  "This is the student's own notebook — you can read it, not write in it";
+
 /** Is this notebook's class on the archive shelf? Personal notebooks have none. */
 async function classIsArchived(classId: string | null | undefined): Promise<boolean> {
   if (!classId) return false;
@@ -126,6 +131,9 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
       nb, user: u, isTeacher: false, instance, studentId: nb.owner_id,
       readOnly: !owns || archived,
       canAnnotate: !owns && teachesClass && !archived,
+      // Both can be true; the archive is the one that explains more, because
+      // it is the one the reader can't do anything about by asking.
+      readOnlyReason: archived ? ARCHIVED_REASON : !owns ? OTHERS_NOTEBOOK_REASON : "",
     };
   }
 
@@ -158,6 +166,7 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   return {
     nb, user, isTeacher, instance, studentId,
     readOnly: archivedClass, canAnnotate: false,
+    readOnlyReason: archivedClass ? ARCHIVED_REASON : "",
   };
 }
 
@@ -200,7 +209,8 @@ async function ensureInstance(nb: any, studentId: string, checkEnrolment: boolea
  */
 app.get("/api/notebooks/:id/work", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { nb, isTeacher, instance, studentId, readOnly, canAnnotate } = await resolveInstance(c, param(c, "id"), studentParam);
+  const { nb, isTeacher, instance, studentId, readOnly, readOnlyReason, canAnnotate } =
+    await resolveInstance(c, param(c, "id"), studentParam);
 
   const pages = await db
     .prepare(
@@ -276,6 +286,8 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     // A teacher looking into a student's own notebook is a reader. Told plainly
     // here so the client doesn't offer a pen whose every save would be refused.
     readOnly,
+    // Why, so the screen can say so rather than just withholding the pen.
+    readOnlyReason,
     // ...except on the pages the student opened up. The pages carry
     // `teacher_annotate`, so the client can offer the pen exactly there.
     canAnnotate,
@@ -507,8 +519,8 @@ const bareType = (value: string) => (value || "").split(";")[0].trim().toLowerCa
  */
 app.post("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { nb, user, isTeacher, instance, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
-  if (readOnly) throw new HttpError(403, "This is the student's own notebook — you can read it, not write in it");
+  const { nb, user, isTeacher, instance, readOnly, readOnlyReason } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (readOnly) throw new HttpError(403, readOnlyReason || OTHERS_NOTEBOOK_REASON);
   if (isTeacher && instance.student_id !== user.id) {
     throw new HttpError(403, "Teachers can't answer on a student's behalf");
   }
@@ -586,8 +598,8 @@ app.get("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
 
 app.delete("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { user, isTeacher, instance, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
-  if (readOnly) throw new HttpError(403, "This is the student's own notebook — you can read it, not write in it");
+  const { user, isTeacher, instance, readOnly, readOnlyReason } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (readOnly) throw new HttpError(403, readOnlyReason || OTHERS_NOTEBOOK_REASON);
   if (isTeacher && instance.student_id !== user.id) throw new HttpError(403, "Not your response to remove");
   await db
     .prepare(`UPDATE field_values SET asset_key = NULL, content_type = NULL, updated_at = ? WHERE instance_id = ? AND field_id = ?`)
@@ -599,8 +611,8 @@ app.delete("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
 /** Save typed answers to teacher-defined form fields. */
 app.put("/api/notebooks/:id/values", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { user, isTeacher, instance, readOnly } = await resolveInstance(c, param(c, "id"), studentParam);
-  if (readOnly) throw new HttpError(403, "This is the student's own notebook — you can read it, not write in it");
+  const { user, isTeacher, instance, readOnly, readOnlyReason } = await resolveInstance(c, param(c, "id"), studentParam);
+  if (readOnly) throw new HttpError(403, readOnlyReason || OTHERS_NOTEBOOK_REASON);
   if (isTeacher && instance.student_id !== user.id) {
     throw new HttpError(403, "Teachers can't type into a student's answers");
   }

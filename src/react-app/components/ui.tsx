@@ -10,7 +10,9 @@
  * that has come back done. Everything else is Pine on Oat.
  */
 
-import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { MoreHorizontal } from "lucide-react";
 import { Link } from "react-router-dom";
 import { cn } from "../lib/utils";
 
@@ -209,6 +211,155 @@ export function Label({ className, children, htmlFor }: { className?: string; ch
     <label htmlFor={htmlFor} className={cn("label-caps block text-pine/75", className)}>
       {children}
     </label>
+  );
+}
+
+export interface MenuItem {
+  label: string;
+  icon?: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  /** A second line, for a choice whose consequence isn't obvious from its name. */
+  hint?: string;
+  /** Destructive: drawn in the warning red, and always placed last by the caller. */
+  danger?: boolean;
+}
+
+/**
+ * A "…" menu.
+ *
+ * Four surfaces need the same short list of actions hanging off a card or a
+ * header — a notebook, a class, a page, a notebook's own toolbar — and each
+ * one growing its own dropdown is how four subtly different dropdowns happen.
+ *
+ * Closes on a press anywhere else and on Escape. The press that opens it is
+ * stopped from propagating, which matters because these sit inside cards that
+ * are themselves links: without it, opening the menu would navigate away.
+ */
+export function Menu({
+  items, label = "More actions", trigger, align = "right", className, disabled,
+}: {
+  items: MenuItem[];
+  label?: string;
+  /** Defaults to a "…" icon button sized like every other icon button. */
+  trigger?: ReactNode;
+  align?: "left" | "right";
+  className?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  /**
+   * Where to draw the panel, in viewport coordinates.
+   *
+   * The panel is portalled to the body rather than drawn where it sits in the
+   * tree, because every place this is used is a card with `overflow-hidden` —
+   * a menu rendered inside one is a menu with its bottom half sliced off. The
+   * cost is positioning it by hand, which is this.
+   */
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+
+  const place = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = Math.min(272, window.innerWidth - 24);
+    // Flips above the trigger when there isn't room below — a menu on a card
+    // near the bottom of a long page otherwise opens off-screen.
+    const estimated = 64 * items.length + 12;
+    const below = r.bottom + 8;
+    const top = below + estimated < window.innerHeight - 12 ? below : Math.max(12, r.top - 8 - estimated);
+    const left = align === "right"
+      ? Math.max(12, Math.min(r.right - width, window.innerWidth - width - 12))
+      : Math.max(12, Math.min(r.left, window.innerWidth - width - 12));
+    setAt({ top, left });
+  }, [align, items.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // Scrolling or resizing while it's open moves the trigger out from under
+    // the panel, so the panel goes rather than drifting away from its button.
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className={cn("relative shrink-0", className)}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={disabled}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (!open) place();
+          setOpen((v) => !v);
+        }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        className={cn(
+          "inline-flex h-11 w-11 items-center justify-center rounded-full border-[3px] border-transparent",
+          "text-pine transition-colors hover:bg-pine/10 disabled:opacity-40",
+          "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-pine/30",
+          open && "bg-pine/10",
+        )}
+      >
+        {trigger ?? <MoreHorizontal className="h-5 w-5" strokeWidth={2.5} />}
+      </button>
+
+      {open && at && createPortal(
+        <div
+          role="menu"
+          style={{ top: at.top, left: at.left }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "fixed z-[60] w-[min(17rem,calc(100vw-24px))] overflow-hidden rounded-[16px]",
+            "border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)]",
+          )}
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              disabled={item.disabled}
+              onClick={() => { setOpen(false); item.onClick(); }}
+              className={cn(
+                "flex w-full items-start gap-2.5 px-4 py-3 text-left transition-colors",
+                "disabled:pointer-events-none disabled:opacity-45",
+                item.danger ? "text-[#a3341f] hover:bg-[#a3341f]/8" : "text-pine hover:bg-oat",
+              )}
+            >
+              {item.icon && <span className="mt-0.5 shrink-0">{item.icon}</span>}
+              <span className="min-w-0">
+                <span className="block font-display text-[17px] font-bold">{item.label}</span>
+                {item.hint && (
+                  <span className={cn("block text-[16px] leading-snug", item.danger ? "text-[#a3341f]/75" : "text-pine/65")}>
+                    {item.hint}
+                  </span>
+                )}
+              </span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
   );
 }
 

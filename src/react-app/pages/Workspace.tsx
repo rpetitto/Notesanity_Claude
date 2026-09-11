@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, PanelLeft, Pencil, PenSquare, Plus, Send, Undo2 } from "lucide-react";
+import { Archive, ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, FolderOpen, PanelLeft, Pencil, PenSquare, Plus, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
-import { parseLayer, TEACHER_COLORS } from "../lib/ink";
+import { emptyLayer, parseLayer, TEACHER_COLORS } from "../lib/ink";
+import { hasGoogleClientId } from "../lib/google";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
 import NotebookSurface, { type LayerMap, type ZoomMode } from "../components/NotebookSurface";
@@ -14,7 +15,7 @@ import InkToolbar from "../components/InkToolbar";
 import Tour from "../components/Tour";
 import type { ToolState } from "../components/PageCanvas";
 import { ErrorNote, Spinner, FlingBadge } from "../components/Shell";
-import { Button, Chip, IconButton, Input, Modal } from "../components/ui";
+import { Button, Chip, IconButton, Input, Menu, Modal, type MenuItem } from "../components/ui";
 import {
   PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
   renderPatternToCanvas, type PatternKey,
@@ -511,7 +512,8 @@ export default function Workspace() {
    * reader everywhere else in this screen, which is why `readOnly` stays true
    * and only the pen is handed back.
    */
-  const ownsStudentNotebook = data?.notebook.kind === "student" && !readOnly;
+  const isStudentOwned = data?.notebook.kind === "student";
+  const ownsStudentNotebook = isStudentOwned && !readOnly;
   const annotating = Boolean(readOnly && data?.canAnnotate);
 
   /**
@@ -703,6 +705,42 @@ export default function Workspace() {
    */
   const isPersonal = (data as any)?.notebook?.kind === "personal";
 
+  /**
+   * Wipe the page in view back to blank paper.
+   *
+   * Everything written *onto* the page goes: ink, highlighter, typed notes,
+   * stamps. The answer boxes a teacher placed do not — they are the worksheet,
+   * not the answer — so they stay exactly where they are and are emptied
+   * instead. Clearing a page that also deleted the questions would be a very
+   * expensive way to find out what this button does.
+   *
+   * It goes through the same setters an ordinary edit does, so it lands in the
+   * undo history and saves like anything else.
+   */
+  const clearVisiblePage = () => {
+    if (!visiblePage || !data) return;
+    const target = annotating ? "teacher" : "student";
+    const existing = (target === "teacher" ? work.teacherLayers : work.studentLayers)[visiblePage];
+    const hasInk = existing && (existing.s.length || existing.x.length || existing.e.length || existing.c.length);
+    const boxes = data.fields.filter(
+      (f) => f.page_id === visiblePage && ["text", "checkbox", "choice", "prompt"].includes(f.type),
+    );
+    const filled = boxes.filter((f) => (work.fieldValues[f.id] ?? "") !== "");
+    if (!hasInk && filled.length === 0) {
+      toast.success("This page is already clear");
+      return;
+    }
+    const parts = [
+      hasInk ? "everything written on it" : "",
+      filled.length ? `${filled.length} answer${filled.length === 1 ? "" : ""} typed into boxes` : "",
+    ].filter(Boolean).join(" and ");
+    if (!window.confirm(`Clear this page? That removes ${parts}. The boxes themselves stay.`)) return;
+
+    work.setLayer(visiblePage, emptyLayer());
+    for (const f of filled) work.setFieldValue(f.id, "");
+    toast.success("Page cleared");
+  };
+
   const openToTeacher = useMemo(
     () => new Set(pages.filter((p) => p.teacher_annotate).map((p) => p.id)),
     [pages],
@@ -722,23 +760,66 @@ export default function Workspace() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const exportPdf = async () => {
+  /**
+   * Take the notebook out of the app, to the machine or to Drive.
+   *
+   * Both destinations render exactly the same PDF — pages composited with
+   * every layer over them, the way the screen shows it — and differ only in
+   * where the finished file goes. Rendering is the slow part, so the progress
+   * counter covers it and the destination is a single step at the end.
+   */
+  const exportTo = async (destination: "download" | "drive") => {
     if (!data) return;
     try {
       setExporting("Preparing…");
-      const { exportNotebookPdf, layersForPage } = await import("../lib/exportPdf");
-      await exportNotebookPdf(
-        notebookId,
-        data.notebook.title,
-        pages.map((page) => ({ page, layers: layersForPage(page.id, data.layers as any) })),
-        (done, total) => setExporting(`Page ${done} of ${total}…`),
-      );
+      const { renderNotebookPdf, exportNotebookPdf, pdfFileName, layersForPage } =
+        await import("../lib/exportPdf");
+      const exportPages = pages.map((page) => ({
+        page,
+        layers: layersForPage(page.id, data.layers as any),
+      }));
+      const onProgress = (done: number, total: number) => setExporting(`Page ${done} of ${total}…`);
+
+      if (destination === "download") {
+        await exportNotebookPdf(notebookId, data.notebook.title, exportPages, onProgress);
+        toast.success("Downloaded");
+        return;
+      }
+
+      const blob = await renderNotebookPdf(notebookId, exportPages, onProgress);
+      setExporting("Saving to Drive…");
+      const { uploadPdfToDrive } = await import("../lib/google");
+      const file = await uploadPdfToDrive(blob, pdfFileName(data.notebook.title));
+      toast.success("Saved to your Google Drive", {
+        duration: 8000,
+        action: { label: "Open", onClick: () => window.open(file.link, "_blank", "noopener") },
+      });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
       setExporting("");
     }
   };
+
+  /** Offered wherever there are pages to export, which is everywhere but an empty notebook. */
+  const exportMenu: MenuItem[] = [
+    {
+      label: "Download as PDF",
+      icon: <Download className="h-5 w-5" strokeWidth={2.5} />,
+      hint: "Every page, with everything written on it.",
+      disabled: !!exporting,
+      onClick: () => void exportTo("download"),
+    },
+    ...(hasGoogleClientId
+      ? [{
+          label: "Save to Google Drive",
+          icon: <FolderOpen className="h-5 w-5" strokeWidth={2.5} />,
+          hint: "The same PDF, straight into your Drive.",
+          disabled: !!exporting,
+          onClick: () => void exportTo("drive"),
+        }]
+      : []),
+  ];
 
   // Keyboard: undo/redo on the page currently in view.
   useEffect(() => {
@@ -814,6 +895,11 @@ export default function Workspace() {
         </div>
 
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {pages.length > 0 && (
+            exporting
+              ? <Chip tone="quiet">{exporting}</Chip>
+              : <Menu label="Export notebook" items={exportMenu} trigger={<Download className="h-5 w-5" strokeWidth={2.5} />} />
+          )}
           {ownsStudentNotebook && (
             <Button variant="secondary" onClick={() => setAccessOpen(true)}>
               <PenSquare className="h-4 w-4" strokeWidth={2.5} />
@@ -826,9 +912,6 @@ export default function Workspace() {
             <>
               <Button variant="secondary" onClick={() => setBlankOpen(true)}>
                 <Plus className="h-4 w-4" strokeWidth={2.5} /> Add pages
-              </Button>
-              <Button variant="secondary" onClick={() => void exportPdf()} disabled={!!exporting}>
-                <Download className="h-4 w-4" strokeWidth={2.5} /> {exporting || "Export PDF"}
               </Button>
             </>
           )}
@@ -895,7 +978,18 @@ export default function Workspace() {
         />
       )}
 
-      {readOnly && (
+      {/* An archived class explains itself: "the pen is gone" is not an
+          explanation. The student-notebook banner below covers the other
+          read-only case, which is about whose notebook it is rather than what
+          state the class is in. */}
+      {readOnly && !isStudentOwned && data.readOnlyReason && (
+        <div className="flex items-center gap-2 border-b-2 border-pine/15 bg-oat px-4 py-2 text-[16px] text-pine/80">
+          <Archive className="h-4 w-4" strokeWidth={2.5} />
+          {data.readOnlyReason}
+        </div>
+      )}
+
+      {readOnly && isStudentOwned && (
         <div className="flex items-center gap-2 border-b-2 border-pine/15 bg-oat px-4 py-2 text-[16px] text-pine/80">
           <Eye className="h-4 w-4" strokeWidth={2.5} />
           {data.student?.name ? `${data.student.name}'s own notebook` : "A student's own notebook"} —{" "}
@@ -963,6 +1057,7 @@ export default function Workspace() {
             status={work.status}
             zoom={zoom}
             onZoomChange={setZoom}
+            onClearPage={clearVisiblePage}
           />
         </div>
       )}

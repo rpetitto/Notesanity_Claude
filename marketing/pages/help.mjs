@@ -116,6 +116,19 @@ const BODY = () => `
          without ever being homework.`,
       ],
       [
+        "What's the difference between archiving and deleting?",
+        `Archiving puts something away and keeps everything: a notebook leaves the class, a class
+         leaves everyone's list, and all the work inside stays exactly as it was. You can bring
+         either back. Deleting is permanent — which is why a notebook can only be deleted before
+         it's published, and deleting a class asks you to type its name first.`,
+      ],
+      [
+        "Can I get a notebook out as a file?",
+        `Yes — <b>Export</b> in a notebook gives you a PDF, either downloaded or saved straight to
+         your Google Drive. It's every page as it looks on screen, with the writing on it.
+         Students can export their own notebooks the same way.`,
+      ],
+      [
         "Can students see a notebook I'm still building?",
         `No. A notebook is a draft until you press <b>Publish to students</b>, and a draft is yours
          alone — it isn't listed in the class, can't be opened by a link, and can't be set as an

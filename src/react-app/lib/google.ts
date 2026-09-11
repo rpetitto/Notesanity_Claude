@@ -316,6 +316,32 @@ export async function driveFileAsPdf(file: DriveFile): Promise<Blob> {
   return await res.blob();
 }
 
+/**
+ * Put a finished PDF in the person's own Drive.
+ *
+ * `drive.file` is the scope we already hold, and it is exactly the right one:
+ * it grants access to files this app creates and nothing else, so saying yes
+ * to this doesn't hand Notesanity the rest of someone's Drive. The trade is
+ * that we can't file it into a folder we didn't make, so it lands in My Drive
+ * — which is where a person looks for something they just saved anyway.
+ */
+export async function uploadPdfToDrive(blob: Blob, filename: string): Promise<{ id: string; link: string }> {
+  const token = await getToken(DRIVE_SCOPES);
+  const form = new FormData();
+  form.append(
+    "metadata",
+    new Blob([JSON.stringify({ name: filename, mimeType: "application/pdf" })], { type: "application/json" }),
+  );
+  form.append("file", blob);
+
+  const file = await gapi<{ id: string; webViewLink?: string }>(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink",
+    token,
+    { method: "POST", body: form },
+  );
+  return { id: file.id, link: file.webViewLink ?? `https://drive.google.com/file/d/${file.id}/view` };
+}
+
 /* ---------- signing in ---------- */
 
 /**

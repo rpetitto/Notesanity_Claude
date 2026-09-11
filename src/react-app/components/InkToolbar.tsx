@@ -1,5 +1,5 @@
 import {
-  Eraser, Hand, Highlighter, MessageSquarePlus, Pen, Smile, Type, Redo2, Undo2,
+  Eraser, Hand, Highlighter, MessageSquarePlus, Pen, Smile, Trash2, Type, Redo2, Undo2,
   Hand as FingerIcon,
 } from "lucide-react";
 import type { ToolState } from "./PageCanvas";
@@ -23,6 +23,11 @@ interface Props {
   allowComments?: boolean;
   zoom: ZoomMode;
   onZoomChange: (z: ZoomMode) => void;
+  /**
+   * Wipe this page back to blank paper: ink, highlighter, typed notes, stamps
+   * and every answer typed into a box. Absent where there is nothing to clear.
+   */
+  onClearPage?: () => void;
 }
 
 const BASE_TOOLS: { kind: ToolKind; icon: typeof Pen; label: string }[] = [
@@ -49,6 +54,7 @@ const ZOOM_OPTIONS: { value: string; label: string }[] = [
 export default function InkToolbar({
   tool, onToolChange, fingerDraw, onFingerDrawChange,
   onUndo, onRedo, canUndo, canRedo, status, teacherPalette, allowComments, zoom, onZoomChange,
+  onClearPage,
 }: Props) {
   const TOOLS = allowComments
     ? [...BASE_TOOLS.slice(0, 5), COMMENT_TOOL, BASE_TOOLS[5]]
@@ -123,6 +129,26 @@ export default function InkToolbar({
             </button>
           ))}
         </div>
+      )}
+
+      {/* Clearing the page lives with the eraser because that is where a person
+          looks for it — but it is separated by a rule and drawn in the warning
+          red, because it is the one control here that can't be undrawn stroke
+          by stroke. */}
+      {tool.kind === "eraser" && onClearPage && (
+        <>
+          <span className="mx-0.5 h-6 w-px shrink-0 bg-pine/20" aria-hidden />
+          <button
+            type="button"
+            onClick={onClearPage}
+            title="Remove everything written on this page and empty every answer box"
+            className="flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border-2 border-[#a3341f] px-3.5 font-display text-[16px] font-bold text-[#a3341f] transition-colors hover:bg-[#a3341f]/8"
+          >
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={2.5} />
+            Clear page
+          </button>
+          <span className="mx-0.5 h-6 w-px shrink-0 bg-pine/20" aria-hidden />
+        </>
       )}
 
       {/* How much the eraser takes. Only meaningful while it is the tool in

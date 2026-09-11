@@ -264,6 +264,19 @@ export default function StudentHome() {
     queryKey: ["classes"],
     queryFn: () => api.get<{ classes: ClassRow[] }>("/api/classes"),
   });
+  /**
+   * Classes the teacher has archived.
+   *
+   * Fetched alongside rather than behind a tab, because the section only
+   * appears at all once there is something on the shelf — and when a student
+   * goes looking for last term's notes, the worst outcome is a screen that
+   * behaves as though the class never existed.
+   */
+  const archivedQ = useQuery({
+    queryKey: ["classes", "archived"],
+    queryFn: () => api.get<{ classes: ClassRow[] }>("/api/classes?archived=1"),
+  });
+  const archivedClasses = archivedQ.data?.classes ?? [];
   const assignmentsQ = useQuery({
     queryKey: ["my-assignments"],
     queryFn: () => api.get<{ assignments: MyAssignment[] }>("/api/my/assignments"),
@@ -312,6 +325,22 @@ export default function StudentHome() {
           </div>
         )}
       </section>
+
+      {archivedClasses.length > 0 && (
+        <section className="mb-8">
+          <h2 className="label-caps mb-1 text-pine/70">Archived classes</h2>
+          <p className="mb-3 text-[16px] text-pine/70">
+            Finished classes. You can still read everything you wrote — you just can't add to it.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {archivedClasses.map((cls) => (
+              <div key={cls.id} className="opacity-75 transition-opacity hover:opacity-100">
+                <ClassCard cls={cls} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="label-caps mb-3 text-pine/70">Assignments</h2>
