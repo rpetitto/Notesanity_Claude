@@ -214,6 +214,61 @@ export function Label({ className, children, htmlFor }: { className?: string; ch
   );
 }
 
+/**
+ * A confirmation that looks like the rest of the app.
+ *
+ * `window.confirm` was doing this job, which meant the moment a teacher was
+ * asked to think hardest was the one moment the product handed them a grey OS
+ * dialog with an OK button. It also can't say *why* — no room for the sentence
+ * that distinguishes archiving (everything kept, reversible) from deleting
+ * (nothing kept, final), which is the distinction the whole question turns on.
+ *
+ * `tone` decides which of those it is. Destructive confirmations put the
+ * consequence in a red panel above the buttons and draw the action in red; a
+ * reversible one just asks.
+ */
+export function ConfirmModal({
+  title, body, confirmLabel, cancelLabel = "Cancel", tone = "default", busy, onConfirm, onClose,
+}: {
+  title: string;
+  body: ReactNode;
+  confirmLabel: string;
+  cancelLabel?: string;
+  tone?: "default" | "danger";
+  busy?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <Modal onClose={onClose} title={title}>
+      {tone === "danger" ? (
+        <div className="rounded-[14px] border-[3px] border-[#a3341f] bg-[#a3341f]/8 p-4 text-[16px] leading-relaxed text-[#7d2716]">
+          {body}
+        </div>
+      ) : (
+        <div className="text-[16px] leading-relaxed text-pine/80">{body}</div>
+      )}
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>{cancelLabel}</Button>
+        <Button
+          variant={tone === "danger" ? "danger" : "primary"}
+          onClick={onConfirm}
+          disabled={busy}
+          autoFocus
+        >
+          {busy ? "Working…" : confirmLabel}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 export interface MenuItem {
   label: string;
   icon?: ReactNode;

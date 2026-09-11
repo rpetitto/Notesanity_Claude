@@ -5,7 +5,7 @@ import { Archive, Plus, RotateCcw, Settings2, Users, BookOpen, Import } from "lu
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
-import { Button, Input, Label, Menu, Modal, type MenuItem } from "../components/ui";
+import { Button, ConfirmModal, Input, Label, Menu, Modal, type MenuItem } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
 import { DEFAULT_ACCENT } from "../lib/utils";
@@ -225,6 +225,8 @@ export default function TeacherHome() {
   const [newClassOpen, setNewClassOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
+  const [confirming, setConfirming] = useState<ClassRow | null>(null);
+
   const setArchived = useMutation({
     mutationFn: ({ classId, archived }: { classId: string; archived: boolean }) =>
       api.patch(`/api/classes/${classId}`, { archived }),
@@ -251,11 +253,12 @@ export default function TeacherHome() {
       hint: cls.archived
         ? "Back on everyone's list, and writable again."
         : "Its notebooks and assignments go too. Students keep read-only access.",
-      onClick: () => {
-        if (cls.archived || window.confirm(
-          `Archive "${cls.name}"? Its notebooks and assignments go with it, and you can bring it all back.`,
-        )) setArchived.mutate({ classId: cls.id, archived: !cls.archived });
-      },
+      // Bringing one back is reversible and costs nothing, so it just happens.
+      // Archiving changes what a roomful of students can see, so it asks.
+      onClick: () =>
+        cls.archived
+          ? setArchived.mutate({ classId: cls.id, archived: false })
+          : setConfirming(cls),
     },
     {
       label: "Open class settings",
@@ -327,7 +330,33 @@ export default function TeacherHome() {
 
       {/* Only while nothing else is open: a spotlight over a modal would ring
           the form rather than the button the step is talking about. */}
-      {!newClassOpen && !importOpen && <Tour place="home" />}
+      {confirming && (
+        <ConfirmModal
+          title="Archive this class?"
+          confirmLabel="Archive the class"
+          busy={setArchived.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() =>
+            setArchived.mutate(
+              { classId: confirming.id, archived: true },
+              { onSettled: () => setConfirming(null) },
+            )
+          }
+          body={
+            <>
+              <span className="font-bold">{confirming.name}</span> comes off your list, and its
+              notebooks, assignments and grades go with it.
+              <div className="mt-2">
+                Your students keep read-only access from their own{" "}
+                <span className="font-bold">Archived classes</span> section. Nothing is deleted, and
+                you can bring the whole class back.
+              </div>
+            </>
+          }
+        />
+      )}
+
+      {!newClassOpen && !importOpen && !confirming && <Tour place="home" />}
     </Shell>
   );
 }

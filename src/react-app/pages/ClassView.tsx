@@ -15,7 +15,7 @@ import StudentAssignmentNav, {
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
-import { Button, ButtonLink, Card, CardLink, Chip, IconButton, Input, Label, Menu, Modal, Textarea, type MenuItem } from "../components/ui";
+import { Button, ButtonLink, Card, CardLink, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Textarea, type MenuItem } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
@@ -1035,6 +1035,17 @@ export default function ClassView() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /**
+   * The confirmation on screen, if any.
+   *
+   * Held as the action plus the notebook it applies to, rather than a boolean
+   * per action per notebook — there is only ever one of these open, and the
+   * modal needs the title to say which notebook it is talking about.
+   */
+  const [confirming, setConfirming] = useState<
+    null | { action: "archive" | "unarchive" | "delete"; nb: ClassNotebook } | { action: "archive-class" }
+  >(null);
+
   /** The menu hanging off one notebook card. */
   const notebookMenu = (nb: ClassNotebook): MenuItem[] => {
     if (!isTeacher || nb.kind === "student") return [];
@@ -1046,7 +1057,7 @@ export default function ClassView() {
         hint: archived
           ? "Students see it again, with their work as they left it."
           : "Puts it away for the class. Nobody's work is lost, and you can bring it back.",
-        onClick: () => setNotebookArchived.mutate({ notebookId: nb.id, archived: !archived }),
+        onClick: () => setConfirming({ action: archived ? "unarchive" : "archive", nb }),
       },
       {
         label: "Delete",
@@ -1056,9 +1067,7 @@ export default function ClassView() {
           ? "Not while students have copies — archive it instead."
           : "Gone for good. Only possible before it's published.",
         disabled: nb.status === "published",
-        onClick: () => {
-          if (window.confirm(`Delete "${nb.title}"? This can't be undone.`)) deleteNotebook.mutate(nb.id);
-        },
+        onClick: () => setConfirming({ action: "delete", nb }),
       },
     ];
   };
@@ -1208,9 +1217,11 @@ export default function ClassView() {
                       ? "Back on everyone's list, and writable again."
                       : "Notebooks, assignments and grades go with it. Students keep read-only access from their archive.",
                     onClick: () => {
-                      if (cls.archived || window.confirm(
-                        `Archive "${cls.name}"? Its notebooks and assignments go with it. Students keep read-only access, and you can bring it all back.`,
-                      )) setClassArchived.mutate(!cls.archived);
+                      // Bringing a class back costs nothing and undoes itself,
+                      // so it just happens; archiving is the one that changes
+                      // what thirty other people can see.
+                      if (cls.archived) setClassArchived.mutate(false);
+                      else setConfirming({ action: "archive-class" });
                     },
                   },
                   {
@@ -1551,6 +1562,93 @@ export default function ClassView() {
           student={reviewingStudent}
           assignments={backfillQ.data?.assignments ?? []}
           onClose={() => setReviewingStudent(null)}
+        />
+      )}
+
+      {confirming && "nb" in confirming && confirming.action === "archive" && (
+        <ConfirmModal
+          title="Archive this notebook?"
+          confirmLabel="Archive it"
+          busy={setNotebookArchived.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() =>
+            setNotebookArchived.mutate(
+              { notebookId: confirming.nb.id, archived: true },
+              { onSettled: () => setConfirming(null) },
+            )
+          }
+          body={
+            <>
+              <span className="font-bold">{confirming.nb.title}</span> leaves the class. Students
+              stop seeing it and can't open it, and everything written in it is kept exactly as it
+              is.
+              <div className="mt-2">You can bring it back whenever you like.</div>
+            </>
+          }
+        />
+      )}
+
+      {confirming && "nb" in confirming && confirming.action === "unarchive" && (
+        <ConfirmModal
+          title="Bring this back to the class?"
+          confirmLabel="Bring it back"
+          busy={setNotebookArchived.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() =>
+            setNotebookArchived.mutate(
+              { notebookId: confirming.nb.id, archived: false },
+              { onSettled: () => setConfirming(null) },
+            )
+          }
+          body={
+            <>
+              <span className="font-bold">{confirming.nb.title}</span> goes back on the class's
+              list, and everyone who had a copy gets it back with their work as they left it.
+            </>
+          }
+        />
+      )}
+
+      {confirming && "nb" in confirming && confirming.action === "delete" && (
+        <ConfirmModal
+          title="Delete this notebook?"
+          confirmLabel="Delete for good"
+          tone="danger"
+          busy={deleteNotebook.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => deleteNotebook.mutate(confirming.nb.id, { onSettled: () => setConfirming(null) })}
+          body={
+            <>
+              This deletes <span className="font-bold">{confirming.nb.title}</span> and all
+              {" "}{confirming.nb.page_count} page{confirming.nb.page_count === 1 ? "" : "s"} in it.
+              It cannot be undone.
+              <div className="mt-2">
+                It hasn't been published, so no student has a copy to lose — but if you only want
+                it off the list, <span className="font-bold">archive it instead</span>.
+              </div>
+            </>
+          }
+        />
+      )}
+
+      {confirming && confirming.action === "archive-class" && (
+        <ConfirmModal
+          title="Archive this class?"
+          confirmLabel="Archive the class"
+          busy={setClassArchived.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => setClassArchived.mutate(true)}
+          body={
+            <>
+              <span className="font-bold">{cls.name}</span> comes off your list, and its notebooks,
+              assignments and grades go with it.
+              <div className="mt-2">
+                Your students keep read-only access from their own <span className="font-bold">Archived
+                classes</span> section — they can still read everything they wrote, they just can't
+                add to it. Nothing is deleted, and you can bring the whole class back.
+              </div>
+            </>
+          }
         />
       )}
 

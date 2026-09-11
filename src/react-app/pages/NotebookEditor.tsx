@@ -22,7 +22,7 @@ import Tour from "../components/Tour";
 import { emptyLayer, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData } from "../lib/ink";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
-import { Button, Chip, IconButton, Input, Label, Menu, Modal, Select, Textarea } from "../components/ui";
+import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea } from "../components/ui";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
 
@@ -555,6 +555,8 @@ export default function NotebookEditor() {
   };
 
   const [renameOpen, setRenameOpen] = useState(false);
+  /** Which confirmation is on screen, if any. */
+  const [confirming, setConfirming] = useState<null | "archive" | "unarchive" | "delete">(null);
 
   const setArchived = useMutation({
     mutationFn: (archived: boolean) => api.patch(`/api/notebooks/${notebookId}`, { archived }),
@@ -715,14 +717,6 @@ export default function NotebookEditor() {
         </div>
 
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => setAppearanceOpen((v) => !v)}
-            aria-expanded={appearanceOpen}
-            className={cn("hidden xl:inline-flex", appearanceOpen && "bg-oat")}
-          >
-            <Palette className="h-5 w-5" strokeWidth={2.5} /> Appearance
-          </Button>
           {/* One verb, three sources. Blank paper, a file and Drive were three
               buttons competing for the same header row while saying the same
               thing — the question is never "which button", it's "where are the
@@ -778,7 +772,7 @@ export default function NotebookEditor() {
                 hint: notebook.archived
                   ? "Students see it again, with their work as they left it."
                   : "Puts it away for the class. No work is lost, and you can bring it back.",
-                onClick: () => setArchived.mutate(!notebook.archived),
+                onClick: () => setConfirming(notebook.archived ? "unarchive" : "archive"),
               },
               {
                 label: "Delete notebook",
@@ -788,11 +782,7 @@ export default function NotebookEditor() {
                 hint: notebook.status === "published"
                   ? "Not while students have copies — archive it instead."
                   : "Gone for good. Only possible before it's published.",
-                onClick: () => {
-                  if (window.confirm(`Delete "${notebook.title}"? This can't be undone.`)) {
-                    deleteNotebook.mutate();
-                  }
-                },
+                onClick: () => setConfirming("delete"),
               },
             ]}
           />
@@ -841,6 +831,62 @@ export default function NotebookEditor() {
           />
         )}
       </header>
+
+      {confirming === "archive" && (
+        <ConfirmModal
+          title="Archive this notebook?"
+          confirmLabel="Archive it"
+          busy={setArchived.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => setArchived.mutate(true, { onSettled: () => setConfirming(null) })}
+          body={
+            <>
+              <span className="font-bold">{notebook.title}</span> leaves the class. Your students
+              stop seeing it and can't open it, and it stays here for you — with every page and
+              everything written on it kept exactly as it is.
+              <div className="mt-2">You can bring it back whenever you like.</div>
+            </>
+          }
+        />
+      )}
+
+      {confirming === "unarchive" && (
+        <ConfirmModal
+          title="Bring this back to the class?"
+          confirmLabel="Bring it back"
+          busy={setArchived.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => setArchived.mutate(false, { onSettled: () => setConfirming(null) })}
+          body={
+            <>
+              <span className="font-bold">{notebook.title}</span> goes back on the class's list.
+              Everyone who had a copy gets it back with their work as they left it.
+            </>
+          }
+        />
+      )}
+
+      {confirming === "delete" && (
+        <ConfirmModal
+          title="Delete this notebook?"
+          confirmLabel="Delete for good"
+          tone="danger"
+          busy={deleteNotebook.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => deleteNotebook.mutate()}
+          body={
+            <>
+              This deletes <span className="font-bold">{notebook.title}</span> and all
+              {" "}{livePages.length} page{livePages.length === 1 ? "" : "s"} in it. It cannot be
+              undone.
+              <div className="mt-2">
+                It hasn't been published, so no student has a copy to lose — but if you only want
+                it off the list, <span className="font-bold">archive it instead</span>.
+              </div>
+            </>
+          }
+        />
+      )}
 
       {renameOpen && (
         <RenameNotebookModal
