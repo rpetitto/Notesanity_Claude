@@ -161,6 +161,8 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
         courseId: course.id,
         name: course.name,
         section: course.section ?? "",
+        description: course.description ?? course.descriptionHeading ?? "",
+        room: course.room ?? "",
         students: students.map((s) => ({ email: s.email, name: s.name, photoUrl: s.photoUrl })),
       });
       await qc.invalidateQueries({ queryKey: ["classes"] });

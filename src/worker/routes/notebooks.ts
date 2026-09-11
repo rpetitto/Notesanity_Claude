@@ -48,6 +48,9 @@ async function notebookAccess(c: any, notebookId: string) {
   // called, and a half-built worksheet is exactly the thing a class shouldn't
   // be reading over the teacher's shoulder.
   if (!isTeacher && nb.status !== "published") throw new HttpError(404, "Notebook not found");
+  // Archiving is the teacher putting it away for everyone, so it leaves a
+  // student's world at the same moment it leaves the class list.
+  if (!isTeacher && nb.archived) throw new HttpError(404, "Notebook not found");
   return { nb, user, isTeacher };
 }
 
@@ -134,7 +137,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
       id: nb.id, classId: nb.class_id, title: nb.title, status: nb.status,
       pageCount: nb.page_count, assetKey: nb.asset_key, lastPublishedAt: nb.last_published_at,
       accentColor: nb.accent_color ?? "#2E7D6B", hasCover: !!nb.cover_key,
-      kind: nb.kind ?? "class", ownerId: nb.owner_id,
+      kind: nb.kind ?? "class", ownerId: nb.owner_id, archived: !!nb.archived,
     },
     pages: pages.results ?? [],
     fields: fields.results ?? [],
@@ -287,6 +290,89 @@ app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
   await syncPageCount(nb.id);
   return c.json({ created });
 }));
+
+/**
+ * Copy a page, with everything on it, and slot the copy in behind the original.
+ *
+ * The fields are copied too, with fresh ids — that is the whole reason to do
+ * this server-side rather than as a "new page then re-place the boxes" dance.
+ * Student work is *not* copied, and can't be: work is anchored to a page id,
+ * the copy has a new one, and a duplicate carrying somebody's answers into a
+ * second page would be a bug wearing a feature's clothes.
+ */
+app.post("/api/notebooks/:id/pages/:pageId/duplicate", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const source = await db
+    .prepare(`SELECT * FROM pages WHERE id = ? AND notebook_id = ?`)
+    .bind(param(c, "pageId"), nb.id)
+    .first<any>();
+  if (!source) throw new HttpError(404, "Page not found");
+
+  const { start: seq } = await seqWindow(nb.id, source.id, 1);
+  const newId = uid();
+  await db
+    .prepare(
+      `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, label,
+                          group_name, archived, pattern, pattern_color, teacher_annotate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+    )
+    .bind(
+      newId, nb.id, seq, source.asset_key, source.source_index, source.width, source.height,
+      copyLabel(source.label), source.group_name ?? "",
+      source.pattern ?? "", source.pattern_color ?? "", source.teacher_annotate ?? 0,
+    )
+    .run();
+
+  const fields = await db
+    .prepare(`SELECT * FROM fields WHERE notebook_id = ? AND page_id = ? AND archived = 0`)
+    .bind(nb.id, source.id)
+    .all<any>();
+  for (const f of fields.results ?? []) {
+    await db
+      .prepare(
+        `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
+                             content, media_key, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      )
+      .bind(
+        uid(), nb.id, newId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
+        f.prompt ?? "", f.content ?? "", f.media_key ?? null, now(),
+      )
+      .run();
+  }
+
+  // The teacher's own ink on the master page travels with it: it is part of
+  // what the page looks like, not part of anyone's answer.
+  const ann = await db
+    .prepare(`SELECT draft_data, published_data FROM page_annotations WHERE notebook_id = ? AND page_id = ?`)
+    .bind(nb.id, source.id)
+    .first<any>();
+  if (ann && (ann.draft_data || ann.published_data)) {
+    await db
+      .prepare(
+        `INSERT INTO page_annotations (page_id, notebook_id, draft_data, published_data, rev, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?)`,
+      )
+      .bind(newId, nb.id, ann.draft_data ?? "", ann.published_data ?? "", now())
+      .run();
+  }
+
+  await db
+    .prepare(`UPDATE notebooks SET page_count = (SELECT COUNT(*) FROM pages WHERE notebook_id = ? AND archived = 0), updated_at = ? WHERE id = ?`)
+    .bind(nb.id, now(), nb.id)
+    .run();
+  return c.json({ page: { id: newId } });
+}));
+
+/** "Lab sheet" becomes "Lab sheet (copy)", and a second copy counts up. */
+function copyLabel(label: string | null | undefined): string {
+  const base = (label ?? "").trim();
+  if (!base) return "";
+  const m = base.match(/^(.*) \(copy(?: (\d+))?\)$/);
+  if (!m) return `${base} (copy)`;
+  return `${m[1]} (copy ${Number(m[2] ?? 1) + 1})`;
+}
 
 /**
  * Archive / restore / relabel / reorder a page.
@@ -659,18 +745,56 @@ app.delete("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
 app.patch("/api/notebooks/:id", handler(async (c) => {
   const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
   if (!isTeacher) throw new HttpError(403, "Teacher access required");
-  const b = await c.req.json<{ title?: string; accentColor?: string; clearCover?: boolean }>();
+  const b = await c.req.json<{
+    title?: string; accentColor?: string; clearCover?: boolean;
+    /** Put the notebook away (or bring it back) for the whole class at once. */
+    archived?: boolean;
+  }>();
   if (b.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(b.accentColor)) throw new HttpError(400, "Invalid color");
   await db
-    .prepare(`UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, updated_at = ? WHERE id = ?`)
+    .prepare(
+      `UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, archived = ?, updated_at = ?
+        WHERE id = ?`,
+    )
     .bind(
       b.title?.trim() || nb.title,
       b.accentColor ?? nb.accent_color ?? "#2E7D6B",
       b.clearCover ? null : nb.cover_key,
+      b.archived === undefined ? (nb.archived ?? 0) : b.archived ? 1 : 0,
       now(),
       nb.id,
     )
     .run();
+  return c.json({ ok: true });
+}));
+
+/**
+ * Delete a class notebook outright.
+ *
+ * Only while it has never been published. Once copies are with students their
+ * writing lives inside this notebook's pages, and a delete would take it with
+ * them — so that door is closed and the teacher is pointed at archiving, which
+ * is what they almost always meant anyway. Archiving keeps every stroke and
+ * can be undone; this cannot.
+ */
+app.delete("/api/notebooks/:id", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  if (nb.kind !== "class") throw new HttpError(400, "That isn't a class notebook");
+  if (nb.status === "published" || nb.last_published_at) {
+    throw new HttpError(
+      409,
+      "This notebook has been published to students, so deleting it would delete their work too. Archive it instead.",
+    );
+  }
+  const assignments = await db
+    .prepare(`SELECT COUNT(*) AS n FROM assignments WHERE notebook_id = ?`)
+    .bind(nb.id)
+    .first<{ n: number }>();
+  if ((assignments?.n ?? 0) > 0) {
+    throw new HttpError(409, "An assignment is built from this notebook. Delete the assignment first, or archive the notebook.");
+  }
+  await deleteNotebookCascade(nb.id);
   return c.json({ ok: true });
 }));
 
@@ -994,7 +1118,7 @@ app.delete("/api/my/personal-notebooks/:id", handler(async (c) => {
 }));
 
 /** Remove a notebook and everything anchored to it, ink chunks included. */
-async function deleteNotebookCascade(notebookId: string) {
+export async function deleteNotebookCascade(notebookId: string) {
   const instances = await db.prepare(`SELECT id FROM instances WHERE notebook_id = ?`).bind(notebookId).all<any>();
   for (const inst of instances.results ?? []) {
     await db
@@ -1006,6 +1130,9 @@ async function deleteNotebookCascade(notebookId: string) {
   }
   await db.prepare(`DELETE FROM instances WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM fields WHERE notebook_id = ?`).bind(notebookId).run();
+  // The teacher's own ink on the master pages, which was being left behind as
+  // orphan rows keyed to a notebook that no longer existed.
+  await db.prepare(`DELETE FROM page_annotations WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM pages WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM notebooks WHERE id = ?`).bind(notebookId).run();
 }

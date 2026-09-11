@@ -679,3 +679,37 @@ migrate("020_page_teacher_annotate", async () => {
     await db.prepare(`ALTER TABLE pages ADD COLUMN teacher_annotate INTEGER NOT NULL DEFAULT 0`).run();
   }
 });
+
+/**
+ * Archiving, and the class details a teacher wants to record.
+ *
+ * `archived` on notebooks is the counterpart to the one classes have had all
+ * along: a notebook put away stops appearing for the class without anyone's
+ * work being destroyed, which is the difference between tidying and deleting.
+ * Deleting stays available, but only while a notebook has never been published
+ * — once copies are with students, throwing it away takes their writing with
+ * it, and that is not a thing to offer behind a single confirm.
+ *
+ * The rest are the fields a class has on the whiteboard anyway. Google
+ * Classroom carries description and room across on import; level, year and
+ * subject have no API field to come from, so they are the teacher's to fill in.
+ */
+migrate("021_archiving_and_class_details", async () => {
+  const nbCols = await db.prepare(`PRAGMA table_info(notebooks)`).all<{ name: string }>();
+  if (!(nbCols.results ?? []).some((c) => c.name === "archived")) {
+    await db.prepare(`ALTER TABLE notebooks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`).run();
+  }
+
+  const cls = await db.prepare(`PRAGMA table_info(classes)`).all<{ name: string }>();
+  const has = (name: string) => (cls.results ?? []).some((c) => c.name === name);
+  for (const col of ["description", "room", "level", "year", "subject"]) {
+    if (!has(col)) {
+      await db.prepare(`ALTER TABLE classes ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`).run();
+    }
+  }
+  // A class that was archived needs to say when, so a student's archive can be
+  // ordered by when it left their active list rather than when it was made.
+  if (!has("archived_at")) {
+    await db.prepare(`ALTER TABLE classes ADD COLUMN archived_at TEXT`).run();
+  }
+});

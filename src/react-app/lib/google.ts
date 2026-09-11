@@ -91,6 +91,10 @@ export interface ClassroomCourse {
   name: string;
   section?: string;
   courseState?: string;
+  /** Classroom's own description and room, carried across so they aren't retyped. */
+  description?: string;
+  descriptionHeading?: string;
+  room?: string;
 }
 
 export async function listCourses(): Promise<ClassroomCourse[]> {

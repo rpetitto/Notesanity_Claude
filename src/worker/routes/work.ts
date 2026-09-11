@@ -82,6 +82,16 @@ async function writeTail(layerId: string, chunks: string[]) {
   }
 }
 
+/** Is this notebook's class on the archive shelf? Personal notebooks have none. */
+async function classIsArchived(classId: string | null | undefined): Promise<boolean> {
+  if (!classId) return false;
+  const row = await db
+    .prepare(`SELECT archived FROM classes WHERE id = ?`)
+    .bind(classId)
+    .first<{ archived: number }>();
+  return !!row?.archived;
+}
+
 /**
  * Resolve the notebook instance being worked on and confirm the caller may touch it.
  *
@@ -111,9 +121,11 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
       throw new HttpError(403, "That notebook belongs to one student");
     }
     const instance = await ensureInstance(nb, nb.owner_id, false);
+    const archived = await classIsArchived(nb.class_id);
     return {
       nb, user: u, isTeacher: false, instance, studentId: nb.owner_id,
-      readOnly: !owns, canAnnotate: !owns && teachesClass,
+      readOnly: !owns || archived,
+      canAnnotate: !owns && teachesClass && !archived,
     };
   }
 
@@ -131,6 +143,7 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   // Same rule as the notebook routes: a class notebook a teacher hasn't
   // published yet isn't a thing a student can open, by link or by guess.
   if (!isTeacher && nb.status !== "published") throw new HttpError(404, "Notebook not found");
+  if (!isTeacher && nb.archived) throw new HttpError(404, "Notebook not found");
 
   const studentId = studentIdParam && isTeacher ? studentIdParam : user.id;
   if (studentIdParam && !isTeacher && studentIdParam !== user.id) {
@@ -138,7 +151,14 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   }
 
   const instance = await ensureInstance(nb, studentId, nb.kind !== "personal");
-  return { nb, user, isTeacher, instance, studentId, readOnly: false, canAnnotate: false };
+  // An archived class is a shelf, not a desk. Everything in it stays readable —
+  // that is the point of keeping it rather than deleting it — and nothing in it
+  // is writable, so last term's work can't be quietly edited after the fact.
+  const archivedClass = await classIsArchived(nb.class_id);
+  return {
+    nb, user, isTeacher, instance, studentId,
+    readOnly: archivedClass, canAnnotate: false,
+  };
 }
 
 /**

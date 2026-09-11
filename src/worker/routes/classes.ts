@@ -2,6 +2,7 @@ import { app, db, storage } from "../platform";
 import {
   handler, now, uid, requireUser, requireTeacher, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { queueMail } from "../lib/mailqueue";
+import { deleteNotebookCascade } from "./notebooks";
 
 /** Where the invite should point people — this deployment, whatever it is. */
 function appOrigin(c: any): string {
@@ -35,7 +36,7 @@ async function provisionForStudent(classId: string, studentId: string) {
   // Only the teacher's own notebooks are pushed out. A student-made notebook
   // lives in the class but is not part of it: nobody else gets a copy.
   const notebooks = await db
-    .prepare(`SELECT id FROM notebooks WHERE class_id = ? AND status = 'published' AND kind = 'class'`)
+    .prepare(`SELECT id FROM notebooks WHERE class_id = ? AND status = 'published' AND kind = 'class' AND archived = 0`)
     .bind(classId)
     .all<{ id: string }>();
   for (const nb of notebooks.results ?? []) {
@@ -65,6 +66,9 @@ async function provisionForStudent(classId: string, studentId: string) {
 /** Classes I teach or am enrolled in, with student counts. */
 app.get("/api/classes", handler(async (c) => {
   const user = await requireUser(c);
+  // An archived class doesn't vanish for the people who were in it — it moves
+  // to a shelf they can still reach, read-only. `?archived=1` is that shelf.
+  const wantArchived = c.req.query("archived") === "1";
   const rows = await db
     .prepare(
       // Positional `?` only — the D1 driver rejects numbered (?1) placeholders.
@@ -75,10 +79,10 @@ app.get("/api/classes", handler(async (c) => {
               CASE WHEN c.owner_id = ? THEN 'teacher' ELSE COALESCE(e.role, 'student') END AS my_role
          FROM classes c
          LEFT JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active'
-        WHERE c.archived = 0 AND (c.owner_id = ? OR e.id IS NOT NULL)
-        ORDER BY c.created_at DESC`,
+        WHERE c.archived = ? AND (c.owner_id = ? OR e.id IS NOT NULL)
+        ORDER BY ${wantArchived ? "c.archived_at DESC" : "c.created_at DESC"}`,
     )
-    .bind(user.id, user.id, user.id)
+    .bind(user.id, user.id, wantArchived ? 1 : 0, user.id)
     .all();
   return c.json({ classes: rows.results ?? [] });
 }));
@@ -111,6 +115,9 @@ app.post("/api/classes/import-classroom", handler(async (c) => {
   const user = await requireTeacher(c);
   const body = await c.req.json<{
     courseId: string; name: string; section?: string;
+    // Classroom carries these two across; level, year and subject have no API
+    // field to come from, so they stay the teacher's to fill in afterwards.
+    description?: string; room?: string;
     students: { email: string; name: string; photoUrl?: string }[];
   }>();
   if (!body.courseId || !body.name) throw new HttpError(400, "Course id and name are required");
@@ -124,10 +131,15 @@ app.post("/api/classes/import-classroom", handler(async (c) => {
     const id = uid();
     await db
       .prepare(
-        `INSERT INTO classes (id, org_id, owner_id, name, section, source, google_course_id, join_code, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'classroom', ?, ?, ?, ?)`,
+        `INSERT INTO classes (id, org_id, owner_id, name, section, description, room, source,
+                              google_course_id, join_code, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'classroom', ?, ?, ?, ?)`,
       )
-      .bind(id, user.org_id, user.id, body.name, body.section ?? "", body.courseId, await uniqueJoinCode(), now(), now())
+      .bind(
+        id, user.org_id, user.id, body.name, body.section ?? "",
+        (body.description ?? "").trim().slice(0, 2000), (body.room ?? "").trim().slice(0, 200),
+        body.courseId, await uniqueJoinCode(), now(), now(),
+      )
       .run();
     cls = await db.prepare(`SELECT * FROM classes WHERE id = ?`).bind(id).first<any>();
   }
@@ -180,7 +192,7 @@ app.get("/api/classes/:id", handler(async (c) => {
     .all();
   const notebooks = await db
     .prepare(
-      `SELECT n.id, n.title, n.status, n.page_count, n.updated_at, n.kind, n.owner_id,
+      `SELECT n.id, n.title, n.status, n.page_count, n.updated_at, n.kind, n.owner_id, n.archived,
               u.name AS owner_name,
               n.accent_color, n.cover_key IS NOT NULL AS has_cover,
               p.id AS first_page_id, p.asset_key AS first_asset_key,
@@ -199,9 +211,12 @@ app.get("/api/classes/:id", handler(async (c) => {
           -- until they publish it. A student's own notebook has no draft state
           -- to be in, so this only ever hides the teacher's unfinished work.
           AND (? = 1 OR n.kind <> 'class' OR n.status = 'published')
+          -- An archived notebook is put away for the class; the teacher still
+          -- sees it, flagged, so there is somewhere to bring it back from.
+          AND (? = 1 OR n.archived = 0)
         ORDER BY n.created_at DESC`,
     )
-    .bind(classId, isTeacher ? 1 : 0, user.id, isTeacher ? 1 : 0)
+    .bind(classId, isTeacher ? 1 : 0, user.id, isTeacher ? 1 : 0, isTeacher ? 1 : 0)
     .all();
 
   const teachers = await db
@@ -233,6 +248,10 @@ app.patch("/api/classes/:id", handler(async (c) => {
   const body = await c.req.json<{
     name?: string; section?: string; accentColor?: string; archived?: boolean;
     emoji?: string; clearCover?: boolean;
+    // What's on the whiteboard anyway. All optional, all free text: a "level"
+    // is Year 9 in one country, 8th grade in another, and Foundation in a
+    // third, and a dropdown that fits one of them is wrong for the other two.
+    description?: string; room?: string; level?: string; year?: string; subject?: string;
   }>();
   const cls = await db.prepare(`SELECT * FROM classes WHERE id = ?`).bind(classId).first<any>();
   if (body.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(body.accentColor)) throw new HttpError(400, "Invalid color");
@@ -240,17 +259,70 @@ app.patch("/api/classes/:id", handler(async (c) => {
   // letting the badge become a text field.
   const emoji = body.emoji === undefined ? cls.emoji : Array.from(body.emoji).slice(0, 3).join("");
 
+  const archived = body.archived === undefined ? cls.archived : body.archived ? 1 : 0;
+  const text = (v: string | undefined, fallback: string, limit = 200) =>
+    v === undefined ? fallback : v.trim().slice(0, limit);
+
   await db
     .prepare(
-      `UPDATE classes SET name = ?, section = ?, accent_color = ?, archived = ?, emoji = ?, cover_key = ?, updated_at = ?
+      `UPDATE classes SET name = ?, section = ?, accent_color = ?, archived = ?, archived_at = ?,
+              emoji = ?, cover_key = ?, description = ?, room = ?, level = ?, year = ?, subject = ?,
+              updated_at = ?
         WHERE id = ?`,
     )
     .bind(
       body.name ?? cls.name, body.section ?? cls.section, body.accentColor ?? cls.accent_color,
-      body.archived === undefined ? cls.archived : body.archived ? 1 : 0,
-      emoji ?? "", body.clearCover ? null : cls.cover_key, now(), classId,
+      archived,
+      // Stamped on the way in and cleared on the way out, so a student's
+      // archive can be ordered by when a class left their list.
+      archived ? (cls.archived_at ?? now()) : null,
+      emoji ?? "", body.clearCover ? null : cls.cover_key,
+      text(body.description, cls.description ?? "", 2000),
+      text(body.room, cls.room ?? ""),
+      text(body.level, cls.level ?? ""),
+      text(body.year, cls.year ?? ""),
+      text(body.subject, cls.subject ?? ""),
+      now(), classId,
     )
     .run();
+  return c.json({ ok: true });
+}));
+
+/**
+ * Delete a class outright.
+ *
+ * Everything in it goes: notebooks, the student copies inside them, every
+ * stroke, the assignments and the grades. There is no undo and nothing left to
+ * appeal to, which is why archiving sits next to it everywhere this is offered
+ * and why this refuses unless the caller spells the class name back.
+ */
+app.delete("/api/classes/:id", handler(async (c) => {
+  const classId = param(c, "id");
+  await requireClassTeacher(c, classId);
+  const cls = await db.prepare(`SELECT * FROM classes WHERE id = ?`).bind(classId).first<any>();
+  if (!cls) throw new HttpError(404, "Class not found");
+
+  const confirm = (c.req.query("confirm") ?? "").trim();
+  if (confirm.toLowerCase() !== String(cls.name).trim().toLowerCase()) {
+    throw new HttpError(400, `Type the class name exactly — "${cls.name}" — to delete it.`);
+  }
+
+  const notebooks = await db
+    .prepare(`SELECT id FROM notebooks WHERE class_id = ?`)
+    .bind(classId)
+    .all<{ id: string }>();
+  for (const nb of notebooks.results ?? []) await deleteNotebookCascade(nb.id);
+
+  const assignments = await db
+    .prepare(`SELECT id FROM assignments WHERE class_id = ?`)
+    .bind(classId)
+    .all<{ id: string }>();
+  for (const a of assignments.results ?? []) {
+    await db.prepare(`DELETE FROM submissions WHERE assignment_id = ?`).bind(a.id).run();
+  }
+  await db.prepare(`DELETE FROM assignments WHERE class_id = ?`).bind(classId).run();
+  await db.prepare(`DELETE FROM enrollments WHERE class_id = ?`).bind(classId).run();
+  await db.prepare(`DELETE FROM classes WHERE id = ?`).bind(classId).run();
   return c.json({ ok: true });
 }));
 
