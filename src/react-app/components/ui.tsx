@@ -237,7 +237,7 @@ export interface MenuItem {
  * are themselves links: without it, opening the menu would navigate away.
  */
 export function Menu({
-  items, label = "More actions", trigger, align = "right", className, disabled,
+  items, label = "More actions", trigger, align = "right", className, disabled, tour,
 }: {
   items: MenuItem[];
   label?: string;
@@ -246,6 +246,8 @@ export function Menu({
   align?: "left" | "right";
   className?: string;
   disabled?: boolean;
+  /** `data-tour` anchor, for menus a guided tour points at. */
+  tour?: string;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -296,7 +298,7 @@ export function Menu({
   if (items.length === 0) return null;
 
   return (
-    <div className={cn("relative shrink-0", className)}>
+    <div data-tour={tour} className={cn("relative shrink-0", className)}>
       <button
         ref={triggerRef}
         type="button"

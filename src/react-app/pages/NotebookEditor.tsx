@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
+  Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
-  MoreHorizontal, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
+  Pencil, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
   FolderOpen,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,7 +22,7 @@ import Tour from "../components/Tour";
 import { emptyLayer, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData } from "../lib/ink";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
-import { Button, Chip, IconButton, Input, Modal, Select, Textarea } from "../components/ui";
+import { Button, Chip, IconButton, Input, Label, Menu, Modal, Select, Textarea } from "../components/ui";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
 
@@ -47,6 +47,8 @@ interface NotebookResponse {
     id: string; classId: string; title: string; status: string;
     pageCount: number; assetKey: string; lastPublishedAt: string | null;
     accentColor: string; hasCover: boolean;
+    /** Put away for the class: hidden from students, still here for the teacher. */
+    archived?: boolean;
   };
   pages: EditorPage[];
   fields: FieldRow[];
@@ -395,7 +397,7 @@ export default function NotebookEditor() {
   });
 
   const patchNotebook = useMutation({
-    mutationFn: (body: { accentColor?: string; clearCover?: boolean }) =>
+    mutationFn: (body: { title?: string; accentColor?: string; clearCover?: boolean; archived?: boolean }) =>
       api.patch(`/api/notebooks/${notebookId}`, body),
     onSuccess: () => {
       invalidate();
@@ -552,6 +554,28 @@ export default function NotebookEditor() {
     });
   };
 
+  const [renameOpen, setRenameOpen] = useState(false);
+
+  const setArchived = useMutation({
+    mutationFn: (archived: boolean) => api.patch(`/api/notebooks/${notebookId}`, { archived }),
+    onSuccess: (_r, archived) => {
+      invalidate();
+      toast.success(archived ? "Archived — students no longer see it" : "Back with the class");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteNotebook = useMutation({
+    mutationFn: () => api.del(`/api/notebooks/${notebookId}`),
+    onSuccess: () => {
+      toast.success("Notebook deleted");
+      navigate(query.data ? `/classes/${query.data.notebook.classId}` : "/classes");
+    },
+    // The refusal names archiving as the thing they probably wanted, so it
+    // gets long enough on screen to be read rather than glimpsed.
+    onError: (e: Error) => toast.error(e.message, { duration: 8000 }),
+  });
+
   const groupSelection = () => {
     const name = window.prompt("Group name (leave blank to ungroup)")?.trim();
     if (name === undefined) return;
@@ -671,20 +695,26 @@ export default function NotebookEditor() {
         </button>
         <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate font-display text-[16px] font-bold text-pine">{notebook.title}</div>
-          <div className="truncate text-[16px] text-pine/70">
-            {livePages.length} page{livePages.length === 1 ? "" : "s"}
-            {archivedCount > 0 && ` · ${archivedCount} archived`}
-            {assignments.length > 0 && ` · ${assignments.length} assignment${assignments.length === 1 ? "" : "s"}`}
+          {/* The status belongs to the notebook, not to the row of things you
+              can do to it — so it sits under the title with the page count,
+              where you read what this notebook *is*. */}
+          <div className="flex min-w-0 items-center gap-2 text-[16px] text-pine/70">
+            <span className="truncate">
+              {livePages.length} page{livePages.length === 1 ? "" : "s"}
+              {archivedCount > 0 && ` · ${archivedCount} archived`}
+              {assignments.length > 0 && ` · ${assignments.length} assignment${assignments.length === 1 ? "" : "s"}`}
+            </span>
+            <Chip
+              tone={notebook.status === "published" ? "mint" : "quiet"}
+              className="h-7 shrink-0 px-2.5"
+              icon={notebook.status === "published" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}
+            >
+              {notebook.status === "published" ? "Published" : "Draft"}
+            </Chip>
           </div>
         </div>
 
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          <Chip
-            tone={notebook.status === "published" ? "mint" : "quiet"}
-            icon={notebook.status === "published" ? <Check className="h-3 w-3" strokeWidth={2.5} /> : undefined}
-          >
-            {notebook.status === "published" ? "Published" : "Draft"}
-          </Chip>
           <Button
             variant="secondary"
             onClick={() => setAppearanceOpen((v) => !v)}
@@ -720,14 +750,51 @@ export default function NotebookEditor() {
           >
             <Pen className="h-5 w-5" strokeWidth={2.5} /> Annotate
           </Button>
-          {/* Adding pages is its own button on every width now, so the only
-              thing left to fold away on a narrow screen is Appearance. */}
-          <ActionMenu
+          {/* Everything you do *to* the notebook rather than *in* it, on every
+              width. Appearance keeps its own button at xl where there's room;
+              here it's listed too, so the menu is a complete answer to "what
+              can I do with this notebook" rather than a leftovers drawer. */}
+          <Menu
             tour="nb-more"
-            label="More actions"
-            className="xl:hidden"
-            trigger={<MoreHorizontal className="h-5 w-5" strokeWidth={2.5} />}
-            items={[{ label: "Appearance", icon: Palette, onClick: () => setAppearanceOpen(true) }]}
+            label="Notebook actions"
+            items={[
+              {
+                label: "Rename",
+                icon: <Pencil className="h-5 w-5" strokeWidth={2.5} />,
+                hint: "What it's called for you and your students.",
+                onClick: () => setRenameOpen(true),
+              },
+              {
+                label: "Appearance",
+                icon: <Palette className="h-5 w-5" strokeWidth={2.5} />,
+                hint: "Cover image and the color on its tile.",
+                onClick: () => setAppearanceOpen(true),
+              },
+              {
+                label: notebook.archived ? "Bring back to the class" : "Archive",
+                icon: notebook.archived
+                  ? <RotateCcw className="h-5 w-5" strokeWidth={2.5} />
+                  : <Archive className="h-5 w-5" strokeWidth={2.5} />,
+                hint: notebook.archived
+                  ? "Students see it again, with their work as they left it."
+                  : "Puts it away for the class. No work is lost, and you can bring it back.",
+                onClick: () => setArchived.mutate(!notebook.archived),
+              },
+              {
+                label: "Delete notebook",
+                icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
+                danger: true,
+                disabled: notebook.status === "published",
+                hint: notebook.status === "published"
+                  ? "Not while students have copies — archive it instead."
+                  : "Gone for good. Only possible before it's published.",
+                onClick: () => {
+                  if (window.confirm(`Delete "${notebook.title}"? This can't be undone.`)) {
+                    deleteNotebook.mutate();
+                  }
+                },
+              },
+            ]}
           />
           {/* Only once students actually have the notebook. On a draft nothing
               has been sent yet, so "not sent" says nothing — and next to the
@@ -774,6 +841,17 @@ export default function NotebookEditor() {
           />
         )}
       </header>
+
+      {renameOpen && (
+        <RenameNotebookModal
+          title={notebook.title}
+          busy={patchNotebook.isPending}
+          onClose={() => setRenameOpen(false)}
+          onSave={(title) => {
+            patchNotebook.mutate({ title }, { onSuccess: () => setRenameOpen(false) });
+          }}
+        />
+      )}
 
       {blankOpen && (
         <BlankPagesModal
@@ -1049,6 +1127,36 @@ export default function NotebookEditor() {
         <Tour place="notebook" />
       )}
     </div>
+  );
+}
+
+/** Renaming the notebook, which is the one detail students see on their copy. */
+function RenameNotebookModal({
+  title, busy, onClose, onSave,
+}: { title: string; busy: boolean; onClose: () => void; onSave: (title: string) => void }) {
+  const [value, setValue] = useState(title);
+  const trimmed = value.trim();
+  return (
+    <Modal onClose={onClose} title="Rename notebook">
+      <Label htmlFor="nb-title">Name</Label>
+      <Input
+        id="nb-title"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Untitled notebook"
+        autoFocus
+        onKeyDown={(e) => { if (e.key === "Enter" && trimmed) onSave(trimmed); }}
+      />
+      <p className="mt-2 text-[16px] text-pine/65">
+        Students see this name on their own copy, so it changes for them too.
+      </p>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="primary" disabled={!trimmed || trimmed === title || busy} onClick={() => onSave(trimmed)}>
+          {busy ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
