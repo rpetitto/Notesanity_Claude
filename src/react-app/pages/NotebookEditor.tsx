@@ -260,6 +260,25 @@ export default function NotebookEditor() {
     }, 1000);
   };
 
+  /**
+   * Wipe the teacher's own ink off the master page in view.
+   *
+   * Only the annotation layer: the answer boxes on the page are fields, not
+   * marks, and a student's work isn't here at all — this is the template, not
+   * anybody's copy. Goes through the same handler as drawing, so it saves the
+   * way any other change does.
+   */
+  const clearAnnotationPage = () => {
+    if (!page) return;
+    const empty = !annotationLayer.s.length && !annotationLayer.x.length
+      && !annotationLayer.e.length && !annotationLayer.c.length;
+    if (empty) {
+      toast.success("Nothing on this page to clear");
+      return;
+    }
+    setClearingPage(true);
+  };
+
   // How many assignments reference each page — surfaced as a badge on the
   // thumbnail, since a page can legitimately be assigned more than once.
   const assignmentCounts = useMemo(() => {
@@ -557,6 +576,7 @@ export default function NotebookEditor() {
   const [renameOpen, setRenameOpen] = useState(false);
   /** Which confirmation is on screen, if any. */
   const [confirming, setConfirming] = useState<null | "archive" | "unarchive" | "delete">(null);
+  const [clearingPage, setClearingPage] = useState(false);
 
   const setArchived = useMutation({
     mutationFn: (archived: boolean) => api.patch(`/api/notebooks/${notebookId}`, { archived }),
@@ -593,6 +613,13 @@ export default function NotebookEditor() {
   if (!query.data) return null;
 
   const { notebook } = query.data;
+  /**
+   * Nothing left to send: it's published, and no page has ink the students
+   * haven't got. Adding a page or a field doesn't count — those are live the
+   * moment they're made, so calling the notebook out of date for them would be
+   * asking the teacher to press a button that changes nothing.
+   */
+  const upToDate = notebook.status === "published" && !hasUnpublishedAnnotations;
   const archivedCount = allPages.filter((p) => p.archived).length;
   const assignments = assignmentsQuery.data?.assignments ?? [];
 
@@ -786,22 +813,26 @@ export default function NotebookEditor() {
               },
             ]}
           />
-          {/* Only once students actually have the notebook. On a draft nothing
-              has been sent yet, so "not sent" says nothing — and next to the
-              "Published" chip it read as a second, contradictory status. */}
-          {hasUnpublishedAnnotations && notebook.status === "published" && (
-            <span
-              className="hidden xl:inline-flex"
-              title="You've written on these pages since the last update. Press Update student notebooks to send it to them."
-            >
-              <Chip tone="warn" icon={<Pen className="h-4 w-4" strokeWidth={2.5} />}>
-                Your writing isn't sent yet
-              </Chip>
-            </span>
-          )}
-          <Button variant="primary" data-tour="nb-publish" onClick={() => publish.mutate()} disabled={publish.isPending}>
-            <Send className="h-5 w-5" strokeWidth={2.5} />
-            {notebook.status === "published" ? "Update student notebooks" : "Publish to students"}
+          {/* The button is the status.
+              A separate chip saying "your writing isn't sent yet" sat beside a
+              button saying "Update student notebooks", which is two controls
+              telling you the same thing and neither of them telling you when
+              there is nothing to do. Now the button itself answers: it offers
+              the update when there is one to send, and says everything is out
+              there when there isn't. Pages and fields reach students the moment
+              they're made — annotations are the only thing publishing holds
+              back — so "Up to date" means exactly what it says. */}
+          <Button
+            variant={upToDate ? "secondary" : "primary"}
+            data-tour="nb-publish"
+            onClick={() => publish.mutate()}
+            disabled={publish.isPending || upToDate}
+            title={upToDate ? "Everything you've written is with your students" : undefined}
+          >
+            {upToDate
+              ? <><Check className="h-5 w-5" strokeWidth={2.5} /> Up to date</>
+              : <><Send className="h-5 w-5" strokeWidth={2.5} />
+                  {notebook.status === "published" ? "Update student notebooks" : "Publish to students"}</>}
           </Button>
         </div>
         <input
@@ -831,6 +862,31 @@ export default function NotebookEditor() {
           />
         )}
       </header>
+
+      {clearingPage && page && (
+        <ConfirmModal
+          title="Clear this page?"
+          confirmLabel="Clear it"
+          tone="danger"
+          onClose={() => setClearingPage(false)}
+          onConfirm={() => {
+            handleAnnotationChange(emptyLayer());
+            setClearingPage(false);
+            toast.success("Page cleared");
+          }}
+          body={
+            <>
+              This removes everything you've written on{" "}
+              <span className="font-bold">{page.label || `page ${pageIdx + 1}`}</span> — ink,
+              highlighter, typed notes and stamps.
+              <div className="mt-2">
+                The answer boxes on the page stay, and so does anything students have already
+                written in their own copies.
+              </div>
+            </>
+          }
+        />
+      )}
 
       {confirming === "archive" && (
         <ConfirmModal
@@ -977,6 +1033,7 @@ export default function NotebookEditor() {
             allowComments
             zoom={zoom}
             onZoomChange={(z) => setZoom(typeof z === "number" ? z : 1)}
+            onClearPage={clearAnnotationPage}
           />
         </div>
       )}
