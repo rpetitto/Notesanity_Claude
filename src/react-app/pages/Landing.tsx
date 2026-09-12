@@ -118,9 +118,12 @@ export default function Landing({ error }: { error?: Error | null }) {
           <Logo size={44} />
           <span className="wordmark text-[34px] text-pine">Notesanity</span>
         </div>
-        <p className="measure mx-auto mb-7 text-center text-pine/75">
-          Every notebook a teacher has, every page a student needs — and nothing else in the way.
-        </p>
+        <div className="measure mx-auto mb-7 text-center">
+          <p className="font-display text-[19px] text-pine">The notebook, without the paperwork.</p>
+          <p className="mt-1 text-pine/75">
+            Push it to your whole class. Change a page later, and every copy updates with it.
+          </p>
+        </div>
 
         {blocked && (
           <div className="mb-5 rounded-[22px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[#5c4611]">
