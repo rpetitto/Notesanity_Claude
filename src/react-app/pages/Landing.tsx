@@ -119,9 +119,9 @@ export default function Landing({ error }: { error?: Error | null }) {
           <span className="wordmark text-[34px] text-pine">Notesanity</span>
         </div>
         <div className="measure mx-auto mb-7 text-center">
-          <p className="font-display text-[19px] text-pine">The notebook, without the paperwork.</p>
+          <p className="font-display text-[19px] text-pine">No{" "}more copies, no{" "}more handouts, no{" "}more collecting.</p>
           <p className="mt-1 text-pine/75">
-            Push it to your whole class. Change a page later, and every copy updates with it.
+            One push gets it to your whole class. Update it instantly, assign just the pages you need.
           </p>
         </div>
 
