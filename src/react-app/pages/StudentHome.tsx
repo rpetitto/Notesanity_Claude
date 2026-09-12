@@ -33,6 +33,7 @@ interface PersonalNotebook {
 
 interface ClassRow extends ClassSummary {
   emoji?: string;
+  has_cover?: number;
 }
 
 /** Raw `/api/my/assignments` row — same information as `StudentAssignmentData`
@@ -71,18 +72,19 @@ function toCardData(a: MyAssignment): StudentAssignmentData {
 }
 
 function ClassCard({ cls }: { cls: ClassRow }) {
-  const [coverFailed, setCoverFailed] = useState(false);
   const accent = cls.accent_color || "#20302C";
   return (
     <CardLink to={`/classes/${cls.id}`}>
       <div className="relative h-20 w-full overflow-hidden border-b-2 border-pine/12">
         <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}, ${accent}99)` }} />
-        {!coverFailed && (
+        {/* Only requested when the class actually has one — asking anyway for
+            every class without one just logs a 404 that looks like a failure
+            and isn't. */}
+        {!!cls.has_cover && (
           <img
             src={`/api/classes/${cls.id}/cover`}
             alt=""
             className="absolute inset-0 h-full w-full object-cover"
-            onError={() => setCoverFailed(true)}
           />
         )}
       </div>

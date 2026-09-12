@@ -11,12 +11,12 @@ import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } fr
 import { DEFAULT_ACCENT } from "../lib/utils";
 
 /** `GET /api/classes` rows also carry `emoji` — declared locally since `ClassSummary`
- * (shared with other owners' code) doesn't yet. There's no `hasCover` flag on this
- * endpoint, so cards probe the cover image directly and fall back on error. */
+ * (shared with other owners' code) doesn't yet. */
 interface ClassRow extends ClassSummary {
   emoji?: string;
   room?: string;
   archived?: number;
+  has_cover?: number;
 }
 
 /** Close a modal on Escape while it's open. */
@@ -32,7 +32,6 @@ function useEscapeClose(active: boolean, onClose: () => void) {
 }
 
 function ClassCard({ cls, menu }: { cls: ClassRow; menu?: MenuItem[] }) {
-  const [coverFailed, setCoverFailed] = useState(false);
   const accent = cls.accent_color || DEFAULT_ACCENT;
   return (
     <Link
@@ -41,12 +40,14 @@ function ClassCard({ cls, menu }: { cls: ClassRow; menu?: MenuItem[] }) {
     >
       <div className="relative h-20 w-full overflow-hidden">
         <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}, ${accent}99)` }} />
-        {!coverFailed && (
+        {/* Only requested when the class actually has one — a class without a
+            cover has nothing at that URL, and asking anyway just logs a 404
+            that looks like a failure and isn't one. */}
+        {!!cls.has_cover && (
           <img
             src={`/api/classes/${cls.id}/cover`}
             alt=""
             className="absolute inset-0 h-full w-full object-cover"
-            onError={() => setCoverFailed(true)}
           />
         )}
       </div>

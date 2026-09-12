@@ -72,7 +72,7 @@ app.get("/api/classes", handler(async (c) => {
   const rows = await db
     .prepare(
       // Positional `?` only — the D1 driver rejects numbered (?1) placeholders.
-      `SELECT c.*,
+      `SELECT c.*, c.cover_key IS NOT NULL AS has_cover,
               (SELECT COUNT(*) FROM enrollments e2
                 WHERE e2.class_id = c.id AND e2.role = 'student' AND e2.status = 'active') AS student_count,
               (SELECT COUNT(*) FROM notebooks n WHERE n.class_id = c.id) AS notebook_count,
