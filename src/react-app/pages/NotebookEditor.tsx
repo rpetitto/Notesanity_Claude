@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
-  Pencil, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Upload, X, PanelLeft,
+  Pencil, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
   FolderOpen,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -199,6 +199,14 @@ export default function NotebookEditor() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedAnnotationPage = useRef<string | null>(null);
+  /**
+   * Undo history for the teacher's own ink, kept per page so switching pages
+   * and coming back doesn't lose either page's stack. Small and local — this
+   * is drawing on a template, not the append-only save `useNotebookWork` does
+   * for student work, so a plain past/future pair is all it needs.
+   */
+  const annotationHistory = useRef<Record<string, { past: LayerData[]; future: LayerData[] }>>({});
+  const [annotationHistoryTick, setAnnotationHistoryTick] = useState(0);
 
   const saveAnnotation = useMutation({
     mutationFn: ({ pageId, data }: { pageId: string; data: string }) =>
@@ -249,7 +257,14 @@ export default function NotebookEditor() {
 
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
-  const handleAnnotationChange = (layer: LayerData) => {
+  const handleAnnotationChange = (layer: LayerData, recordHistory = true) => {
+    if (recordHistory && page) {
+      const entry = (annotationHistory.current[page.id] ??= { past: [], future: [] });
+      entry.past.push(annotationLayer);
+      if (entry.past.length > 40) entry.past.shift();
+      entry.future = [];
+      setAnnotationHistoryTick((t) => t + 1);
+    }
     setAnnotationLayer(layer);
     if (!page) return;
     setSaveStatus("saving");
@@ -268,6 +283,31 @@ export default function NotebookEditor() {
    * anybody's copy. Goes through the same handler as drawing, so it saves the
    * way any other change does.
    */
+  const undoAnnotation = () => {
+    if (!page) return;
+    const entry = annotationHistory.current[page.id];
+    if (!entry?.past.length) return;
+    entry.future.push(annotationLayer);
+    const previous = entry.past.pop()!;
+    handleAnnotationChange(previous, false);
+    setAnnotationHistoryTick((t) => t + 1);
+  };
+  const redoAnnotation = () => {
+    if (!page) return;
+    const entry = annotationHistory.current[page.id];
+    if (!entry?.future.length) return;
+    entry.past.push(annotationLayer);
+    const next = entry.future.pop()!;
+    handleAnnotationChange(next, false);
+    setAnnotationHistoryTick((t) => t + 1);
+  };
+  const canUndoAnnotation = !!page && (annotationHistory.current[page.id]?.past.length ?? 0) > 0;
+  const canRedoAnnotation = !!page && (annotationHistory.current[page.id]?.future.length ?? 0) > 0;
+  // Referenced so the linter (and a future reader) can see why this exists —
+  // it exists purely to force the undo/redo buttons to re-render, since the
+  // history itself lives in a ref that changing doesn't re-render on its own.
+  void annotationHistoryTick;
+
   const clearAnnotationPage = () => {
     if (!page) return;
     const empty = !annotationLayer.s.length && !annotationLayer.x.length
@@ -575,7 +615,7 @@ export default function NotebookEditor() {
 
   const [renameOpen, setRenameOpen] = useState(false);
   /** Which confirmation is on screen, if any. */
-  const [confirming, setConfirming] = useState<null | "archive" | "unarchive" | "delete">(null);
+  const [confirming, setConfirming] = useState<null | "archive" | "unarchive" | "delete" | "discard">(null);
   const [clearingPage, setClearingPage] = useState(false);
 
   const setArchived = useMutation({
@@ -596,6 +636,26 @@ export default function NotebookEditor() {
     // The refusal names archiving as the thing they probably wanted, so it
     // gets long enough on screen to be read rather than glimpsed.
     onError: (e: Error) => toast.error(e.message, { duration: 8000 }),
+  });
+
+  /**
+   * Throw away the teacher's own unsent ink, back to what's already published.
+   *
+   * The only thing this can discard is annotations — pages and fields reach
+   * students the moment they're made, so there's nothing else pending. Clears
+   * the local undo history too: after a discard there is nothing left for
+   * "undo" to mean on any page.
+   */
+  const discardDrafts = useMutation({
+    mutationFn: () => api.post(`/api/notebooks/${notebookId}/discard-drafts`),
+    onSuccess: () => {
+      annotationHistory.current = {};
+      loadedAnnotationPage.current = null;
+      invalidate();
+      qc.invalidateQueries({ queryKey: ["annotations", notebookId] });
+      toast.success("Unsent writing discarded");
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const groupSelection = () => {
@@ -801,6 +861,16 @@ export default function NotebookEditor() {
                   : "Puts it away for the class. No work is lost, and you can bring it back.",
                 onClick: () => setConfirming(notebook.archived ? "unarchive" : "archive"),
               },
+              ...(notebook.status === "published" ? [{
+                label: "Discard unsent writing",
+                icon: <Undo2 className="h-5 w-5" strokeWidth={2.5} />,
+                danger: true,
+                disabled: !hasUnpublishedAnnotations,
+                hint: hasUnpublishedAnnotations
+                  ? "Throws away your ink on this notebook since the last update. Nothing sent is touched."
+                  : "Nothing unsent right now — everything you've written is already with your students.",
+                onClick: () => setConfirming("discard"),
+              }] : []),
               {
                 label: "Delete notebook",
                 icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
@@ -944,6 +1014,27 @@ export default function NotebookEditor() {
         />
       )}
 
+      {confirming === "discard" && (
+        <ConfirmModal
+          title="Discard your unsent writing?"
+          confirmLabel="Discard it"
+          tone="danger"
+          busy={discardDrafts.isPending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => discardDrafts.mutate(undefined, { onSettled: () => setConfirming(null) })}
+          body={
+            <>
+              This throws away everything you've written on <span className="font-bold">{notebook.title}</span>'s
+              pages since the last update — every page goes back to exactly what students already have.
+              <div className="mt-2">
+                Nothing already with students is touched, and pages, fields and answer boxes aren't
+                affected — this only ever holds your own ink.
+              </div>
+            </>
+          }
+        />
+      )}
+
       {renameOpen && (
         <RenameNotebookModal
           title={notebook.title}
@@ -1028,6 +1119,10 @@ export default function NotebookEditor() {
             onToolChange={setInkTool}
             fingerDraw={inkFingerDraw}
             onFingerDrawChange={setInkFingerDraw}
+            onUndo={undoAnnotation}
+            onRedo={redoAnnotation}
+            canUndo={canUndoAnnotation}
+            canRedo={canRedoAnnotation}
             status={saveStatus}
             teacherPalette
             allowComments

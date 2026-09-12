@@ -894,6 +894,30 @@ app.put("/api/notebooks/:id/annotations/:pageId", handler(async (c) => {
 }));
 
 /**
+ * Throw away every unpublished annotation, back to what students already have.
+ *
+ * The only draft state a notebook carries once it's published is the
+ * teacher's own ink on the master pages — pages and fields are already live
+ * the moment they're made, so there is nothing else here to discard. Refused
+ * once nothing is actually pending, so the button that triggers this can't be
+ * pressed into doing nothing and calling it a success.
+ */
+app.post("/api/notebooks/:id/discard-drafts", handler(async (c) => {
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const pending = await db
+    .prepare(`SELECT COUNT(*) AS n FROM page_annotations WHERE notebook_id = ? AND draft_data <> published_data`)
+    .bind(nb.id)
+    .first<{ n: number }>();
+  if (!pending?.n) throw new HttpError(400, "Nothing to discard — there's no unsent writing on this notebook.");
+  await db
+    .prepare(`UPDATE page_annotations SET draft_data = published_data, updated_at = ? WHERE notebook_id = ?`)
+    .bind(now(), nb.id)
+    .run();
+  return c.json({ ok: true, discarded: pending.n });
+}));
+
+/**
  * Publish / "Update Student Notebooks".
  *
  * Because student work is anchored to page and field UUIDs, propagation is

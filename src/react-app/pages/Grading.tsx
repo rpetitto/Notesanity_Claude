@@ -38,6 +38,7 @@ const BUTTON_ROW =
   "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none";
 
 const RAIL_KEY = "notesanity:gradeRail";
+const ROSTER_KEY = "notesanity:gradeRoster";
 
 /** What deleting (or heavily editing) an assignment would actually disturb. */
 export interface AssignmentImpact {
@@ -145,6 +146,44 @@ function PageRail({
   );
 }
 
+/** Roster list, shared by the persistent left panel and its mobile drawer. */
+function RosterList({
+  rows, studentIdx, onSelect,
+}: {
+  rows: GradeRow[];
+  studentIdx: number;
+  onSelect: (index: number) => void;
+}) {
+  return (
+    <>
+      {rows.map((r, i) => (
+        <button
+          key={r.student.id}
+          onClick={() => onSelect(i)}
+          className={cn(
+            "flex w-full items-center gap-2.5 border-l-[3px] px-3 py-2.5 text-left hover:bg-oat",
+            i === studentIdx ? "border-pine bg-mint/30" : "border-transparent",
+          )}
+        >
+          <Avatar name={r.student.name} picture={r.student.picture} size={32} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[16px] font-bold text-pine">{r.student.name}</div>
+            <div className="text-[16px] text-pine/70">
+              {r.status.replace("_", " ")}
+              {r.lastWorkedAt && ` · ${relativeTime(r.lastWorkedAt)}`}
+            </div>
+          </div>
+          {r.graded && (
+            <span title="Graded">
+              <Check className="h-4 w-4 text-pine" strokeWidth={2.5} />
+            </span>
+          )}
+        </button>
+      ))}
+    </>
+  );
+}
+
 interface GradeRow {
   student: { id: string; name: string; email: string; picture?: string | null };
   status: string;
@@ -202,7 +241,22 @@ export default function Grading() {
   const [studentIdx, setStudentIdx] = useState(0);
   const [pageIdx, setPageIdx] = useState(0);
   const [pageLocked, setPageLocked] = useState(true);
-  const [rosterOpen, setRosterOpen] = useState(false);
+  /**
+   * The roster is the first thing grading actually starts with — pick a
+   * student, then a page, then look at it — so it defaults open the same way
+   * the page rail does, and remembers whichever way a teacher leaves it.
+   */
+  const [rosterOpen, setRosterOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(ROSTER_KEY);
+      if (saved !== null) return saved === "1";
+    } catch { /* ignore */ }
+    return typeof window === "undefined" || window.innerWidth >= 640;
+  });
+  useEffect(() => {
+    try { localStorage.setItem(ROSTER_KEY, rosterOpen ? "1" : "0"); } catch { /* ignore */ }
+  }, [rosterOpen]);
+  const [rosterMobileOpen, setRosterMobileOpen] = useState(false);
   const [zoom, setZoom] = useState<ZoomMode>("page");
   const [tool, setTool] = useState<ToolState>({
     kind: "select", color: "#D93025", width: 2.5, stamp: "✅", fontSize: 14, erase: "quick",
@@ -223,13 +277,13 @@ export default function Grading() {
   const [railMobileOpen, setRailMobileOpen] = useState(false);
   const [gradeSheetOpen, setGradeSheetOpen] = useState(false);
   useEffect(() => {
-    if (!railMobileOpen && !gradeSheetOpen) return;
+    if (!railMobileOpen && !gradeSheetOpen && !rosterMobileOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setRailMobileOpen(false); setGradeSheetOpen(false); }
+      if (e.key === "Escape") { setRailMobileOpen(false); setGradeSheetOpen(false); setRosterMobileOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [railMobileOpen, gradeSheetOpen]);
+  }, [railMobileOpen, gradeSheetOpen, rosterMobileOpen]);
 
   const [visiblePage, setVisiblePage] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -420,14 +474,37 @@ export default function Grading() {
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
+        {/* Both panel toggles live together on the left, where the panels
+            themselves are — a "Roster" button living in the actions cluster on
+            the right was two screens' worth of eye travel from the thing it
+            opened. */}
+        <button
+          type="button"
+          onClick={() => setRosterOpen((v) => !v)}
+          className="hidden h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8 sm:inline-flex"
+          aria-label={rosterOpen ? "Hide roster" : "Show roster"}
+          aria-pressed={rosterOpen}
+          title="Roster"
+        >
+          <Users className="h-4 w-4" strokeWidth={2.5} />
+        </button>
         <button
           type="button"
           onClick={() => setRailOpen((v) => !v)}
           className="hidden h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8 sm:inline-flex"
           aria-label={railOpen ? "Hide pages" : "Show pages"}
           aria-pressed={railOpen}
+          title="Pages"
         >
           <PanelLeft className="h-4 w-4" strokeWidth={2.5} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setRosterMobileOpen(true)}
+          className={cn(BUTTON_ROW, "sm:hidden")}
+          aria-label="Show roster"
+        >
+          <Users className="h-4 w-4" strokeWidth={2.5} /> Roster
         </button>
         <button
           type="button"
@@ -447,9 +524,6 @@ export default function Grading() {
         {/* The actions outgrow a handset on their own, so they wrap among
             themselves rather than pushing the page sideways. */}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          <Button variant="secondary" size="sm" onClick={() => setRosterOpen((v) => !v)}>
-            <Users className="h-4 w-4" strokeWidth={2.5} /> Roster
-          </Button>
           {outstanding ? (
             <Button variant="primary" onClick={() => returnWork.mutate({ all: true })}>
               <Send className="h-4 w-4" strokeWidth={2.5} /> Return all graded
@@ -502,60 +576,77 @@ export default function Grading() {
         </div>
       </header>
 
-      {/* Navigation bar — the two axes */}
+      {/* Navigation bar — the two axes, each its own bordered group so eight
+          small controls read as two decisions instead of a loose handful of
+          icons. Picking a student or a page directly happens in the panels on
+          the left now; these are the fast, no-panel-needed way to step. */}
       <div className="flex items-center gap-3 overflow-x-auto border-b-2 border-pine/12 bg-oat px-3 py-2">
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5 rounded-full border-[3px] border-pine bg-white p-1">
           <button onClick={() => setStudentIdx(0)} disabled={studentIdx === 0}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="First student">
+            className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="First student">
             <ChevronsLeft className="h-4 w-4" strokeWidth={2.5} />
           </button>
           <button onClick={() => goStudent(-1)} disabled={studentIdx === 0}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Previous student (←)">
+            className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Previous student (←)">
             <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
           </button>
 
-          <div className="flex shrink-0 items-center gap-2 rounded-full border-[3px] border-pine bg-white px-3 py-1.5">
+          <div className="flex shrink-0 items-center gap-2 px-2">
             <Avatar name={current?.student.name ?? ""} picture={current?.student.picture} size={24} />
             <div className="min-w-0">
               <div className="max-w-[120px] truncate text-[16px] font-bold text-pine">{current?.student.name}</div>
             </div>
-            <span className="ml-1 text-[16px] tabular-nums text-pine/50">{studentIdx + 1}/{rows.length}</span>
+            <span className="text-[16px] tabular-nums text-pine/50">{studentIdx + 1}/{rows.length}</span>
           </div>
 
           <button onClick={() => goStudent(1)} disabled={studentIdx >= rows.length - 1}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Next student (→)">
+            className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Next student (→)">
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
           <button onClick={() => setStudentIdx(rows.length - 1)} disabled={studentIdx >= rows.length - 1}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Last student">
+            className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Last student">
             <ChevronsRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
+        {/* What "pinning" a page does, said in the label instead of left to a
+            pin icon to explain: hold one page still while stepping through
+            every student ("grade question 4 for everyone"), or let go and
+            scroll the whole assignment for just this one student. */}
+        <div className="flex shrink-0 items-center gap-0.5 rounded-full border-[3px] border-pine bg-white p-1">
           <button
-            onClick={() => setPageLocked((v) => !v)}
+            onClick={() => setPageLocked(true)}
             className={cn(
-              "inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-[3px] px-3 py-1.5 text-[16px] font-display font-bold whitespace-nowrap transition-colors",
-              pageLocked ? "border-pine bg-mint/40 text-pine" : "border-pine/20 bg-white text-pine/70",
+              "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[16px] font-display font-bold whitespace-nowrap transition-colors",
+              pageLocked ? "bg-mint/50 text-pine" : "text-pine/60 hover:bg-oat",
             )}
-            title={pageLocked ? "Page is pinned while you move across students" : "Scroll through every assigned page"}
+            title="Hold this page still and move across students"
           >
-            {pageLocked ? <Pin className="h-3.5 w-3.5" strokeWidth={2.5} /> : <PinOff className="h-3.5 w-3.5" strokeWidth={2.5} />}
-            {pageLocked ? "Page pinned" : "All pages"}
+            <Pin className="h-3.5 w-3.5" strokeWidth={2.5} /> Same page, every student
+          </button>
+          <button
+            onClick={() => setPageLocked(false)}
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[16px] font-display font-bold whitespace-nowrap transition-colors",
+              !pageLocked ? "bg-mint/50 text-pine" : "text-pine/60 hover:bg-oat",
+            )}
+            title="Scroll through every assigned page for this student"
+          >
+            <PinOff className="h-3.5 w-3.5" strokeWidth={2.5} /> Every page, this student
           </button>
 
           {pageLocked && (
             <>
+              <span className="mx-0.5 h-6 w-px shrink-0 bg-pine/20" aria-hidden />
               <button onClick={() => goPage(-1)} disabled={pageIdx === 0}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Previous page (↑)">
+                className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Previous page (↑)">
                 <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
               </button>
-              <span className="whitespace-nowrap text-[16px] tabular-nums text-pine/70">
+              <span className="whitespace-nowrap px-1 text-[16px] tabular-nums text-pine/70">
                 Page {Math.min(pageIdx + 1, assignedPages.length || 1)} of {assignedPages.length || 1}
               </span>
               <button onClick={() => goPage(1)} disabled={pageIdx >= assignedPages.length - 1}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30" title="Next page (↓)">
+                className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Next page (↓)">
                 <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
               </button>
             </>
@@ -584,6 +675,32 @@ export default function Grading() {
           onZoomChange={setZoom}
         />
       </div>
+
+      {/* Mobile roster drawer — opens over everything else, since picking a
+          student is the first thing grading does. */}
+      {rosterMobileOpen && (
+        <div className="fixed inset-0 z-40 flex sm:hidden">
+          <div className="absolute inset-0 bg-pine/40" onClick={() => setRosterMobileOpen(false)} aria-hidden />
+          <aside className="relative flex h-full w-72 max-w-[85vw] flex-col overflow-y-auto border-r-2 border-pine/12 bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b-2 border-pine/12 px-3 py-2">
+              <span className="label-caps text-pine/70">Roster</span>
+              <button
+                type="button"
+                onClick={() => setRosterMobileOpen(false)}
+                className="rounded-full p-1.5 text-pine hover:bg-pine/8"
+                aria-label="Close roster"
+              >
+                <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            </div>
+            <RosterList
+              rows={rows}
+              studentIdx={studentIdx}
+              onSelect={(i) => { setStudentIdx(i); setRosterMobileOpen(false); }}
+            />
+          </aside>
+        </div>
+      )}
 
       {/* Mobile page rail drawer */}
       {railMobileOpen && (
@@ -614,7 +731,14 @@ export default function Grading() {
         </div>
       )}
 
+      {/* Roster sits to the left of the pages, matching the order you actually
+          work in: pick a student, then a page, then look at it. */}
       <div className="flex min-h-0 flex-1">
+        {rosterOpen && (
+          <aside className="hidden w-64 shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white sm:block">
+            <RosterList rows={rows} studentIdx={studentIdx} onSelect={setStudentIdx} />
+          </aside>
+        )}
         {railOpen && (
           <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 sm:block">
             <PageRail
@@ -626,34 +750,6 @@ export default function Grading() {
               activePageId={visiblePage}
               onSelect={goToRailPage}
             />
-          </aside>
-        )}
-        {rosterOpen && (
-          <aside className="w-64 max-w-[85vw] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white">
-            {rows.map((r, i) => (
-              <button
-                key={r.student.id}
-                onClick={() => { setStudentIdx(i); setRosterOpen(false); }}
-                className={cn(
-                  "flex w-full items-center gap-2.5 border-l-[3px] px-3 py-2.5 text-left hover:bg-oat",
-                  i === studentIdx ? "border-pine bg-mint/30" : "border-transparent",
-                )}
-              >
-                <Avatar name={r.student.name} picture={r.student.picture} size={32} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[16px] font-bold text-pine">{r.student.name}</div>
-                  <div className="text-[16px] text-pine/70">
-                    {r.status.replace("_", " ")}
-                    {r.lastWorkedAt && ` · ${relativeTime(r.lastWorkedAt)}`}
-                  </div>
-                </div>
-                {r.graded && (
-                  <span title="Graded">
-                    <Check className="h-4 w-4 text-pine" strokeWidth={2.5} />
-                  </span>
-                )}
-              </button>
-            ))}
           </aside>
         )}
 

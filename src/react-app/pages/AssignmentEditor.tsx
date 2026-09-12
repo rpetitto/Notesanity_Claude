@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Check, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { api, pageSource, type PageRec } from "../lib/api";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
@@ -155,6 +155,17 @@ export default function AssignmentEditor() {
   });
   const pages = notebookQuery.data?.pages ?? [];
 
+  /**
+   * Pages are picked, not read — nobody needs to see all hundred at once to
+   * tick the four they want. Paginated the same way the notebook's own page
+   * list is, at a size that fills the grid's widest layout (7 columns) evenly.
+   */
+  const PAGE_SIZE = 35;
+  const [pagePage, setPagePage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(pages.length / PAGE_SIZE));
+  useEffect(() => { setPagePage(0); }, [notebookId]);
+  const visiblePages = pages.slice(pagePage * PAGE_SIZE, pagePage * PAGE_SIZE + PAGE_SIZE);
+
   const save = useMutation({
     mutationFn: (status: "draft" | "active") => {
       const body = {
@@ -270,7 +281,8 @@ export default function AssignmentEditor() {
               </div>
               <p className="mt-0.5 text-[16px] text-pine/70">Pages don't have to be next to each other.</p>
               <div className="mt-2 grid grid-cols-3 gap-2.5 sm:grid-cols-5 lg:grid-cols-7">
-                {pages.map((p, i) => {
+                {visiblePages.map((p) => {
+                  const i = pages.indexOf(p);
                   const on = pageIds.includes(p.id);
                   return (
                     <button
@@ -301,6 +313,32 @@ export default function AssignmentEditor() {
                   );
                 })}
               </div>
+
+              {pageCount > 1 && (
+                <div className="mt-3 flex items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPagePage((n) => Math.max(0, n - 1))}
+                    disabled={pagePage === 0}
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30"
+                    aria-label="Previous pages"
+                  >
+                    <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+                  </button>
+                  <span className="text-[16px] tabular-nums text-pine/70">
+                    Pages {pagePage * PAGE_SIZE + 1}–{Math.min(pages.length, pagePage * PAGE_SIZE + PAGE_SIZE)} of {pages.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPagePage((n) => Math.min(pageCount - 1, n + 1))}
+                    disabled={pagePage >= pageCount - 1}
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30"
+                    aria-label="More pages"
+                  >
+                    <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

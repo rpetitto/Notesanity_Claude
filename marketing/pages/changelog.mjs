@@ -38,6 +38,16 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 13, 2026",
+    "A clearer grading screen, real undo on a notebook, and a way back out of a mistake.",
+    [
+      ["new", "The grading screen puts your roster on the left, where you actually start — pick a student, then a page, then look at it. The old scattered row of icon buttons is now two clear controls: step through students, and choose whether a page stays put while you do or scrolls with each one."],
+      ["new", "Undo and redo now work while you're writing on a notebook itself (Annotate), not just while grading — the buttons were there before but did nothing."],
+      ["new", "<b>Discard unsent writing</b>, in a published notebook's menu. If you've written on pages since the last update and change your mind, this throws it away and puts every page back to what students already have. Nothing already sent is touched."],
+      ["better", "Picking pages for an assignment is paginated now instead of showing every page in the notebook at once — a hundred-page notebook no longer means a hundred thumbnails on one screen."],
+    ],
+  ],
+  [
     "September 12, 2026",
     "Tidying up: archiving, duplicating, clearing and exporting.",
     [
