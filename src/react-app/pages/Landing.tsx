@@ -310,10 +310,6 @@ export default function Landing({ error }: { error?: Error | null }) {
             </>
           )}
         </div>
-
-        <p className="mx-auto mt-5 max-w-sm text-center text-[16px] text-pine/60">
-          The first person to sign in sets up the school.
-        </p>
       </div>
     </div>
   );
