@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" role="img" aria-label="Notesanity">
+  <rect width="512" height="512" rx="115" fill="#20302C"/>
+  <g stroke="#F4EFE6" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="118" y="128" width="228" height="240" rx="58" fill="none" transform="rotate(-10 232 248)"/>
+  </g>
+  <g stroke="#20302C" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="168" y="140" width="228" height="240" rx="58" fill="#7FD1AE"/>
+    <path d="M222 262 268 308 344 218" stroke-width="30"/>
+  </g>
+</svg>

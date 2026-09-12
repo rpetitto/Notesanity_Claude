@@ -1,0 +1,202 @@
+export class ApiError extends Error {
+  /**
+   * The decoded error body, when there was one.
+   *
+   * A 409 from a layer save carries the revision the server actually holds,
+   * and the client needs it to recover — without this it can only retry the
+   * revision that was just refused, forever.
+   */
+  constructor(public status: number, message: string, public body?: any) {
+    super(message);
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(path, {
+    credentials: "same-origin",
+    ...init,
+    headers: {
+      ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    let body: any;
+    try {
+      body = (await res.json()) as any;
+      if (body?.error) message = body.error;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, message, body);
+  }
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>(path),
+  post: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PUT", body: body === undefined ? undefined : JSON.stringify(body) }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PATCH", body: body === undefined ? undefined : JSON.stringify(body) }),
+  del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  upload: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
+};
+
+// ---------- shared types ----------
+
+export interface Me {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string | null;
+  role: "teacher" | "student" | "pending";
+  isAdmin: boolean;
+  /** Platform owner: sees and edits across every school. */
+  isSuperadmin?: boolean;
+  /**
+   * Guided tours this person has finished or skipped, as `role.place` keys.
+   * Carried on the session rather than fetched separately so a tour can decide
+   * whether to run in the same tick the screen renders.
+   */
+  toursSeen?: string[];
+}
+
+export interface ClassSummary {
+  id: string;
+  name: string;
+  section: string;
+  accent_color: string;
+  source: "manual" | "classroom";
+  join_code?: string;
+  student_count: number;
+  notebook_count: number;
+  my_role: "teacher" | "student";
+}
+
+export interface PageRec {
+  id: string;
+  seq: number;
+  asset_key: string;
+  source_index: number;
+  width: number;
+  height: number;
+  label: string;
+  /** Section this page belongs to, "" when ungrouped. */
+  group_name?: string;
+  archived?: number;
+  /**
+   * Set on teacher-inserted blank pages: the ruling to draw instead of a PDF.
+   * Empty on every page that came from a source document.
+   */
+  pattern?: string;
+  pattern_color?: string;
+  /**
+   * Student-owned notebooks only: the owner has opened this page for a teacher
+   * of the class to write on. 0 or absent everywhere else.
+   */
+  teacher_annotate?: number;
+}
+
+export interface FieldRec {
+  id: string;
+  page_id: string;
+  /**
+   * `prompt` pairs a teacher instruction (and optional image) with an answer box;
+   * `image` and `audio` take a student upload inside the teacher-defined box.
+   * `richtext` and `figure` are the teacher's own content — prose and pictures
+   * that belong to the page and take no answer.
+   */
+  type: "text" | "checkbox" | "choice" | "prompt" | "image" | "audio" | "richtext" | "figure";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  options: string;
+  /** Teacher instruction, used by `prompt` fields. */
+  prompt?: string;
+  /** Sanitised markup for a `richtext` block — cleaned server-side on write. */
+  content?: string;
+  /**
+   * Truthy when the teacher attached an illustration to a `prompt` field.
+   * SQLite returns the `IS NOT NULL` test as 0/1, but drivers may hand back a
+   * boolean, so accept either rather than forcing casts at every call site.
+   */
+  has_media?: number | boolean;
+}
+
+export interface LayerRec {
+  page_id: string;
+  kind: "student" | "teacher";
+  data: string;
+  rev: number;
+}
+
+export interface WorkResponse {
+  notebook: { id: string; title: string; classId: string; kind?: "class" | "personal" | "student" };
+  instanceId: string;
+  pages: PageRec[];
+  fields: FieldRec[];
+  layers: LayerRec[];
+  values: { field_id: string; value: string }[];
+  student: { id: string; name: string; email: string; picture?: string | null };
+  isTeacher: boolean;
+  /** Set when the viewer may read this notebook but not write in it. */
+  readOnly?: boolean;
+  /** Why it's read-only, in a sentence the screen can show as-is. */
+  readOnlyReason?: string;
+  /**
+   * Set for a teacher of the class looking into a student's own notebook: they
+   * may write on the pages whose `teacher_annotate` the student has turned on,
+   * and nothing else. Always paired with `readOnly`.
+   */
+  canAnnotate?: boolean;
+}
+
+export interface AssignmentSummary {
+  id: string;
+  title: string;
+  notebookId: string;
+  notebookTitle: string;
+  pageCount: number;
+  releaseAt: string | null;
+  dueAt: string | null;
+  grading: "none" | "complete" | "points" | "letter";
+  pointsMax: number;
+  status: "draft" | "active";
+  submitted?: number;
+  returned?: number;
+  total?: number;
+  myStatus?: string;
+  grade?: { points: number | null; letter: string | null; complete: number | null; feedback?: string } | null;
+}
+
+export const assetUrl = (notebookId: string, key?: string) =>
+  `/api/notebooks/${notebookId}/asset${key ? `?key=${encodeURIComponent(key)}` : ""}`;
+
+/**
+ * The props any page-rendering component needs, gathered from a page record.
+ *
+ * Pages come in two kinds — PDF-backed and generated — and every renderer has
+ * to be told which it's looking at. Spreading this keeps that decision in one
+ * place instead of at each of the dozen call sites.
+ */
+export function pageSource(
+  notebookId: string,
+  p: Pick<PageRec, "asset_key" | "source_index" | "width" | "height" | "pattern" | "pattern_color">,
+) {
+  return {
+    pdfUrl: assetUrl(notebookId, p.asset_key),
+    sourceIndex: p.source_index,
+    pageWidth: p.width,
+    pageHeight: p.height,
+    pattern: p.pattern,
+    patternColor: p.pattern_color,
+  };
+}

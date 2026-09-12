@@ -1,0 +1,62 @@
+{
+  // Notesanity on Cloudflare, owned outright rather than through a platform.
+  //
+  // `nodejs_compat` is required: the request-scoping seam uses AsyncLocalStorage
+  // so that two districts' requests in one isolate can never share a database
+  // handle.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "notesanity",
+  "main": "src/worker/entry.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    "enabled": true
+  },
+
+  // A Google client id is public by design — it appears in the page source of
+  // every site that offers Google sign-in. It is here rather than as a secret
+  // because the server needs it to check that an ID token was issued to *this*
+  // app, and there is no corresponding secret to protect: sign-in verifies
+  // Google's signature instead of exchanging a code.
+  "vars": {
+    "GOOGLE_CLIENT_ID": "781612697082-2gddfu860fdrotddhm3dgjfsuaqetudu.apps.googleusercontent.com"
+  },
+
+  // The built SPA is served straight from the edge; only /api/* reaches the
+  // Worker, so page loads cost no Worker invocation.
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "notesanity",
+      "database_id": "e41a3e56-4ae1-4e54-ad2f-1e76ee95500c"
+    }
+  ],
+
+  // Transactional mail. No API key: the binding is the credential, and the
+  // addresses it may send from are fixed by the onboarded domain.
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "notesanity-assets"
+    }
+  ],
+
+  // Matches the schedule the mail-queue drain registers in src/worker/index.ts.
+  "triggers": {
+    "crons": ["* * * * *"]
+  }
+}
