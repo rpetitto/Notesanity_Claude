@@ -1,13 +1,13 @@
 /**
- * Teacher grading view with the two navigation axes from the spec:
+ * Teacher grading view: a roster on the left, the assigned pages next to it,
+ * a grade panel on the right. Picking a student and a page is direct — click
+ * either panel — and the page you're looking at carries over when you move to
+ * another student, so grading one question across the whole class is just
+ * "next student" repeated, with nothing to toggle.
  *
- *   Horizontal — hold a page still and move across the roster (S1 → S2 → S3).
- *                This is the "grade question 4 for everyone" pass.
- *   Vertical   — hold a student still and move through their pages.
- *
- * Both axes stay inside the assignment's page scope, so unassigned pages are
- * never in the way. Teacher markup is written to a separate layer, which is why
- * annotating never touches what the student drew.
+ * Only the assignment's own pages are ever in view, so pages outside its scope
+ * are never in the way. Teacher markup is written to a separate layer, which
+ * is why annotating never touches what the student drew.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +15,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckCheck, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck,
-  History, Lock, Mail, MoreVertical, PanelLeft, Pencil, Pin, PinOff, Send, Trash2, Type as TypeIcon,
+  History, Lock, Mail, MoreVertical, PanelLeft, Pencil, Send, Trash2, Type as TypeIcon,
   Undo2, Unlock, Upload, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -108,20 +108,18 @@ export function DeleteAssignmentModal({
 }
 
 function PageRail({
-  pages, pageNumbers, notebookId, pageLocked, activeIndex, activePageId, onSelect,
+  pages, pageNumbers, notebookId, activePageId, onSelect,
 }: {
   pages: PageRec[];
   pageNumbers?: number[];
   notebookId: string;
-  pageLocked: boolean;
-  activeIndex: number;
   activePageId: string;
   onSelect: (index: number, pageId: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-3">
       {pages.map((page, i) => {
-        const active = pageLocked ? i === activeIndex : page.id === activePageId;
+        const active = page.id === activePageId;
         return (
           <button
             key={page.id}
@@ -239,8 +237,6 @@ export default function Grading() {
   const allMarkedAndReturned = anyGraded && rows.every((r) => !r.graded || !!r.returnedAt);
 
   const [studentIdx, setStudentIdx] = useState(0);
-  const [pageIdx, setPageIdx] = useState(0);
-  const [pageLocked, setPageLocked] = useState(true);
   /**
    * The roster is the first thing grading actually starts with — pick a
    * student, then a page, then look at it — so it defaults open the same way
@@ -392,27 +388,43 @@ export default function Grading() {
     return all.filter((p) => allowed.has(p.id));
   }, [work.data?.pages, assignment]);
 
-  const visiblePages = useMemo(
-    () => (pageLocked ? assignedPages.slice(pageIdx, pageIdx + 1) : assignedPages),
-    [assignedPages, pageLocked, pageIdx],
-  );
+  /** Which assigned page is currently on screen, for the stepper's label and bounds. */
+  const visiblePageIdx = Math.max(0, assignedPages.findIndex((p) => p.id === visiblePage));
 
   const goStudent = (delta: number) => {
     setStudentIdx((i) => Math.max(0, Math.min(rows.length - 1, i + delta)));
   };
-  const goPage = (delta: number) => {
-    setPageIdx((i) => Math.max(0, Math.min(Math.max(0, assignedPages.length - 1), i + delta)));
+
+  const scrollToPage = (pageId: string, smooth = true) => {
+    scrollRef.current
+      ?.querySelector(`[data-page-id="${pageId}"]`)
+      ?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
   };
 
-  const goToRailPage = (index: number, pageId: string) => {
-    if (pageLocked) {
-      setPageIdx(index);
-    } else {
-      setVisiblePage(pageId);
-      scrollRef.current?.querySelector(`[data-page-id="${pageId}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+  /** Step to the next/previous assigned page from wherever is currently in view. */
+  const goPage = (delta: number) => {
+    const i = assignedPages.findIndex((p) => p.id === visiblePage);
+    const next = assignedPages[Math.max(0, Math.min(assignedPages.length - 1, (i < 0 ? 0 : i) + delta))];
+    if (next) { setVisiblePage(next.id); scrollToPage(next.id); }
+  };
+
+  const goToRailPage = (_index: number, pageId: string) => {
+    setVisiblePage(pageId);
+    scrollToPage(pageId);
     setRailMobileOpen(false);
   };
+
+  /**
+   * Moving to another student keeps you looking at the same page you were on
+   * — grading question 4 for the whole class means it should still be
+   * question 4 after "next student", with no toggle to remember to set.
+   * Instant rather than smooth: this is a continuation of where you already
+   * were, not a new destination to travel to.
+   */
+  useEffect(() => {
+    if (!visiblePage || work.isLoading) return;
+    scrollToPage(visiblePage, false);
+  }, [studentId, work.isLoading]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -609,48 +621,21 @@ export default function Grading() {
           </button>
         </div>
 
-        {/* What "pinning" a page does, said in the label instead of left to a
-            pin icon to explain: hold one page still while stepping through
-            every student ("grade question 4 for everyone"), or let go and
-            scroll the whole assignment for just this one student. */}
+        {/* Just a stepper through the assigned pages — it moves the page in
+            view, nothing more. The page you're on already carries over when
+            you switch students, so there's nothing here to explain. */}
         <div className="flex shrink-0 items-center gap-0.5 rounded-full border-[3px] border-pine bg-white p-1">
-          <button
-            onClick={() => setPageLocked(true)}
-            className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[16px] font-display font-bold whitespace-nowrap transition-colors",
-              pageLocked ? "bg-mint/50 text-pine" : "text-pine/60 hover:bg-oat",
-            )}
-            title="Hold this page still and move across students"
-          >
-            <Pin className="h-3.5 w-3.5" strokeWidth={2.5} /> Same page, every student
+          <button onClick={() => goPage(-1)} disabled={visiblePageIdx <= 0}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Previous page (↑)">
+            <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
           </button>
-          <button
-            onClick={() => setPageLocked(false)}
-            className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[16px] font-display font-bold whitespace-nowrap transition-colors",
-              !pageLocked ? "bg-mint/50 text-pine" : "text-pine/60 hover:bg-oat",
-            )}
-            title="Scroll through every assigned page for this student"
-          >
-            <PinOff className="h-3.5 w-3.5" strokeWidth={2.5} /> Every page, this student
+          <span className="whitespace-nowrap px-1 text-[16px] tabular-nums text-pine/70">
+            Page {Math.min(visiblePageIdx + 1, assignedPages.length || 1)} of {assignedPages.length || 1}
+          </span>
+          <button onClick={() => goPage(1)} disabled={visiblePageIdx >= assignedPages.length - 1}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Next page (↓)">
+            <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
-
-          {pageLocked && (
-            <>
-              <span className="mx-0.5 h-6 w-px shrink-0 bg-pine/20" aria-hidden />
-              <button onClick={() => goPage(-1)} disabled={pageIdx === 0}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Previous page (↑)">
-                <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
-              </button>
-              <span className="whitespace-nowrap px-1 text-[16px] tabular-nums text-pine/70">
-                Page {Math.min(pageIdx + 1, assignedPages.length || 1)} of {assignedPages.length || 1}
-              </span>
-              <button onClick={() => goPage(1)} disabled={pageIdx >= assignedPages.length - 1}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-pine hover:bg-oat disabled:opacity-30" title="Next page (↓)">
-                <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
-              </button>
-            </>
-          )}
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-2 text-[16px]">
@@ -664,10 +649,10 @@ export default function Grading() {
           onToolChange={setTool}
           fingerDraw={fingerDraw}
           onFingerDrawChange={setFingerDraw}
-          onUndo={() => visiblePages[0] && notebookWork.undo(visiblePages[0].id)}
-          onRedo={() => visiblePages[0] && notebookWork.redo(visiblePages[0].id)}
-          canUndo={!!visiblePages[0] && notebookWork.canUndo(visiblePages[0].id)}
-          canRedo={!!visiblePages[0] && notebookWork.canRedo(visiblePages[0].id)}
+          onUndo={() => visiblePage && notebookWork.undo(visiblePage)}
+          onRedo={() => visiblePage && notebookWork.redo(visiblePage)}
+          canUndo={!!visiblePage && notebookWork.canUndo(visiblePage)}
+          canRedo={!!visiblePage && notebookWork.canRedo(visiblePage)}
           status={notebookWork.status}
           teacherPalette
           allowComments
@@ -722,8 +707,6 @@ export default function Grading() {
               pages={assignedPages}
               pageNumbers={assignment.pageNumbers}
               notebookId={assignment.notebookId}
-              pageLocked={pageLocked}
-              activeIndex={pageIdx}
               activePageId={visiblePage}
               onSelect={goToRailPage}
             />
@@ -745,8 +728,6 @@ export default function Grading() {
               pages={assignedPages}
               pageNumbers={assignment.pageNumbers}
               notebookId={assignment.notebookId}
-              pageLocked={pageLocked}
-              activeIndex={pageIdx}
               activePageId={visiblePage}
               onSelect={goToRailPage}
             />
@@ -761,7 +742,7 @@ export default function Grading() {
           ) : (
             <NotebookSurface
               notebookId={assignment.notebookId}
-              pages={visiblePages}
+              pages={assignedPages}
               fields={work.data?.fields ?? []}
               studentLayers={notebookWork.studentLayers}
               studentId={studentId}

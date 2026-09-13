@@ -157,12 +157,6 @@ const BODY = () => `
          comment, set a grade, and return it.`,
       ],
       [
-        "What does \"same page, every student\" mean when grading?",
-        `It's the choice between two ways of moving through an assignment. Pin one page and step
-         between students to grade the same question for everyone in a row; let go and you scroll
-         every assigned page for whichever student you're on. Switch any time.`,
-      ],
-      [
         "Can I undo a mistake I made writing on a notebook?",
         `Yes — the undo and redo buttons in the toolbar work while you're annotating a notebook
          (not just while grading), and go back through everything you've drawn since you opened
