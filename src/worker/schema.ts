@@ -736,3 +736,38 @@ migrate("022_mail_log_org_scope", async () => {
     await db.prepare(`ALTER TABLE mail_queue ADD COLUMN org_id TEXT`).run();
   }
 });
+
+/**
+ * Which school an api_log row's request came from, so a superadmin
+ * troubleshooting "school X says invites are failing" can filter to that
+ * school instead of eyeballing user_email/path across the whole platform.
+ */
+migrate("023_api_log_org_scope", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(api_log)`).all<{ name: string }>();
+  if (!(cols.results ?? []).some((c) => c.name === "org_id")) {
+    await db.prepare(`ALTER TABLE api_log ADD COLUMN org_id TEXT`).run();
+  }
+});
+
+/**
+ * Superadmin impersonation, for white-glove support: briefly seeing what a
+ * user sees without asking them to screen-share.
+ *
+ * This table is the whole point — it's the audit trail, so it is never
+ * exposed through the generic admin cell editor (see EDITABLE in
+ * routes/admin.ts, which has no entry for it and never should).
+ */
+migrate("024_impersonation", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS impersonation_sessions (
+      id TEXT PRIMARY KEY,
+      superadmin_id TEXT NOT NULL,
+      target_user_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      ended_at TEXT
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_impersonation_active ON impersonation_sessions(expires_at, ended_at)`).run();
+});

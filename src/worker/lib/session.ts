@@ -24,6 +24,12 @@ export interface AppUser {
   is_admin: number;
   /** Platform owner — sees and edits across every school. */
   is_superadmin?: number;
+  /**
+   * Set only while a superadmin is impersonating this account for support —
+   * the superadmin's own user id. Present means the request is read-only
+   * (see `handler()`'s write guard below) no matter which route it hits.
+   */
+  impersonated_by?: string;
 }
 
 export interface Org {
@@ -113,6 +119,57 @@ export async function noOrgsYet(): Promise<boolean> {
   return !any;
 }
 
+// ---- superadmin impersonation ----------------------------------------
+
+export const IMPERSONATE_COOKIE = "notesanity_impersonate";
+export const IMPERSONATE_MINUTES = 30;
+
+export function setImpersonateCookie(c: Context, id: string) {
+  const secure = new URL(c.req.url).protocol === "https:";
+  c.header(
+    "Set-Cookie",
+    `${IMPERSONATE_COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${IMPERSONATE_MINUTES * 60}${secure ? "; Secure" : ""}`,
+    { append: true },
+  );
+}
+
+export function clearImpersonateCookie(c: Context) {
+  const secure = new URL(c.req.url).protocol === "https:";
+  c.header(
+    "Set-Cookie",
+    `${IMPERSONATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? "; Secure" : ""}`,
+    { append: true },
+  );
+}
+
+export interface ImpersonationInfo {
+  id: string;
+  superadminId: string;
+  targetUserId: string;
+  reason: string;
+  expiresAt: string;
+}
+
+/**
+ * Resolve the impersonation cookie to an active session row, if any.
+ *
+ * "Active" means not ended and not past its own expiry — checked here rather
+ * than trusted from the cookie, since the cookie is only a pointer to the
+ * row that's the actual source of truth (and the audit trail).
+ */
+export async function activeImpersonation(c: Context): Promise<ImpersonationInfo | null> {
+  const raw = c.req.header("Cookie") ?? "";
+  const match = raw.match(new RegExp(`(?:^|;\\s*)${IMPERSONATE_COOKIE}=([^;]+)`));
+  if (!match) return null;
+  const row = await db
+    .prepare(`SELECT * FROM impersonation_sessions WHERE id = ?`)
+    .bind(match[1])
+    .first<any>();
+  if (!row || row.ended_at) return null;
+  if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  return { id: row.id, superadminId: row.superadmin_id, targetUserId: row.target_user_id, reason: row.reason, expiresAt: row.expires_at };
+}
+
 /**
  * Resolve the signed-in Google account to a Notesanity user row.
  *
@@ -122,6 +179,15 @@ export async function noOrgsYet(): Promise<boolean> {
  * single school without any manual provisioning step.
  */
 export async function currentUser(c: Context): Promise<AppUser | null> {
+  // Impersonation overrides everything else — while it's active, the request
+  // is the target user (read-only; see handler()'s write guard) regardless
+  // of whose real cookie is also sitting in the browser.
+  const impersonation = await activeImpersonation(c);
+  if (impersonation) {
+    const row = await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(impersonation.targetUserId).first<AppUser>();
+    if (row) return { ...row, impersonated_by: impersonation.superadminId };
+  }
+
   // A local session (email/password or magic link) is authoritative on its own;
   // Google sign-in remains available alongside it.
   const localId = await resolveLocalSession(c);
@@ -267,14 +333,19 @@ const API_LOG_KEEP = 500;
 async function logApiFailure(c: Context, status: number, message: string, startedAt: number) {
   try {
     const url = new URL(c.req.url);
+    // Best-effort — a failure here (an expired token, a request that was
+    // never signed in) just means the row logs without a user/org, which is
+    // fine: most of those are sign-in refusals that already name the domain
+    // in the message text.
+    const user = await currentUser(c).catch(() => null);
     await db
       .prepare(
-        `INSERT INTO api_log (id, method, path, status, duration_ms, message, user_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO api_log (id, method, path, status, duration_ms, message, user_id, org_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         uid(), c.req.method, url.pathname, status, Math.round(Date.now() - startedAt),
-        message.slice(0, 500), (c.get("userId") as string) ?? null, now(),
+        message.slice(0, 500), user?.id ?? null, user?.org_id ?? null, now(),
       )
       .run();
     await db
@@ -285,10 +356,23 @@ async function logApiFailure(c: Context, status: number, message: string, starte
   }
 }
 
+/**
+ * Paths a request may still write to while impersonating — just enough to
+ * end the session. Nothing else needs an exception: impersonation is a
+ * read-only lens on the app, on purpose.
+ */
+const IMPERSONATION_WRITE_ALLOWLIST = new Set(["/api/admin/impersonate/end"]);
+
 export function handler(fn: (c: Context) => Promise<Response>) {
   return async (c: Context) => {
     const startedAt = Date.now();
     try {
+      if (c.req.method !== "GET" && c.req.method !== "HEAD" && c.req.method !== "OPTIONS") {
+        const impersonation = await activeImpersonation(c);
+        if (impersonation && !IMPERSONATION_WRITE_ALLOWLIST.has(new URL(c.req.url).pathname)) {
+          throw new HttpError(403, "You're viewing as this user for support — nothing can be changed while impersonating.");
+        }
+      }
       const res = await fn(c);
       // Handlers can also fail by returning a status rather than throwing.
       if (res.status >= 400) await logApiFailure(c, res.status, "", startedAt);

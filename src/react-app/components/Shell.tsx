@@ -1,8 +1,39 @@
 import { type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { BookOpen, ClipboardList, GraduationCap, LayoutGrid, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, ClipboardList, Eye, GraduationCap, LayoutGrid, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { signOutHref, useSession } from "../lib/session";
+import { api } from "../lib/api";
 import { cn, initials } from "../lib/utils";
+
+/**
+ * Sits above everything while a superadmin is viewing as another user for
+ * support — impossible to miss, and the only way out other than it expiring
+ * on its own. Rendered once, in Shell, so no page can forget it.
+ */
+function ImpersonationBanner({ viewingAsEmail, reason }: { viewingAsEmail: string; reason: string }) {
+  const qc = useQueryClient();
+  const end = useMutation({
+    mutationFn: () => api.post("/api/admin/impersonate/end", {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b-2 border-[#8a6a1f] bg-[#fdf1cf] px-4 py-2 text-[15px] text-[#5c4713]">
+      <Eye className="h-4 w-4 shrink-0" />
+      <span>
+        Viewing as <strong>{viewingAsEmail}</strong> for support — read-only. Reason: {reason}
+      </span>
+      <button
+        type="button"
+        onClick={() => end.mutate()}
+        disabled={end.isPending}
+        className="ml-auto shrink-0 rounded-full border-2 border-[#8a6a1f] px-3 py-1 font-display font-bold hover:bg-[#8a6a1f]/10"
+      >
+        {end.isPending ? "Exiting…" : "Exit"}
+      </button>
+    </div>
+  );
+}
 
 export function Avatar({ name, picture, size = 32 }: { name: string; picture?: string | null; size?: number }) {
   if (picture) {
@@ -45,7 +76,7 @@ export function FlingBadge() {
 }
 
 export default function Shell({ children, wide }: { children: ReactNode; wide?: boolean }) {
-  const { user } = useSession();
+  const { user, impersonating } = useSession();
   const { pathname } = useLocation();
 
   const nav = user?.role === "teacher"
@@ -64,7 +95,9 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
 
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-30 border-b-2 border-pine/12 bg-oat/95 backdrop-blur">
+      <div className="sticky top-0 z-30">
+        {impersonating && user && <ImpersonationBanner viewingAsEmail={user.email} reason={impersonating.reason} />}
+        <header className="border-b-2 border-pine/12 bg-oat/95 backdrop-blur">
         <div className={cn("mx-auto flex h-14 items-center gap-4 px-4", wide ? "max-w-none" : "max-w-6xl")}>
           <Link to={user?.role === "teacher" ? "/classes" : "/work"} className="flex shrink-0 items-center gap-2">
             <Logo size={26} />
@@ -104,7 +137,8 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
             </a>
           </div>
         </div>
-      </header>
+        </header>
+      </div>
       <main className={cn("mx-auto px-4 py-6 pb-24 sm:pb-6", wide ? "max-w-none" : "max-w-6xl")}>{children}</main>
 
       {/* Phone navigation. The header row collapses below sm:, so without this

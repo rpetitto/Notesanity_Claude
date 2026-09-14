@@ -148,7 +148,22 @@ const TABLES: TableSpec[] = [
       { id: "path", title: "Path", width: 300 },
       { id: "message", title: "Message", width: 320 },
       { id: "user_email", title: "User", width: 200 },
+      { id: "org_name", title: "School", width: 160 },
       { id: "duration_ms", title: "ms", width: 70, kind: "number" },
+    ],
+  },
+  {
+    key: "impersonations",
+    label: "Impersonation log",
+    endpoint: "impersonations",
+    hint: "Every time a superadmin viewed as someone else, and why. Read-only — this is the audit trail.",
+    columns: [
+      { id: "started_at", title: "Started", width: 140 },
+      { id: "superadmin_email", title: "Superadmin", width: 200 },
+      { id: "target_email", title: "Viewed as", width: 200 },
+      { id: "reason", title: "Reason", width: 280 },
+      { id: "expires_at", title: "Expires", width: 140 },
+      { id: "ended_at", title: "Ended", width: 140 },
     ],
   },
 ];
@@ -219,6 +234,64 @@ function NewSchool() {
   );
 }
 
+/**
+ * Start a support session as another user, by email — the fastest way to see
+ * what someone is actually seeing. A reason is required because it's the
+ * whole point of the audit trail below; the session is read-only and expires
+ * on its own in 30 minutes even if nobody remembers to exit it.
+ */
+function StartImpersonation() {
+  const qc = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [reason, setReason] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const start = useMutation({
+    mutationFn: async () => {
+      const found = await api.get<{ rows: { id: string; email: string }[] }>(
+        `/api/admin/users?q=${encodeURIComponent(email.trim())}&limit=5`,
+      );
+      const match = found.rows.find((r) => r.email.toLowerCase() === email.trim().toLowerCase());
+      if (!match) throw new Error(`No account matches "${email.trim()}" exactly`);
+      return api.post<{ targetName: string }>("/api/admin/impersonate", { targetUserId: match.id, reason });
+    },
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["me"] });
+      toast.success(`Viewing as ${res.targetName} — reload any open tab to see it`);
+      setEmail(""); setReason(""); setOpen(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!open) {
+    return (
+      <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+        View as a user
+      </Button>
+    );
+  }
+
+  return (
+    <form
+      className="flex flex-wrap items-end gap-2"
+      onSubmit={(e) => { e.preventDefault(); start.mutate(); }}
+    >
+      <div>
+        <Label htmlFor="impersonate-email">Their email</Label>
+        <Input id="impersonate-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teacher@school.edu" className="h-11" />
+      </div>
+      <div>
+        <Label htmlFor="impersonate-reason">Reason (goes on the record)</Label>
+        <Input id="impersonate-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ticket #4821 — can't see roster" className="h-11 w-64" />
+      </div>
+      <Button type="submit" disabled={start.isPending || !email.trim() || !reason.trim()}>
+        {start.isPending ? "Starting…" : "Start"}
+      </Button>
+      <Button type="button" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
+  );
+}
+
 /** Which base path a grid reads/writes — the superadmin console or one school's own view. */
 type AdminScope = "admin" | "org";
 
@@ -227,8 +300,10 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
   const [term, setTerm] = useState("");
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
+  const [orgFilter, setOrgFilter] = useState("");
   const base = `/api/${scope}`;
-  const queryKey = [scope, spec.endpoint, q, offset];
+  const showOrgFilter = scope === "admin" && spec.endpoint === "logs";
+  const queryKey = [scope, spec.endpoint, q, offset, orgFilter];
 
   // Typing shouldn't put a query on the wire per keystroke.
   useEffect(() => {
@@ -239,11 +314,17 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
     return () => clearTimeout(t);
   }, [term]);
 
+  const orgs = useQuery({
+    queryKey: ["admin", "orgs", "picker"],
+    queryFn: () => api.get<{ rows: { id: string; name: string }[] }>(`/api/admin/orgs?limit=500`),
+    enabled: showOrgFilter,
+  });
+
   const { data, isLoading, error, isFetching } = useQuery({
     queryKey,
     queryFn: () =>
       api.get<{ rows: Record<string, unknown>[]; total: number }>(
-        `${base}/${spec.endpoint}?limit=${PAGE_SIZE}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+        `${base}/${spec.endpoint}?limit=${PAGE_SIZE}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ""}${orgFilter ? `&org_id=${encodeURIComponent(orgFilter)}` : ""}`,
       ),
     // Keeps the previous page painted while the next one loads, so paging
     // doesn't flash a spinner over the grid.
@@ -335,6 +416,19 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
           className="h-11 w-full max-w-xs"
           aria-label={`Search ${spec.label.toLowerCase()}`}
         />
+        {showOrgFilter && (
+          <Select
+            value={orgFilter}
+            onChange={(e) => { setOrgFilter(e.target.value); setOffset(0); }}
+            aria-label="Filter by school"
+            className="h-11 w-auto"
+          >
+            <option value="">All schools</option>
+            {(orgs.data?.rows ?? []).map((o) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </Select>
+        )}
         <p className="text-[16px] text-pine/70">
           {total === 0
             ? "No matches"
@@ -345,6 +439,7 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
         </p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {spec.endpoint === "orgs" && <NewSchool />}
+          {spec.endpoint === "impersonations" && <StartImpersonation />}
           <Button
             variant="secondary"
             size="sm"

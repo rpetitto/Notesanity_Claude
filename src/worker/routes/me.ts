@@ -1,5 +1,5 @@
 import { app, db } from "../platform";
-import { currentUser, handler, now, requireUser, HttpError } from "../lib/session";
+import { currentUser, handler, now, requireUser, HttpError, activeImpersonation } from "../lib/session";
 
 /** Who am I? Returns null (200) when signed out so the client can show the landing page. */
 app.get("/api/me", handler(async (c) => {
@@ -13,6 +13,19 @@ app.get("/api/me", handler(async (c) => {
     .prepare(`SELECT tour FROM user_tours WHERE user_id = ?`)
     .bind(user.id)
     .all<{ tour: string }>();
+
+  // The banner a superadmin sees while viewing as this account — never shown
+  // to the account itself, since currentUser() only sets impersonated_by
+  // when the *impersonation cookie* resolved this request in the first place.
+  let impersonating: { superadminEmail: string; reason: string; expiresAt: string } | null = null;
+  if (user.impersonated_by) {
+    const active = await activeImpersonation(c);
+    const superadmin = await db.prepare(`SELECT email FROM users WHERE id = ?`).bind(user.impersonated_by).first<{ email: string }>();
+    if (active && superadmin) {
+      impersonating = { superadminEmail: superadmin.email, reason: active.reason, expiresAt: active.expiresAt };
+    }
+  }
+
   return c.json({
     user: {
       id: user.id, email: user.email, name: user.name, picture: user.picture,
@@ -20,6 +33,7 @@ app.get("/api/me", handler(async (c) => {
       toursSeen: (tours.results ?? []).map((r) => r.tour),
     },
     org: org ? { name: org.name, primaryDomain: org.primary_domain } : null,
+    impersonating,
   });
 }));
 

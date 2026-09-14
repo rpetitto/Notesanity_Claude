@@ -1,9 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Me } from "./api";
 
+export interface Impersonating {
+  superadminEmail: string;
+  reason: string;
+  expiresAt: string;
+}
+
 interface MeResponse {
   user: Me | null;
   org: { name: string; primaryDomain: string } | null;
+  impersonating: Impersonating | null;
 }
 
 export function useSession() {
@@ -16,6 +23,7 @@ export function useSession() {
   return {
     user: q.data?.user ?? null,
     org: q.data?.org ?? null,
+    impersonating: q.data?.impersonating ?? null,
     isLoading: q.isLoading,
     error: q.error as Error | null,
     refetch: q.refetch,

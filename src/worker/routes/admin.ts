@@ -15,7 +15,10 @@
  */
 
 import { app, db } from "../platform";
-import { HttpError, handler, now, param, requireUser, uid } from "../lib/session";
+import {
+  HttpError, handler, now, param, requireUser, uid,
+  IMPERSONATE_MINUTES, setImpersonateCookie, clearImpersonateCookie, activeImpersonation,
+} from "../lib/session";
 import { SUPERADMIN_EMAILS } from "../schema";
 import { page } from "../lib/paging";
 
@@ -158,13 +161,107 @@ app.get("/api/admin/grades", handler(async (c) => {
 
 app.get("/api/admin/logs", handler(async (c) => {
   await requireSuperadmin(c);
+  const orgId = new URL(c.req.url).searchParams.get("org_id");
   return page(c, {
     select: `l.id, l.method, l.path, l.status, l.duration_ms, l.message, l.created_at,
-             u.email AS user_email`,
-    from: `api_log l LEFT JOIN users u ON u.id = l.user_id`,
+             u.email AS user_email, o.name AS org_name`,
+    from: `api_log l LEFT JOIN users u ON u.id = l.user_id LEFT JOIN orgs o ON o.id = l.org_id`,
     searchable: ["l.path", "l.message", "u.email"],
     order: `l.created_at DESC`,
+    scope: orgId ? { condition: `l.org_id = ?`, params: [orgId] } : undefined,
   });
+}));
+
+/**
+ * Row-count usage for one school — the "what's actually going on at school X"
+ * question a support conversation needs answered fast. R2 storage isn't
+ * included: keys are namespaced by class, not by org, so an accurate byte
+ * count means joining class -> org first or walking prefixes — worth doing
+ * if this becomes a frequent ask, not before.
+ */
+app.get("/api/admin/orgs/:id/usage", handler(async (c) => {
+  await requireSuperadmin(c);
+  const orgId = param(c, "id");
+  const one = async (sql: string, ...params: unknown[]) =>
+    (await db.prepare(sql).bind(...params).first<{ n: number }>())?.n ?? 0;
+  return c.json({
+    users: await one(`SELECT COUNT(*) AS n FROM users WHERE org_id = ?`, orgId),
+    classes: await one(`SELECT COUNT(*) AS n FROM classes WHERE org_id = ?`, orgId),
+    notebooks: await one(
+      `SELECT COUNT(*) AS n FROM notebooks n2
+        LEFT JOIN classes cl ON cl.id = n2.class_id
+        LEFT JOIN users owner ON owner.id = n2.owner_id
+        WHERE COALESCE(cl.org_id, owner.org_id) = ?`,
+      orgId,
+    ),
+    submissions: await one(
+      `SELECT COUNT(*) AS n FROM submissions s
+        JOIN assignments a ON a.id = s.assignment_id
+        JOIN classes cl ON cl.id = a.class_id
+        WHERE cl.org_id = ?`,
+      orgId,
+    ),
+  });
+}));
+
+/**
+ * Impersonation log — the audit trail for the feature below. Read-only, and
+ * deliberately not in EDITABLE: nobody, including a superadmin, edits their
+ * own audit history through a spreadsheet cell.
+ */
+app.get("/api/admin/impersonations", handler(async (c) => {
+  await requireSuperadmin(c);
+  return page(c, {
+    select: `i.id, i.reason, i.started_at, i.expires_at, i.ended_at,
+             sa.email AS superadmin_email, tu.email AS target_email, tu.name AS target_name`,
+    from: `impersonation_sessions i
+           LEFT JOIN users sa ON sa.id = i.superadmin_id
+           LEFT JOIN users tu ON tu.id = i.target_user_id`,
+    searchable: ["sa.email", "tu.email", "tu.name", "i.reason"],
+    order: `i.started_at DESC`,
+  });
+}));
+
+/**
+ * Start viewing as another user — for support, when the fastest way to
+ * understand what someone's seeing is to see it. Read-only: the write guard
+ * in lib/session.ts's handler() refuses every mutating request while a
+ * session is active, this endpoint's own row is the audit trail, and the
+ * session expires on its own in 30 minutes even if nobody ends it early.
+ */
+app.post("/api/admin/impersonate", handler(async (c) => {
+  const actor = await requireSuperadmin(c);
+  const body = await c.req.json<{ targetUserId?: string; reason?: string }>();
+  const targetUserId = (body.targetUserId ?? "").trim();
+  const reason = (body.reason ?? "").trim();
+  if (!reason) throw new HttpError(400, "Say why — it goes on the record.");
+  if (!targetUserId) throw new HttpError(400, "Choose who to view as");
+  if (targetUserId === actor.id) throw new HttpError(400, "You're already signed in as yourself");
+
+  const target = await db.prepare(`SELECT id, name, email FROM users WHERE id = ?`).bind(targetUserId).first<any>();
+  if (!target) throw new HttpError(404, "User not found");
+
+  const id = uid();
+  const expiresAt = new Date(Date.now() + IMPERSONATE_MINUTES * 60_000).toISOString();
+  await db
+    .prepare(
+      `INSERT INTO impersonation_sessions (id, superadmin_id, target_user_id, reason, started_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, actor.id, targetUserId, reason, now(), expiresAt)
+    .run();
+  setImpersonateCookie(c, id);
+  return c.json({ ok: true, targetName: target.name, targetEmail: target.email, expiresAt });
+}));
+
+/** End an impersonation session early. Allowlisted in the write guard, so this works even mid-session. */
+app.post("/api/admin/impersonate/end", handler(async (c) => {
+  const active = await activeImpersonation(c);
+  if (active) {
+    await db.prepare(`UPDATE impersonation_sessions SET ended_at = ? WHERE id = ?`).bind(now(), active.id).run();
+  }
+  clearImpersonateCookie(c);
+  return c.json({ ok: true });
 }));
 
 /**
