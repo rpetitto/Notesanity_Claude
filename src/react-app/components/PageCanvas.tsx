@@ -44,9 +44,10 @@ import {
 import { toast } from "sonner";
 import type { FieldRec } from "../lib/api";
 import {
-  type LayerData, type MarkHit, type Stroke, type ToolKind,
-  drawLayer, drawStroke, hitStroke, markAt, straightenHighlight,
+  type LayerData, type MarkHit, type MarkOp, type MarkRef, type Stroke, type ToolKind,
+  drawLayer, drawStroke, hitStroke, markAt, markBox, markRefAt, straightenHighlight, transformMark,
 } from "../lib/ink";
+import MarkSelection from "./MarkSelection";
 import { renderPageToCanvas } from "../lib/pdf";
 import { isPattern, renderPatternToCanvas, DEFAULT_PATTERN_COLOR } from "../lib/patterns";
 import { cn, relativeTime } from "../lib/utils";
@@ -123,6 +124,11 @@ interface Props {
   onResponseUploaded?: (fieldId: string) => void;
   /** Teacher view: hovering a student's mark reveals when it was made. */
   showMarkHistory?: boolean;
+  /**
+   * A mark to have selected on arrival — how a tap made outside annotate mode
+   * carries its target into the editor that opens because of it.
+   */
+  initialSelection?: MarkRef | null;
 }
 
 /** How each kind of mark is named in the history tooltip. */
@@ -133,37 +139,6 @@ const MARK_LABEL: Record<MarkHit["kind"], string> = {
   stamp: "Stamp",
   comment: "Comment",
 };
-
-/** Which mark a drag is moving. Strokes have no id, so they go by index. */
-type MarkRef =
-  | { kind: "stroke"; index: number }
-  | { kind: "text"; id: string }
-  | { kind: "stamp"; id: string };
-
-/**
- * Move one mark by (dx, dy) page units, leaving the rest of the layer alone.
- *
- * Returns a new layer, so the same call serves both the live preview during a
- * drag and the single committed change at the end of one.
- */
-function translateMark(layer: LayerData, ref: MarkRef, dx: number, dy: number): LayerData {
-  if (ref.kind === "stroke") {
-    return {
-      ...layer,
-      s: layer.s.map((st, i) =>
-        i !== ref.index
-          ? st
-          // Points are a flat [x, y, pressure, ...] run: shift the first two of
-          // every triple and leave pressure be.
-          : { ...st, p: st.p.map((n, j) => (j % 3 === 0 ? n + dx : j % 3 === 1 ? n + dy : n)) },
-      ),
-    };
-  }
-  if (ref.kind === "text") {
-    return { ...layer, x: layer.x.map((t) => (t.id === ref.id ? { ...t, x: t.x + dx, y: t.y + dy } : t)) };
-  }
-  return { ...layer, e: layer.e.map((st) => (st.id === ref.id ? { ...st, x: st.x + dx, y: st.y + dy } : st)) };
-}
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
@@ -190,7 +165,7 @@ export default function PageCanvas({
   fields, fieldValues, onFieldChange,
   studentLayer, teacherLayer, masterLayer, onLayerChange,
   writeTarget, tool, fingerDraw, fieldsEditable, authorName, className,
-  notebookId = "", studentId, onResponseUploaded, showMarkHistory,
+  notebookId = "", studentId, onResponseUploaded, showMarkHistory, initialSelection = null,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const masterRef = useRef<HTMLCanvasElement>(null);
@@ -290,22 +265,39 @@ export default function PageCanvas({
     moved: boolean;
     pointerId: number;
   } | null>(null);
-  const [dragOffset, setDragOffset] = useState<{ ref: MarkRef; dx: number; dy: number } | null>(null);
+  /**
+   * The one mark the handles are on. Distinct from a drag: a selection outlives
+   * the gesture that made it, which is the whole point — you press once to say
+   * "this one", then reach for a handle.
+   */
+  const [selected, setSelected] = useState<MarkRef | null>(initialSelection);
+  /** The reshaping in progress, shown but not yet committed. */
+  const [pending, setPending] = useState<{ ref: MarkRef; op: MarkOp } | null>(null);
   /** Set for the length of a click after a drag, so releasing doesn't also "tap". */
   const justDragged = useRef(false);
   const draggableMarks = canWrite && tool.kind === "select";
 
-  /** The layer as it looks mid-drag — the committed layer with one mark shifted. */
+  // A selection means nothing once the tool that acts on it is put down, and a
+  // stroke index means nothing on a different page.
+  useEffect(() => { if (!draggableMarks) setSelected(null); }, [draggableMarks]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSelected(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** The layer as it looks mid-drag — the committed layer with one mark reshaped. */
   const previewOf = useCallback((layer: LayerData, target: "student" | "teacher") => {
-    if (!dragOffset || writeTarget !== target) return layer;
-    return translateMark(layer, dragOffset.ref, dragOffset.dx, dragOffset.dy);
-  }, [dragOffset, writeTarget]);
+    if (!pending || writeTarget !== target) return layer;
+    return transformMark(layer, pending.ref, pending.op);
+  }, [pending, writeTarget]);
 
   const shownStudentLayer = previewOf(studentLayer, "student");
   const shownTeacherLayer = previewOf(teacherLayer, "teacher");
 
   const beginMarkDrag = (ref: MarkRef, e: React.PointerEvent) => {
     if (!canWrite || tool.kind !== "select") return false;
+    setSelected(ref);
     const surface = e.currentTarget as HTMLElement;
     try { surface.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     const rect = pageRef.current?.getBoundingClientRect();
@@ -332,7 +324,7 @@ export default function PageCanvas({
     if (!d.moved && Math.abs(dx) < DRAG_SLOP / scale && Math.abs(dy) < DRAG_SLOP / scale) return;
     d.moved = true;
     e.preventDefault();
-    setDragOffset({ ref: d.ref, dx, dy });
+    setPending({ ref: d.ref, op: { kind: "move", dx, dy } });
   };
 
   /** Commit once, on release, so a drag is a single undo step rather than one per frame. */
@@ -340,13 +332,26 @@ export default function PageCanvas({
     const d = markDrag.current;
     if (!d || d.pointerId !== e.pointerId) return false;
     markDrag.current = null;
-    const offset = dragOffset;
-    setDragOffset(null);
-    if (!d.moved || !offset || !onLayerChange) return false;
-    onLayerChange(translateMark(activeLayer, offset.ref, offset.dx, offset.dy));
+    const op = pending;
+    setPending(null);
+    if (!d.moved || !op || !onLayerChange) return false;
+    onLayerChange(transformMark(activeLayer, op.ref, op.op));
     justDragged.current = true;
     setTimeout(() => { justDragged.current = false; }, 0);
     return true;
+  };
+
+  /** A handle drag on the selection box: previewed while it runs, committed once. */
+  const commitSelectionOp = (op: MarkOp | null) => {
+    setPending(null);
+    // A press that never became a drag is still a tap, and a tap on a typed
+    // note means "let me type in it" — the box must not swallow that just
+    // because it happens to be lying over the words.
+    if (!op && selected?.kind === "text") { setEditingText(selected.id); return; }
+    if (!op || !selected || !onLayerChange) return;
+    onLayerChange(transformMark(activeLayer, selected, op));
+    justDragged.current = true;
+    setTimeout(() => { justDragged.current = false; }, 0);
   };
 
   useLayoutEffect(() => { paint(studentRef.current, shownStudentLayer); }, [paint, shownStudentLayer]);
@@ -422,11 +427,13 @@ export default function PageCanvas({
     const surface = e.currentTarget;
     const { x, y } = toPage(e, surface);
 
-    // Select: pick up your own ink if the press landed on some, otherwise do
-    // nothing at all so the page scrolls as it always has.
+    // Select: pick up your own mark if the press landed on one, otherwise let
+    // go of whatever was held and do nothing at all, so the page scrolls as it
+    // always has.
     if (tool.kind === "select") {
-      const index = hitStroke(activeLayer.s, x, y, 6 / scale);
-      if (index >= 0) beginMarkDrag({ kind: "stroke", index }, e);
+      const ref = markRefAt(activeLayer, x, y, 6 / scale);
+      if (ref) beginMarkDrag(ref, e);
+      else setSelected(null);
       return;
     }
 
@@ -692,6 +699,15 @@ export default function PageCanvas({
     ...shownStudentLayer.e.map((t) => ({ t, own: writeTarget === "student" })),
     ...shownTeacherLayer.e.map((t) => ({ t, own: writeTarget === "teacher" })),
   ];
+  // Read off the *shown* layer, so the box tracks the mark through a drag
+  // rather than sitting where the mark used to be until the release.
+  const shownActiveLayer = writeTarget === "teacher" ? shownTeacherLayer : shownStudentLayer;
+  // Hidden while the note it holds is being typed in, for the same reason.
+  const selectedBox =
+    selected && draggableMarks && !(selected.kind === "text" && editingText === selected.id)
+      ? markBox(shownActiveLayer, selected)
+      : null;
+
   const comments = [
     ...studentLayer.c.map((k) => ({ k, own: writeTarget === "student", teacher: false })),
     ...teacherLayer.c.map((k) => ({ k, own: writeTarget === "teacher", teacher: true })),
@@ -808,6 +824,8 @@ export default function PageCanvas({
               left: t.x * scale,
               top: t.y * scale,
               width: t.w * scale,
+              transform: t.r ? `rotate(${t.r}deg)` : undefined,
+              transformOrigin: "center",
               pointerEvents: own ? objectPointerEvents : "none",
               cursor: own && draggableMarks ? "grab" : undefined,
               touchAction: own && draggableMarks ? "none" : undefined,
@@ -838,7 +856,7 @@ export default function PageCanvas({
         {stampOwners.map(({ t: s, own }) => (
           <div
             key={s.id}
-            className="absolute -translate-x-1/2 -translate-y-1/2 leading-none"
+            className="absolute leading-none"
             onPointerDown={(e) => { if (beginMarkDrag({ kind: "stamp", id: s.id }, e)) e.stopPropagation(); }}
             onPointerMove={moveMarkDrag}
             onPointerUp={endMarkDrag}
@@ -847,6 +865,9 @@ export default function PageCanvas({
               left: s.x * scale,
               top: s.y * scale,
               fontSize: s.s * scale,
+              // Centred on its point, then turned — one transform, because a
+              // second would replace the first rather than add to it.
+              transform: `translate(-50%, -50%)${s.r ? ` rotate(${s.r}deg)` : ""}`,
               // Only your own stamps take the pointer, and only when the select
               // tool is up — otherwise they stay out of the way of drawing.
               pointerEvents: own && draggableMarks ? "auto" : "none",
@@ -857,6 +878,16 @@ export default function PageCanvas({
             {s.e}
           </div>
         ))}
+
+        {selectedBox && (
+          <MarkSelection
+            box={selectedBox}
+            scale={scale}
+            pageRef={pageRef}
+            onPreview={(op) => setPending(op && selected ? { ref: selected, op } : null)}
+            onCommit={commitSelectionOp}
+          />
+        )}
 
         {comments.map(({ k, own, teacher }, i) => (
           <CommentPin

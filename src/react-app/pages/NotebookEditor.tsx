@@ -20,7 +20,7 @@ import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageL
 import InkToolbar from "../components/InkToolbar";
 import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
-import { emptyLayer, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData } from "../lib/ink";
+import { emptyLayer, markRefAt, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea } from "../components/ui";
@@ -193,6 +193,13 @@ export default function NotebookEditor() {
 
   // ---- master-page annotation mode ----
   const [annotateMode, setAnnotateMode] = useState(false);
+  /**
+   * The mark a press outside annotate mode landed on, handed to the editor that
+   * opens because of it. Reaching for an annotation *is* asking to work on it,
+   * so the alternative — a press that appears to do nothing until you find the
+   * Annotate button yourself — is just a worse way of saying yes.
+   */
+  const [pendingMark, setPendingMark] = useState<MarkRef | null>(null);
   const [inkTool, setInkTool] = useState<ToolState>({
     kind: "pen", color: TEACHER_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14, erase: "quick",
   });
@@ -896,7 +903,7 @@ export default function NotebookEditor() {
           <Button
             variant="secondary"
             data-tour="nb-annotate"
-            onClick={() => { setTool("none"); setAnnotateMode((v) => !v); }}
+        onClick={() => { setTool("none"); setPendingMark(null); setAnnotateMode((v) => !v); }}
             aria-pressed={annotateMode}
             className={cn(annotateMode && "border-pine bg-pine text-oat hover:bg-pine")}
           >
@@ -1281,6 +1288,7 @@ export default function NotebookEditor() {
                     tool={inkTool}
                     fingerDraw={inkFingerDraw}
                     fieldsEditable={false}
+                    initialSelection={pendingMark}
                   />
                 ) : (
                   <>
@@ -1323,6 +1331,15 @@ export default function NotebookEditor() {
                         setTool("none");
                       }}
                       onCommit={(id, rect) => updateField.mutate({ id, ...rect })}
+                      onEmptyPress={({ x, y }) => {
+                        const ref = markRefAt(annotationLayer, x, y, 6 / scale);
+                        if (!ref) return false;
+                        setSelectedField(null);
+                        setInkTool((t) => ({ ...t, kind: "select" }));
+                        setPendingMark(ref);
+                        setAnnotateMode(true);
+                        return true;
+                      }}
                     />
                   </>
                 )}
@@ -1720,7 +1737,7 @@ function AppearancePopover({
 
 /** Drag-to-create and drag-to-move overlay for form fields. */
 function FieldLayer({
-  pageWidth, pageHeight, scale, fields, tool, selected, onSelect, onCreate, onCommit,
+  pageWidth, pageHeight, scale, fields, tool, selected, onSelect, onCreate, onCommit, onEmptyPress,
 }: {
   pageWidth: number;
   pageHeight: number;
@@ -1731,6 +1748,11 @@ function FieldLayer({
   onSelect: (id: string | null) => void;
   onCreate: (rect: { x: number; y: number; w: number; h: number }) => void;
   onCommit: (id: string, rect: { x: number; y: number; w: number; h: number }) => void;
+  /**
+   * Offered a press that would otherwise just clear the field selection.
+   * Returns true when something below claimed it — today, an annotation.
+   */
+  onEmptyPress?: (p: { x: number; y: number }) => boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -1750,7 +1772,11 @@ function FieldLayer({
   const start = useRef<{ x: number; y: number } | null>(null);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (tool === "none") { onSelect(null); return; }
+    if (tool === "none") {
+      if (onEmptyPress?.(toPage(e))) { e.preventDefault(); return; }
+      onSelect(null);
+      return;
+    }
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const p = toPage(e);

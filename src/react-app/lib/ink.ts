@@ -34,6 +34,15 @@ export interface TextBox {
   s: number;
   c: string;
   v: string;
+  /**
+   * Rotation in degrees about the box's own centre, absent when upright.
+   *
+   * Strokes need no such field — a rotation is baked into their points, which
+   * is exactly as faithful and costs nothing to draw. A text box and a stamp
+   * are DOM elements whose glyphs cannot be rewritten that way, so for those
+   * two the angle is stored and applied at paint time.
+   */
+  r?: number;
   ts?: number;
 }
 
@@ -45,6 +54,8 @@ export interface Stamp {
   s: number;
   /** the emoji itself */
   e: string;
+  /** Rotation in degrees about the stamp's centre, absent when upright. */
+  r?: number;
   ts?: number;
 }
 
@@ -115,8 +126,8 @@ const packStroke = (st: Stroke) => ({
 export function serializeDelta(layer: LayerData, from: number) {
   return {
     s: layer.s.slice(from).map(packStroke),
-    x: layer.x.map((t) => ({ ...t, x: r1(t.x), y: r1(t.y), w: r1(t.w), s: r1(t.s) })),
-    e: layer.e.map((s) => ({ ...s, x: r1(s.x), y: r1(s.y), s: r1(s.s) })),
+    x: layer.x.map((t) => ({ ...t, x: r1(t.x), y: r1(t.y), w: r1(t.w), s: r1(t.s), ...(t.r ? { r: r1(t.r) } : {}) })),
+    e: layer.e.map((s) => ({ ...s, x: r1(s.x), y: r1(s.y), s: r1(s.s), ...(s.r ? { r: r1(s.r) } : {}) })),
     c: layer.c.map((k) => ({ ...k, x: r1(k.x), y: r1(k.y) })),
   };
 }
@@ -133,8 +144,8 @@ export function serializeLayer(layer: LayerData): string {
       // named here or it is silently dropped on the next save.
       ...(st.ts ? { ts: st.ts } : {}),
     })),
-    x: layer.x.map((t) => ({ ...t, x: r1(t.x), y: r1(t.y), w: r1(t.w), s: r1(t.s) })),
-    e: layer.e.map((s) => ({ ...s, x: r1(s.x), y: r1(s.y), s: r1(s.s) })),
+    x: layer.x.map((t) => ({ ...t, x: r1(t.x), y: r1(t.y), w: r1(t.w), s: r1(t.s), ...(t.r ? { r: r1(t.r) } : {}) })),
+    e: layer.e.map((s) => ({ ...s, x: r1(s.x), y: r1(s.y), s: r1(s.s), ...(s.r ? { r: r1(s.r) } : {}) })),
     c: layer.c.map((k) => ({ ...k, x: r1(k.x), y: r1(k.y) })),
   });
 }
@@ -383,4 +394,192 @@ export function markAt(layer: LayerData, x: number, y: number, radius: number): 
     return { kind: st.t === "h" ? "highlight" : "stroke", ts: st.ts };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Selecting and reshaping one mark
+// ---------------------------------------------------------------------------
+
+/** Which mark a selection or a drag is holding. Strokes have no id, so they go by index. */
+export type MarkRef =
+  | { kind: "stroke"; index: number }
+  | { kind: "text"; id: string }
+  | { kind: "stamp"; id: string };
+
+/**
+ * A mark's box in page units: the upright rectangle plus the angle it is turned
+ * through, about its own centre. Everything the selection UI draws and every
+ * drag it interprets is expressed in these terms.
+ */
+export interface MarkBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** degrees */
+  rot: number;
+}
+
+/** How tall a text box renders, given how many lines it holds. */
+export const textHeight = (t: TextBox) =>
+  Math.max(t.s * 1.5, ((t.v.match(/\n/g)?.length ?? 0) + 1) * t.s * 1.3);
+
+function strokeBox(st: Stroke): MarkBox {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i + 2 < st.p.length; i += 3) {
+    if (st.p[i] < minX) minX = st.p[i];
+    if (st.p[i] > maxX) maxX = st.p[i];
+    if (st.p[i + 1] < minY) minY = st.p[i + 1];
+    if (st.p[i + 1] > maxY) maxY = st.p[i + 1];
+  }
+  if (!Number.isFinite(minX)) return { x: 0, y: 0, w: 0, h: 0, rot: 0 };
+  // The nib has width, so the ink reaches half of it past the centre line on
+  // every side. A box drawn on the centre line clips the stroke it is holding.
+  const pad = st.w / 2;
+  return { x: minX - pad, y: minY - pad, w: maxX - minX + st.w, h: maxY - minY + st.w, rot: 0 };
+}
+
+/** The box around one mark, or null if the ref points at nothing. */
+export function markBox(layer: LayerData, ref: MarkRef): MarkBox | null {
+  if (ref.kind === "stroke") {
+    const st = layer.s[ref.index];
+    return st ? strokeBox(st) : null;
+  }
+  if (ref.kind === "text") {
+    const t = layer.x.find((b) => b.id === ref.id);
+    return t ? { x: t.x, y: t.y, w: t.w, h: textHeight(t), rot: t.r ?? 0 } : null;
+  }
+  const st = layer.e.find((b) => b.id === ref.id);
+  // Stamps are drawn centred on their point, so the box is built outwards.
+  return st ? { x: st.x - st.s / 2, y: st.y - st.s / 2, w: st.s, h: st.s, rot: st.r ?? 0 } : null;
+}
+
+/** Rotate (x, y) about (cx, cy). `cos`/`sin` are passed in so a loop computes them once. */
+const spin = (x: number, y: number, cx: number, cy: number, cos: number, sin: number) => ({
+  x: cx + (x - cx) * cos - (y - cy) * sin,
+  y: cy + (x - cx) * sin + (y - cy) * cos,
+});
+
+/**
+ * The topmost mark under a point that can be picked up, or null.
+ *
+ * Distinct from `markAt`, which answers "what is this?" for the history
+ * tooltip: this one answers "which one do I now hold?", so it returns a
+ * reference rather than a description and it ignores comment pins, which are
+ * their own openable objects rather than something to drag a handle on.
+ */
+export function markRefAt(layer: LayerData, x: number, y: number, radius: number): MarkRef | null {
+  for (let i = layer.e.length - 1; i >= 0; i--) {
+    const st = layer.e[i];
+    // Un-turn the point rather than the stamp: a rotated box is a plain box
+    // seen from an angle.
+    const a = (-(st.r ?? 0) * Math.PI) / 180;
+    const p = spin(x, y, st.x, st.y, Math.cos(a), Math.sin(a));
+    if (Math.abs(st.x - p.x) <= st.s / 2 && Math.abs(st.y - p.y) <= st.s / 2) return { kind: "stamp", id: st.id };
+  }
+  for (let i = layer.x.length - 1; i >= 0; i--) {
+    const t = layer.x[i];
+    const h = textHeight(t);
+    const a = (-(t.r ?? 0) * Math.PI) / 180;
+    const p = spin(x, y, t.x + t.w / 2, t.y + h / 2, Math.cos(a), Math.sin(a));
+    if (p.x >= t.x && p.x <= t.x + t.w && p.y >= t.y && p.y <= t.y + h) return { kind: "text", id: t.id };
+  }
+  const si = hitStroke(layer.s, x, y, radius);
+  return si >= 0 ? { kind: "stroke", index: si } : null;
+}
+
+/**
+ * One reshaping of one mark.
+ *
+ * `scale` carries the box's own angle so the stretch happens along the box's
+ * axes rather than the page's — dragging the side handle of a mark turned 30°
+ * must widen it along its own width, not the page's.
+ */
+export type MarkOp =
+  | { kind: "move"; dx: number; dy: number }
+  | { kind: "scale"; ax: number; ay: number; fx: number; fy: number; rot: number }
+  | { kind: "rotate"; cx: number; cy: number; deg: number };
+
+/**
+ * Apply an operation to one mark, leaving the rest of the layer alone.
+ *
+ * Returns a new layer, so the same call serves both the live preview during a
+ * drag and the single committed change at the end of one.
+ */
+export function transformMark(layer: LayerData, ref: MarkRef, op: MarkOp): LayerData {
+  // A point mover in page units, plus the factor a length grows by, are all
+  // any of the three marks needs — the rest is bookkeeping per mark kind.
+  let movePoint: (x: number, y: number) => { x: number; y: number };
+  let growX = 1;
+  let growY = 1;
+  let turn = 0;
+
+  if (op.kind === "move") {
+    movePoint = (x, y) => ({ x: x + op.dx, y: y + op.dy });
+  } else if (op.kind === "rotate") {
+    const a = (op.deg * Math.PI) / 180;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    movePoint = (x, y) => spin(x, y, op.cx, op.cy, cos, sin);
+    turn = op.deg;
+  } else {
+    const a = (op.rot * Math.PI) / 180;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    growX = op.fx;
+    growY = op.fy;
+    // Into the box's own frame, stretch, and back out again.
+    movePoint = (x, y) => {
+      const local = spin(x, y, op.ax, op.ay, cos, -sin);
+      return spin(op.ax + (local.x - op.ax) * op.fx, op.ay + (local.y - op.ay) * op.fy, op.ax, op.ay, cos, sin);
+    };
+  }
+
+  if (ref.kind === "stroke") {
+    const grow = (Math.abs(growX) + Math.abs(growY)) / 2;
+    return {
+      ...layer,
+      s: layer.s.map((st, i) => {
+        if (i !== ref.index) return st;
+        const p = st.p.slice();
+        // A flat [x, y, pressure, ...] run: move the first two of every triple
+        // and leave pressure be.
+        for (let j = 0; j + 2 < p.length; j += 3) {
+          const moved = movePoint(p[j], p[j + 1]);
+          p[j] = moved.x;
+          p[j + 1] = moved.y;
+        }
+        return { ...st, p, w: grow === 1 ? st.w : Math.max(0.3, st.w * grow) };
+      }),
+    };
+  }
+
+  if (ref.kind === "text") {
+    return {
+      ...layer,
+      x: layer.x.map((t) => {
+        if (t.id !== ref.id) return t;
+        const h = textHeight(t);
+        const c = movePoint(t.x + t.w / 2, t.y + h / 2);
+        const w = Math.max(24, t.w * Math.abs(growX));
+        // The font follows the box's height; widening alone just rewraps.
+        const size = Math.max(6, t.s * Math.abs(growY));
+        const grown = { ...t, w, s: size, r: (t.r ?? 0) + turn };
+        const gh = textHeight(grown);
+        return { ...grown, x: c.x - w / 2, y: c.y - gh / 2, ...((grown.r % 360) === 0 ? { r: undefined } : {}) };
+      }),
+    };
+  }
+
+  return {
+    ...layer,
+    e: layer.e.map((st) => {
+      if (st.id !== ref.id) return st;
+      const c = movePoint(st.x, st.y);
+      // A stamp is one glyph and stays square, so it takes a single factor.
+      const grow = (Math.abs(growX) + Math.abs(growY)) / 2;
+      const r = (st.r ?? 0) + turn;
+      return { ...st, x: c.x, y: c.y, s: Math.max(6, st.s * grow), r: r % 360 === 0 ? undefined : r };
+    }),
+  };
 }
