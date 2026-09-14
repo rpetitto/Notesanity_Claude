@@ -84,7 +84,7 @@ const BODY = () => `
         "Who can create an account?",
         `Only addresses on a domain your school has approved. The first person to sign in sets
          the school up; after that an admin decides which domains count as staff and which as
-         students, under <b>Settings</b>.`,
+         students, from the <b>Admin</b> page.`,
       ],
     ])}
 
@@ -235,6 +235,14 @@ const BODY = () => `
     ])}
 
     ${group("Accounts and data", [
+      [
+        "How do I manage my school's settings and people?",
+        `From the <b>Admin</b> page, if you're a school admin — it's in the navigation once you
+         have admin rights. It covers your approved sign-in domains, everyone at your school,
+         your sign-in email delivery, and a read-only look at your school's notebooks,
+         assignments and grades. It only shows your own school — an admin can't see another
+         school's people or work.`,
+      ],
       [
         "Who can see a student's work?",
         `The student, and the teachers of the class it belongs to. Not other students. Personal

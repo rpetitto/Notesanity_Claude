@@ -38,6 +38,15 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 14, 2026",
+    "A real admin panel for school admins, and a couple of places another school shouldn't have been visible.",
+    [
+      ["new", "<b>School admins now have their own admin panel.</b> Open Admin from Settings to manage your people, see your sign-in email delivery, and look over your school's notebooks, assignments and grades — without needing platform-wide access."],
+      ["fixed", "Importing a Google Classroom roster, inviting a student by email, or adding a co-teacher by email could silently pull in someone who already had an account at a different school. Those cases are now called out by name instead."],
+      ["fixed", "A school admin's sign-in email log showed activity from every school on the platform, not just their own. It's scoped to your school now."],
+    ],
+  ],
+  [
     "September 13, 2026",
     "A clearer grading screen, real undo on a notebook, and a way back out of a mistake.",
     [
