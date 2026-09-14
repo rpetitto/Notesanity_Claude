@@ -862,3 +862,83 @@ migrate("026_page_library", async () => {
   `).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_library_owner ON library_pages(owner_id, created_at)`).run();
 });
+
+/**
+ * Plans, seats and the Stripe bookkeeping behind them. (027 is reserved for
+ * the ink cleanup that follows 025 by a deploy.)
+ *
+ * Every entitlement hangs off a school, even a single teacher's Pro — the
+ * buyer's org — so the superadmin grid and every org-scoped query need one
+ * join, not two. A Department is a subscription with twenty seats the school's
+ * admin hands out; a School has none, because it covers everyone. Comps are
+ * subscriptions too, with `provider = 'comp'` and the audit fields that are
+ * the whole reason comping is an endpoint rather than a grid edit.
+ *
+ * Seats are never deleted by a webhook. Whether a seat entitles is decided by
+ * its subscription's status, so a lapsed card doesn't quietly erase who the
+ * school chose — it comes back the day the card does.
+ */
+migrate("028_billing", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      plan TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      seat_count INTEGER,
+      owner_user_id TEXT,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      stripe_price_id TEXT,
+      current_period_end TEXT,
+      cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+      comped_by TEXT,
+      comped_reason TEXT,
+      expires_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      ended_at TEXT
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_subscriptions_org ON subscriptions(org_id, status)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe ON subscriptions(stripe_subscription_id)`).run();
+
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS plan_seats (
+      id TEXT PRIMARY KEY,
+      subscription_id TEXT NOT NULL,
+      org_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      granted_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(subscription_id, user_id)
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_plan_seats_user ON plan_seats(user_id)`).run();
+
+  // One Stripe customer per person, made lazily on first checkout. Its own
+  // table rather than a column on users, so billing stays a set of files.
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS billing_customers (
+      user_id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      stripe_customer_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    )
+  `).run();
+
+  // Keyed by Stripe's own event id: that is the idempotency guarantee.
+  // `processed_at` stays NULL until the re-fetch and upsert succeeded, so a
+  // redelivery of an event that failed is re-run rather than skipped.
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS billing_events (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      received_at TEXT NOT NULL,
+      processed_at TEXT,
+      error TEXT
+    )
+  `).run();
+});

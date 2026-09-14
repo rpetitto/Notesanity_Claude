@@ -251,6 +251,12 @@ const BODY = () => `
          school's people or work.`,
       ],
       [
+        "Is there a limit on how many notebooks I can make?",
+        `Not during the beta. When paid plans arrive, the Free plan will allow ten class notebooks at
+         a time — archived ones don't count, nothing is ever deleted, and you'll have a full
+         semester's notice first. See <a href="/pricing">pricing</a> for what's coming.`,
+      ],
+      [
         "Who can see a student's work?",
         `The student, and the teachers of the class it belongs to. Not other students. Personal
          notebooks are visible only to the student who made them.`,

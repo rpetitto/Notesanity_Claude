@@ -20,7 +20,12 @@
   // app, and there is no corresponding secret to protect: sign-in verifies
   // Google's signature instead of exchanging a code.
   "vars": {
-    "GOOGLE_CLIENT_ID": "781612697082-2gddfu860fdrotddhm3dgjfsuaqetudu.apps.googleusercontent.com"
+    "GOOGLE_CLIENT_ID": "781612697082-2gddfu860fdrotddhm3dgjfsuaqetudu.apps.googleusercontent.com",
+    // A Stripe price id is public by design — it appears in every Checkout
+    // URL — and has no secret to protect. The secret key and the webhook
+    // secret are secrets and never appear here (see CLAUDE.md). This is the
+    // test-mode id until launch; the launch commit swaps in the live one.
+    "STRIPE_PRICE_PRO": "price_REPLACE_WITH_TEST_MODE_ID"
   },
 
   // The built SPA is served straight from the edge; only /api/* reaches the

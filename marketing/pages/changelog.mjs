@@ -41,6 +41,7 @@ const RELEASES = [
     "September 14, 2026",
     "A page library, a real admin panel for school admins, and a couple of places another school shouldn't have been visible.",
     [
+      ["new", "<b>Pricing is published.</b> Free, Pro, Department and School are on the <a href=\"/pricing\">pricing page</a> now, with the real prices shown — and everything stays free for everyone while we're in beta. When that changes, schools get a full semester's notice first."],
       ["new", "<b>Save a page to your library and use it again.</b> Any page — the Monday warm-up, a lab write-up frame, an exit ticket — can be saved from the page list, then dropped into any other notebook from <b>Add pages</b> &rarr; <b>Page library</b>. Its answer boxes and your own markup come with it. The saved copy is independent: editing or even deleting the notebook it came from leaves it untouched."],
       ["new", "<b>School admins now have their own admin panel.</b> Open Admin from Settings to manage your people, see your sign-in email delivery, and look over your school's notebooks, assignments and grades — without needing platform-wide access."],
       ["fixed", "Importing a Google Classroom roster, inviting a student by email, or adding a co-teacher by email could silently pull in someone who already had an account at a different school. Those cases are now called out by name instead."],

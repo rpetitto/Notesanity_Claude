@@ -30,6 +30,7 @@ const INTERESTS = [
   "Using Notesanity in my classroom",
   "Rolling it out across a school",
   "Rolling it out across a district",
+  "A quote for a Department or School plan",
   "Privacy, security or a signed agreement",
   "Help with something I'm stuck on",
   "Feedback or a feature request",

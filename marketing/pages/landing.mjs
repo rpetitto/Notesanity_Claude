@@ -1,4 +1,5 @@
 import { layout } from "../layout.mjs";
+import { BETA_FREE } from "../../src/shared/plans.mjs";
 
 /**
  * The landing page.
@@ -289,8 +290,9 @@ ${HERO_CSS}
         <a class="btn" href="/help">See how it works</a>
       </p>
       <p class="small quiet">
-        <span class="beta">Beta</span>
-        &nbsp;Free for every school while we're in beta — see <a href="/pricing">pricing</a>.
+        ${BETA_FREE
+          ? `<span class="beta">Beta</span>&nbsp;Free for every school while we're in beta — see <a href="/pricing">pricing</a>.`
+          : `Free to start, Pro for one teacher, plans for a whole school — see <a href="/pricing">pricing</a>.`}
       </p>
     </div>
     ${HERO_ART}
@@ -364,10 +366,13 @@ ${STEPS_CSS}
 <section>
   <div class="wrap">
     <div class="card" style="background:var(--mint)">
-      <h2 style="margin-bottom:10px">Free for your whole school while we're in beta.</h2>
+      <h2 style="margin-bottom:10px">${BETA_FREE
+        ? "Free for your whole school while we're in beta."
+        : "Free to start. Simple plans when you're ready."}</h2>
       <p style="margin-bottom:20px">
-        No card, no seat count, no trial clock. We're building this with teachers, and the
-        fastest way to help is to use it and tell us what breaks.
+        ${BETA_FREE
+          ? "No card, no seat count, no trial clock. We're building this with teachers, and the fastest way to help is to use it and tell us what breaks."
+          : "One teacher can start today for nothing. A department or a whole school buys on an invoice, and we switch it on."}
       </p>
       <p style="margin:0;display:flex;gap:12px;flex-wrap:wrap">
         <a class="btn" href="/?signin=1">Start free</a>

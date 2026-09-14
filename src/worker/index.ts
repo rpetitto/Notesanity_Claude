@@ -22,6 +22,8 @@ import "./routes/assignments";
 import "./routes/admin";
 import "./routes/org-admin";
 import "./routes/page-library";
+import "./routes/billing";
+import "./routes/billing-webhooks";
 import "./routes/status";
 import "./routes/contact";
 import { drainMailQueue } from "./lib/mailqueue";

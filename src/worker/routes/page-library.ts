@@ -22,6 +22,7 @@ import { handler, now, uid, requireTeacher, HttpError, param } from "../lib/sess
 import {
   MAX_LIBRARY_PAGES, libraryAssetKey, libraryMediaKey, type LibraryField,
 } from "../lib/page-library";
+import { requirePlan } from "../lib/plans";
 
 async function ownedEntry(userId: string, id: string) {
   const row = await db
@@ -35,6 +36,7 @@ async function ownedEntry(userId: string, id: string) {
 /** What's in my library, newest first — everything a thumbnail needs to render. */
 app.get("/api/my/page-library", handler(async (c) => {
   const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
   const rows = await db
     .prepare(
       `SELECT id, title, asset_key <> '' AS has_asset, source_index, width, height,
@@ -56,6 +58,7 @@ app.get("/api/my/page-library", handler(async (c) => {
  */
 app.get("/api/my/page-library/:id/asset", handler(async (c) => {
   const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
   const entry = await ownedEntry(user.id, param(c, "id"));
   if (!entry.asset_key) throw new HttpError(404, "That page has no document behind it");
   const obj = await storage.get(entry.asset_key);
@@ -71,6 +74,7 @@ app.get("/api/my/page-library/:id/asset", handler(async (c) => {
 /** Save one of my notebook's pages into my library. */
 app.post("/api/my/page-library", handler(async (c) => {
   const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
   const body = await c.req.json<{ notebookId?: string; pageId?: string; title?: string }>();
 
   const nb = await db
@@ -156,6 +160,7 @@ app.post("/api/my/page-library", handler(async (c) => {
 /** Rename an entry — `label` is often empty, and a library of "Untitled page" is not a library. */
 app.patch("/api/my/page-library/:id", handler(async (c) => {
   const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
   const entry = await ownedEntry(user.id, param(c, "id"));
   const { title } = await c.req.json<{ title?: string }>();
   const clean = (title ?? "").trim().slice(0, 120);
@@ -167,6 +172,7 @@ app.patch("/api/my/page-library/:id", handler(async (c) => {
 /** Take a page back out, and its bytes with it once nothing else needs them. */
 app.delete("/api/my/page-library/:id", handler(async (c) => {
   const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
   const entry = await ownedEntry(user.id, param(c, "id"));
   await db.prepare(`DELETE FROM library_pages WHERE id = ?`).bind(entry.id).run();
 

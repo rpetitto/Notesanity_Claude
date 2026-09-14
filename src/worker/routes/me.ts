@@ -1,10 +1,27 @@
 import { app, db } from "../platform";
+import { billingConfigured } from "../platform/billing";
+import { BETA_FREE, PLANS } from "../../shared/plans.mjs";
 import { currentUser, handler, now, requireUser, HttpError, activeImpersonation } from "../lib/session";
+import { planForUser, notebookQuota, departmentFor, requirePlan } from "../lib/plans";
 
 /** Who am I? Returns null (200) when signed out so the client can show the landing page. */
 app.get("/api/me", handler(async (c) => {
   const user = await currentUser(c);
   if (!user) return c.json({ user: null });
+
+  // What they really have, and what that means today. The Settings card shows
+  // the real tier; `beta` is what tells it every gate is currently open.
+  const plan = await planForUser(user);
+  const quota = await notebookQuota(user, plan);
+  const customer = await db
+    .prepare(`SELECT 1 FROM billing_customers WHERE user_id = ?`)
+    .bind(user.id)
+    .first();
+  const department = user.is_admin ? await departmentFor(user.org_id) : null;
+  const seatsUsed = department
+    ? (await db.prepare(`SELECT COUNT(*) AS n FROM plan_seats WHERE subscription_id = ?`)
+        .bind(department.id).first<{ n: number }>())?.n ?? 0
+    : 0;
   const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id).first<any>();
   // Tours ride along with the session rather than being fetched separately. A
   // guide that arrives a moment after the screen does is a guide that pops up
@@ -34,6 +51,21 @@ app.get("/api/me", handler(async (c) => {
     },
     org: org ? { name: org.name, primaryDomain: org.primary_domain } : null,
     impersonating,
+    plan: {
+      tier: plan.tier,
+      source: plan.source,
+      label: PLANS[plan.source].label,
+      beta: BETA_FREE,
+      quota,
+      renewsAt: plan.renewsAt,
+      cancelAtPeriodEnd: plan.cancelAtPeriodEnd,
+      canUpgrade: !BETA_FREE && plan.tier === "free" && user.role === "teacher" && billingConfigured(),
+      hasPortal: !!customer,
+      seats: department ? { used: seatsUsed, total: department.seat_count ?? 0 } : null,
+      prices: {
+        pro: PLANS.pro.priceCents, department: PLANS.department.priceCents, school: PLANS.school.priceCents,
+      },
+    },
   });
 }));
 
@@ -160,6 +192,7 @@ app.get("/api/org/users", handler(async (c) => {
 app.get("/api/org/overview", handler(async (c) => {
   const user = await requireUser(c);
   if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  await requirePlan(user, "school", "School-wide oversight");
   const one = async (sql: string, ...params: unknown[]) =>
     (await db.prepare(sql).bind(...params).first<{ n: number }>())?.n ?? 0;
   return c.json({
@@ -211,6 +244,7 @@ export const touchedAt = now;
 app.get("/api/org/mail", handler(async (c) => {
   const user = await requireUser(c);
   if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  await requirePlan(user, "school", "School-wide oversight");
   const rows = await db
     .prepare(`SELECT address, kind, status, detail, created_at FROM mail_log WHERE org_id = ? ORDER BY created_at DESC LIMIT 50`)
     .bind(user.org_id)

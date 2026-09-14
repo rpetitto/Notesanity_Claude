@@ -1,3 +1,5 @@
+import { BETA_FREE, PLANS, dollars } from "../src/shared/plans.mjs";
+
 /**
  * The shell every marketing page is rendered into.
  *
@@ -180,13 +182,23 @@ const SITE_SCHEMA = `<script type="application/ld+json">${JSON.stringify({
         "Google sign-in, email sign-in links and passwords",
         "FERPA and COPPA-aware handling of student data",
       ],
-      offers: {
-        "@type": "Offer",
-        price: "0",
-        priceCurrency: "USD",
-        description: "Free for every teacher, class and school during the beta.",
-        availability: "https://schema.org/InStock",
-      },
+      // Structured data says what's true today: one free offer during the beta,
+      // the published plans after it. Same switch as the pricing page.
+      offers: BETA_FREE
+        ? {
+            "@type": "Offer",
+            price: "0",
+            priceCurrency: "USD",
+            description: `Free for every teacher, class and school during the beta. Pro, Department and School plans are published at ${dollars(PLANS.pro.priceCents)}, ${dollars(PLANS.department.priceCents)} and ${dollars(PLANS.school.priceCents)} a year.`,
+            availability: "https://schema.org/InStock",
+          }
+        : ["free", "pro", "department", "school"].map((key) => ({
+            "@type": "Offer",
+            name: PLANS[key].label,
+            price: String(PLANS[key].priceCents / 100),
+            priceCurrency: "USD",
+            availability: "https://schema.org/InStock",
+          })),
     },
   ],
 })}</script>`;

@@ -16,11 +16,12 @@
 
 import { app, db } from "../platform";
 import {
-  HttpError, handler, now, param, requireUser, uid,
+  HttpError, handler, now, param, requireUser, uid, findUserInOrg,
   IMPERSONATE_MINUTES, setImpersonateCookie, clearImpersonateCookie, activeImpersonation,
 } from "../lib/session";
 import { SUPERADMIN_EMAILS } from "../schema";
 import { page } from "../lib/paging";
+import { PLANS, type PlanKey } from "../../shared/plans.mjs";
 
 export async function requireSuperadmin(c: any) {
   const user = await requireUser(c);
@@ -70,11 +71,74 @@ app.get("/api/admin/orgs", handler(async (c) => {
   return page(c, {
     select: `o.id, o.name, o.primary_domain, o.teacher_domains, o.student_domains, o.created_at,
              (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id) AS users,
-             (SELECT COUNT(*) FROM classes c2 WHERE c2.org_id = o.id) AS classes`,
+             (SELECT COUNT(*) FROM classes c2 WHERE c2.org_id = o.id) AS classes,
+             (SELECT s.plan FROM subscriptions s
+               WHERE s.org_id = o.id AND s.plan IN ('school', 'department')
+                 AND s.status IN ('active', 'trialing', 'past_due')
+                 AND (s.expires_at IS NULL OR s.expires_at > ?)
+               ORDER BY CASE s.plan WHEN 'school' THEN 0 ELSE 1 END LIMIT 1) AS plan`,
+    selectParams: [now()],
     from: `orgs o`,
     searchable: ["o.name", "o.primary_domain"],
     order: `o.created_at DESC`,
   });
+}));
+
+/**
+ * Switch a school's plan on by hand — the whole of the invoice/PO path.
+ *
+ * An endpoint rather than a grid edit because it writes an audit trail: who
+ * comped it, why, and until when. A comped row entitles exactly as a paid one
+ * does; `plan: "free"` ends whatever comp is running.
+ */
+app.post("/api/admin/orgs/:id/plan", handler(async (c) => {
+  const actor = await requireSuperadmin(c);
+  const orgId = param(c, "id");
+  const body = await c.req.json<{ plan?: string; reason?: string; expiresAt?: string; seatEmail?: string }>();
+  const plan = String(body.plan ?? "") as PlanKey;
+  if (!(plan in PLANS)) throw new HttpError(400, "Unknown plan");
+  const reason = (body.reason ?? "").trim();
+  if (!reason) throw new HttpError(400, "Say why — it goes on the record.");
+  const org = await db.prepare(`SELECT id FROM orgs WHERE id = ?`).bind(orgId).first();
+  if (!org) throw new HttpError(404, "School not found");
+
+  const ts = now();
+  // One comp at a time per school: the new one replaces whatever was running.
+  await db
+    .prepare(
+      `UPDATE subscriptions SET status = 'canceled', ended_at = ?, updated_at = ?
+        WHERE org_id = ? AND provider = 'comp' AND status = 'active'`,
+    )
+    .bind(ts, ts, orgId)
+    .run();
+  if (plan === "free") return c.json({ ok: true, plan });
+
+  const expiresAt = body.expiresAt ? new Date(body.expiresAt).toISOString() : null;
+  const id = uid();
+  await db
+    .prepare(
+      `INSERT INTO subscriptions
+         (id, org_id, plan, status, provider, seat_count, comped_by, comped_reason, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'active', 'comp', ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, orgId, plan, PLANS[plan].seats, actor.id, reason, expiresAt, ts, ts)
+    .run();
+
+  // A comped Pro is one person's; the address says whose.
+  if (plan === "pro") {
+    const email = (body.seatEmail ?? "").trim().toLowerCase();
+    if (!email) throw new HttpError(400, "A Pro comp needs the teacher's email");
+    const holder = await findUserInOrg(email, orgId);
+    if (!holder) throw new HttpError(404, "No account with that email at this school");
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO plan_seats (id, subscription_id, org_id, user_id, granted_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(uid(), id, orgId, holder.id, actor.id, ts)
+      .run();
+  }
+  return c.json({ ok: true, plan, id, seats: PLANS[plan].seats });
 }));
 
 app.post("/api/admin/orgs", handler(async (c) => {

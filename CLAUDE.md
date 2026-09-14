@@ -12,7 +12,8 @@ vendor any more.
 
 ```
 src/worker/        the API (Hono) and the platform layer over Cloudflare bindings
-src/worker/platform/   db, storage, email, cron, migrations — the seam over the bindings
+src/worker/platform/   db, storage, email, billing, cron, migrations — the seam over the bindings
+src/shared/        constants the worker, the SPA and the marketing build all read (plans, the beta switch)
 src/react-app/     the SPA
 marketing/         the static marketing pages (landing, help, pricing, terms, privacy, status)
 scripts/           build and one-off migration tooling
@@ -32,11 +33,15 @@ npm run dev:ui     vite with HMR, proxying /api to wrangler on 8787
 npm run build      builds the SPA and renders the marketing pages
 npm run deploy     build then deploy
 npx wrangler d1 execute notesanity --remote --command "SELECT ..."
+npx wrangler secret put STRIPE_SECRET_KEY        Stripe; also STRIPE_WEBHOOK_SECRET (test mode until launch)
+npx wrangler secret put AWS_ACCESS_KEY_ID        SES, if switching mail off Cloudflare; also AWS_SECRET_ACCESS_KEY
 ```
 
 Deploying needs Cloudflare credentials in `.cf-credentials` (gitignored):
 `. ./.cf-credentials` first. If that token has been revoked, ask rather than
-working around it.
+working around it. Worker secrets go in with `wrangler secret put` and never in
+`wrangler.jsonc`; locally they live in `.dev.vars` (gitignored) under the same
+names.
 
 ## Things worth knowing before changing them
 
@@ -44,9 +49,16 @@ working around it.
   of them mutate data rather than schema, so never let them run against a
   database that was populated some other way — see the comment in
   `scripts/export-fling.mjs`, which explains both ways to get that wrong.
-- **Ink is chunked.** A page's strokes are split across `layer_chunks` rows of
-  twenty so an append rewrites one chunk, not the page. `layers.data` is chunk 0
-  and also holds text, stamps and comments.
+- **Ink lives in R2, not D1.** A page's strokes are one object per layer under
+  `notebooks/{id}/ink/`; the `layers` row keeps only `rev`, `updated_at` and
+  `byte_length`, which is what lets the roster-wide "who has started" queries
+  stay one query each. Every asset a notebook owns sits under its own prefix,
+  and deleting the notebook sweeps that prefix — so nothing else may point into
+  it (the page library copies bytes out for exactly this reason).
+- **The beta switch is `src/shared/plans.mjs`.** The worker's plan gates,
+  Checkout, and the static pricing page all read it. While `BETA_FREE` is true
+  no gate refuses anything and prices render struck through. Flip it in one
+  deliberate commit, a full semester after the notice the pricing page promises.
 - **The root path is decided in the Worker.** `/` serves the static landing page
   to a visitor and the app to anyone with a session; every other marketing page
   is a static file and never reaches the Worker.

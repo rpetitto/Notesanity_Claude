@@ -4,6 +4,7 @@ import {
 import { sanitizeRichText } from "../lib/richtext";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import type { LibraryField } from "../lib/page-library";
+import { requireNotebookRoom, requirePlan } from "../lib/plans";
 import { MAX_TEMPLATE_PAGES, TEMPLATES, templateFor } from "../lib/templates";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -90,6 +91,7 @@ function requireNotebookTeacher<T extends { isTeacher: boolean; denied?: string 
 app.post("/api/classes/:id/notebooks", handler(async (c) => {
   const classId = param(c, "id");
   const teacher = await requireClassTeacher(c, classId);
+  await requireNotebookRoom(teacher);
   const form = await c.req.parseBody();
   const file = form["file"] as File | undefined;
   const title = String(form["title"] ?? "").trim();
@@ -104,8 +106,8 @@ app.post("/api/classes/:id/notebooks", handler(async (c) => {
 
   await db
     .prepare(
-      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 'draft', ?, ?)`,
+      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 'draft', 'class', ?, ?)`,
     )
     .bind(notebookId, classId, teacher.id, title || file.name.replace(/\.[^.]+$/, ""), file.name, assetKey, now(), now())
     .run();
@@ -332,6 +334,7 @@ app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
  */
 app.post("/api/notebooks/:id/pages/from-library", handler(async (c) => {
   const { nb, user, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
+  await requirePlan(user, "pro", "The page library");
 
   const body = await c.req.json<{ entryId?: string; insertAfterPageId?: string | null }>();
   const entry = await db
@@ -1132,6 +1135,7 @@ app.get("/api/notebook-templates", handler(async (c) => {
 app.post("/api/classes/:id/notebooks/blank", handler(async (c) => {
   const classId = param(c, "id");
   const teacher = await requireClassTeacher(c, classId);
+  await requireNotebookRoom(teacher);
   const body = await c.req.json<{ title?: string; template?: string; pages?: number; pattern?: string; color?: string }>();
 
   const preset = body.template ? templateFor(body.template) : null;

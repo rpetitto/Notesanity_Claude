@@ -51,6 +51,8 @@ export async function page(
   opts: {
     select: string; from: string; searchable: string[]; order: string;
     scope?: { condition: string; params: unknown[] };
+    /** Bound to `?`s inside `select` itself — the count query has no SELECT list, so they never reach it. */
+    selectParams?: unknown[];
   },
 ) {
   const { limit, offset, q } = paging(c);
@@ -65,7 +67,7 @@ export async function page(
 
   const rows = await db
     .prepare(`SELECT ${opts.select} FROM ${opts.from} ${where} ORDER BY ${opts.order} LIMIT ? OFFSET ?`)
-    .bind(...params, limit, offset)
+    .bind(...(opts.selectParams ?? []), ...params, limit, offset)
     .all<any>();
 
   const counted = await db

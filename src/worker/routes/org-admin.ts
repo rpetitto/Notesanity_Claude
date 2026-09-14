@@ -15,10 +15,17 @@
 import { app } from "../platform";
 import { HttpError, handler, requireUser } from "../lib/session";
 import { page } from "../lib/paging";
+import { requirePlan } from "../lib/plans";
 
+/**
+ * Oversight — reading a school's notebooks, assignments and grades — is what
+ * the School plan buys. Administration (domains, people, seats) stays open to
+ * every admin regardless, because that is how a school's staff sign in at all.
+ */
 async function requireOrgAdmin(c: any) {
   const user = await requireUser(c);
   if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  await requirePlan(user, "school", "School-wide oversight");
   return user;
 }
 

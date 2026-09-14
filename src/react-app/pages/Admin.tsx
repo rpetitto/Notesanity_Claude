@@ -64,6 +64,7 @@ const TABLES: TableSpec[] = [
       { id: "student_domains", title: "Student domains", width: 200, editable: true },
       { id: "users", title: "People", width: 90, kind: "number" },
       { id: "classes", title: "Classes", width: 90, kind: "number" },
+      { id: "plan", title: "Plan", width: 110 },
     ],
   },
   {
@@ -292,6 +293,96 @@ function StartImpersonation() {
   );
 }
 
+/**
+ * Switch a school's plan on by hand — the whole of the invoice/PO path.
+ *
+ * A reason is required because this writes the audit trail; a Pro comp also
+ * needs to know whose it is. Department seats are not chosen here: the school
+ * knows its own department, so its admin hands those out under People.
+ */
+function CompPlan() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [orgId, setOrgId] = useState("");
+  const [plan, setPlan] = useState("school");
+  const [reason, setReason] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [seatEmail, setSeatEmail] = useState("");
+
+  const orgs = useQuery({
+    queryKey: ["admin", "orgs", "picker"],
+    queryFn: () => api.get<{ rows: { id: string; name: string }[] }>(`/api/admin/orgs?limit=500`),
+    enabled: open,
+  });
+
+  const comp = useMutation({
+    mutationFn: () =>
+      api.post<{ plan: string; seats: number | null }>(`/api/admin/orgs/${orgId}/plan`, {
+        plan, reason, expiresAt: expiresAt || undefined, seatEmail: seatEmail || undefined,
+      }),
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["admin", "orgs"] });
+      toast.success(
+        res.plan === "department"
+          ? `Department plan set — ${res.seats} seats. The school's admin assigns them under My School › People.`
+          : res.plan === "free" ? "Plan removed" : `${res.plan} plan set`,
+      );
+      setReason(""); setExpiresAt(""); setSeatEmail(""); setOpen(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!open) {
+    return (
+      <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+        Set a plan
+      </Button>
+    );
+  }
+
+  return (
+    <form
+      className="flex flex-wrap items-end gap-2"
+      onSubmit={(e) => { e.preventDefault(); comp.mutate(); }}
+    >
+      <div>
+        <Label htmlFor="comp-org">School</Label>
+        <Select id="comp-org" value={orgId} onChange={(e) => setOrgId(e.target.value)} className="h-11">
+          <option value="">Choose…</option>
+          {(orgs.data?.rows ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </Select>
+      </div>
+      <div>
+        <Label htmlFor="comp-plan">Plan</Label>
+        <Select id="comp-plan" value={plan} onChange={(e) => setPlan(e.target.value)} className="h-11">
+          <option value="school">School</option>
+          <option value="department">Department (20 seats)</option>
+          <option value="pro">Pro (one teacher)</option>
+          <option value="free">Free — end the comp</option>
+        </Select>
+      </div>
+      {plan === "pro" && (
+        <div>
+          <Label htmlFor="comp-email">Teacher's email</Label>
+          <Input id="comp-email" value={seatEmail} onChange={(e) => setSeatEmail(e.target.value)} placeholder="teacher@school.edu" className="h-11" />
+        </div>
+      )}
+      <div>
+        <Label htmlFor="comp-reason">Reason (goes on the record)</Label>
+        <Input id="comp-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="PO #4821, paid 9/14" className="h-11 w-56" />
+      </div>
+      <div>
+        <Label htmlFor="comp-expires">Until (optional)</Label>
+        <Input id="comp-expires" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} className="h-11" />
+      </div>
+      <Button type="submit" disabled={comp.isPending || !orgId || !reason.trim() || (plan === "pro" && !seatEmail.trim())}>
+        {comp.isPending ? "Saving…" : "Set plan"}
+      </Button>
+      <Button type="button" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
+  );
+}
+
 /** Which base path a grid reads/writes — the superadmin console or one school's own view. */
 type AdminScope = "admin" | "org";
 
@@ -438,7 +529,7 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
           {isFetching && " · updating…"}
         </p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {spec.endpoint === "orgs" && <NewSchool />}
+          {spec.endpoint === "orgs" && <><NewSchool /><CompPlan /></>}
           {spec.endpoint === "impersonations" && <StartImpersonation />}
           <Button
             variant="secondary"
@@ -675,6 +766,25 @@ function OrgUsers() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  // Department seats, if the school has a Department plan to hand out.
+  const seats = useQuery({
+    queryKey: ["org-seats"],
+    queryFn: () => api.get<{ department: { total: number; used: number; holders: string[] } | null }>("/api/org/seats"),
+  });
+  const department = seats.data?.department ?? null;
+  const holders = new Set(department?.holders ?? []);
+  const seat = useMutation({
+    mutationFn: ({ id, give }: { id: string; give: boolean }) =>
+      give ? api.put(`/api/org/seats/${id}`) : api.del(`/api/org/seats/${id}`),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["org-seats"] }),
+        qc.invalidateQueries({ queryKey: ["me"] }),
+      ]);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   if (isLoading) return <Spinner />;
   if (error || !data) return <ErrorNote error={(error as Error) ?? new Error("Couldn't load users")} />;
 
@@ -685,6 +795,9 @@ function OrgUsers() {
     <Card className="mt-6">
       <div className="flex flex-wrap items-center gap-3 p-5 pb-0">
         <h2 className="font-display text-[17px] text-pine">People</h2>
+        {department && (
+          <span className="text-[16px] text-pine/70">Pro seats: {department.used} of {department.total}</span>
+        )}
         <Input
           value={term}
           onChange={(e) => setTerm(e.target.value)}
@@ -714,6 +827,17 @@ function OrgUsers() {
               </span>
               <span className="block truncate text-[16px] text-pine/70">{u.email}</span>
             </span>
+            {department && u.role === "teacher" && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                disabled={seat.isPending}
+                onClick={() => seat.mutate({ id: u.id, give: !holders.has(u.id) })}
+              >
+                {holders.has(u.id) ? "Remove seat" : "Give Pro seat"}
+              </Button>
+            )}
             <Select
               value={u.role === "pending" ? "" : u.role}
               onChange={(e) => mutation.mutate({ id: u.id, role: e.target.value as "teacher" | "student" })}

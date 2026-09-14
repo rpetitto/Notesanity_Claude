@@ -1,14 +1,80 @@
-import { LogOut, RotateCcw } from "lucide-react";
+import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
+import { CreditCard, LogOut, RotateCcw } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
-import { useSession, signOutHref } from "../lib/session";
+import { useSession, signOutHref, type Plan } from "../lib/session";
 import { api } from "../lib/api";
 import { Button, ButtonLink, Card, Chip } from "../components/ui";
 
+const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
+
+/**
+ * What the person is on, and the one thing they can do about it.
+ *
+ * During the beta that one thing is nothing — everything is open — so the card
+ * says so plainly and names the price that's coming, rather than hiding a
+ * button. A page that says "free" without saying "for now" reads as a
+ * bait-and-switch the moment it changes.
+ */
+function PlanCard({ plan, isTeacher }: { plan: Plan; isTeacher: boolean }) {
+  const go = useMutation({
+    mutationFn: (path: "/api/billing/checkout" | "/api/billing/portal") => api.post<{ url: string }>(path),
+    onSuccess: ({ url }) => window.location.assign(url),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const { quota } = plan;
+  const usage = quota.unlimited
+    ? quota.limit === null
+      ? "Unlimited class notebooks."
+      : `${quota.used} of ${quota.limit} class notebooks — unlimited while Notesanity is in beta.`
+    : `${quota.used} of ${quota.limit} class notebooks.`;
+
+  return (
+    <Card className="mb-6 p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="font-display text-[17px] text-pine">Plan</h2>
+        <Chip tone="quiet">{plan.label}</Chip>
+        {plan.beta && <Chip>Free while in beta</Chip>}
+      </div>
+      <p className="mt-1 text-[16px] text-pine/70">
+        {usage}
+        {plan.renewsAt && (
+          <> {plan.cancelAtPeriodEnd ? "Ends" : "Renews"} on {new Date(plan.renewsAt).toLocaleDateString("en-US")}.</>
+        )}
+      </p>
+      {plan.beta && isTeacher && (
+        <p className="mt-2 text-[16px] text-pine/70">
+          Every Pro feature is on for everyone during the beta. Pro will be {dollars(plan.prices.pro)} a year,
+          and you'll get a full semester's notice before that.
+        </p>
+      )}
+      {plan.seats && (
+        <p className="mt-2 text-[16px] text-pine/70">
+          Department seats: {plan.seats.used} of {plan.seats.total} assigned — hand them out under Admin › People.
+        </p>
+      )}
+      {plan.canUpgrade && (
+        <Button variant="primary" className="mt-3" disabled={go.isPending} onClick={() => go.mutate("/api/billing/checkout")}>
+          <CreditCard className="h-4 w-4" strokeWidth={2.5} />
+          Upgrade to Pro — {dollars(plan.prices.pro)}/year
+        </Button>
+      )}
+      {plan.hasPortal && (
+        <Button variant="secondary" className="mt-3" disabled={go.isPending} onClick={() => go.mutate("/api/billing/portal")}>
+          Manage billing
+        </Button>
+      )}
+    </Card>
+  );
+}
+
 export default function Settings() {
-  const { user, isLoading } = useSession();
+  const { user, plan, isLoading } = useSession();
   const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
 
   /**
    * Clear the record of which tours have been seen.
@@ -27,6 +93,21 @@ export default function Settings() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  /*
+   * Back from Checkout. The webhook is usually seconds behind the redirect,
+   * so the session is confirmed here — otherwise this page would greet a
+   * teacher who just paid with "Free".
+   */
+  const billing = params.get("billing");
+  const sessionId = params.get("session_id");
+  useEffect(() => {
+    if (billing !== "success" || !sessionId) return;
+    api.post("/api/billing/confirm", { sessionId })
+      .then(() => { qc.invalidateQueries({ queryKey: ["me"] }); toast.success("You're on Pro. Thank you!"); })
+      .catch((e: Error) => toast.error(e.message))
+      .finally(() => setParams({}, { replace: true }));
+  }, [billing, sessionId, qc, setParams]);
 
   if (isLoading) {
     return (
@@ -62,6 +143,9 @@ export default function Settings() {
           Sign out
         </ButtonLink>
       </Card>
+
+      {/* Students have nothing to buy and nothing to manage, so the card is theirs to not see. */}
+      {plan && user.role === "teacher" && <PlanCard plan={plan} isTeacher />}
 
       <Card className="mb-6 p-5">
         <h2 className="font-display text-[17px] text-pine">Guided tours</h2>
