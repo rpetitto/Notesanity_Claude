@@ -3,6 +3,7 @@ import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { sanitizeRichText } from "../lib/richtext";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
+import type { LibraryField } from "../lib/page-library";
 import { MAX_TEMPLATE_PAGES, TEMPLATES, templateFor } from "../lib/templates";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -293,6 +294,86 @@ app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
 }));
 
 /**
+ * Drop a page out of the teacher's library into this notebook.
+ *
+ * Everything the saved page is made of comes across with fresh ids — the
+ * document behind it, its form fields, the teacher's markup — exactly as
+ * duplicating a page within a notebook does, and for the same reason: a page
+ * is its boxes and its markup, not just its background.
+ *
+ * The document is copied back under this notebook's own prefix rather than
+ * referenced where it sits in the library, because a notebook has to own every
+ * byte it renders — that is the invariant `deleteNotebookCascade`'s prefix
+ * sweep relies on. The name is derived from the library key, so inserting the
+ * same saved page twice into one notebook reuses the first copy.
+ */
+app.post("/api/notebooks/:id/pages/from-library", handler(async (c) => {
+  const { nb, user, isTeacher } = await notebookAccess(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+
+  const body = await c.req.json<{ entryId?: string; insertAfterPageId?: string | null }>();
+  const entry = await db
+    .prepare(`SELECT * FROM library_pages WHERE id = ? AND owner_id = ?`)
+    .bind(String(body.entryId ?? ""), user.id)
+    .first<any>();
+  if (!entry) throw new HttpError(404, "That page isn't in your library");
+
+  let assetKey = "";
+  if (entry.asset_key) {
+    assetKey = `notebooks/${nb.id}/lib-${entry.asset_key.replace(/[^A-Za-z0-9._-]/g, "-").slice(-80)}`;
+    await storage.copy(entry.asset_key, assetKey);
+  }
+
+  const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, 1);
+  const pageId = uid();
+  await db
+    .prepare(
+      `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, label,
+                          group_name, archived, pattern, pattern_color, teacher_annotate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0)`,
+    )
+    .bind(
+      pageId, nb.id, start + step, assetKey, entry.source_index ?? 0, entry.width, entry.height,
+      entry.title ?? "", groupName, entry.pattern ?? "", entry.pattern_color ?? "",
+    )
+    .run();
+
+  for (const f of JSON.parse(entry.fields || "[]") as LibraryField[]) {
+    let mediaKey: string | null = null;
+    if (f.media_key) {
+      mediaKey = `notebooks/${nb.id}/fields/${uid()}`;
+      await storage.copy(f.media_key, mediaKey);
+    }
+    await db
+      .prepare(
+        `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
+                             content, media_key, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      )
+      .bind(
+        uid(), nb.id, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
+        f.prompt ?? "", f.content ?? "", mediaKey, now(),
+      )
+      .run();
+  }
+
+  // Arrives as a draft: the markup is on the page, but students don't see it
+  // until this notebook is published like any other change.
+  if (entry.annotation) {
+    await db
+      .prepare(
+        `INSERT INTO page_annotations (page_id, notebook_id, draft_data, published_data, rev, updated_at)
+         VALUES (?, ?, ?, '', 1, ?)`,
+      )
+      .bind(pageId, nb.id, entry.annotation, now())
+      .run();
+  }
+
+  await syncPageCount(nb.id);
+  return c.json({ page: { id: pageId } });
+}));
+
+/**
  * Copy a page, with everything on it, and slot the copy in behind the original.
  *
  * The fields are copied too, with fresh ids — that is the whole reason to do
@@ -310,7 +391,11 @@ app.post("/api/notebooks/:id/pages/:pageId/duplicate", handler(async (c) => {
     .first<any>();
   if (!source) throw new HttpError(404, "Page not found");
 
-  const { start: seq } = await seqWindow(nb.id, source.id, 1);
+  // `start + step`, not `start`: `start` is the anchor's own seq, so a copy
+  // taking it landed on exactly the same number as its original and the two
+  // were then ordered arbitrarily against each other.
+  const { start, step } = await seqWindow(nb.id, source.id, 1);
+  const seq = start + step;
   const newId = uid();
   await db
     .prepare(

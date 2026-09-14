@@ -13,7 +13,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
-  ChevronDown, ChevronRight, CopyPlus, EyeOff, GripVertical, Pencil, RotateCcw, Trash2,
+  ChevronDown, ChevronRight, CopyPlus, EyeOff, GripVertical, LibraryBig, Pencil, RotateCcw, Trash2,
 } from "lucide-react";
 import PageThumb from "./PageThumb";
 import { pageSource, type PageRec } from "../lib/api";
@@ -42,6 +42,8 @@ interface Props {
   onDelete: (pageId: string) => void;
   /** Copy a page, with its boxes, in behind the original. */
   onDuplicate: (pageId: string) => void;
+  /** Keep a copy of this page in the teacher's own library, to reuse elsewhere. */
+  onSaveToLibrary: (pageId: string) => void;
   onArrange: (entries: ArrangeEntry[]) => void;
   onRenameGroup: (from: string, to: string) => void;
 }
@@ -53,7 +55,8 @@ interface Section {
 
 export default function NotebookPageList({
   notebookId, pages, assignmentCounts, currentPageId, selection,
-  onSelectionChange, onOpenPage, onRename, onArchiveToggle, onDelete, onDuplicate, onArrange, onRenameGroup,
+  onSelectionChange, onOpenPage, onRename, onArchiveToggle, onDelete, onDuplicate, onSaveToLibrary,
+  onArrange, onRenameGroup,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -280,6 +283,13 @@ export default function NotebookPageList({
                           className="rounded p-1 text-pine/55 hover:bg-white hover:text-pine"
                         >
                           <CopyPlus className="h-3 w-3" />
+                        </button>
+                        <button
+                          title="Save to your page library"
+                          onClick={(e) => { e.stopPropagation(); onSaveToLibrary(p.id); }}
+                          className="rounded p-1 text-pine/55 hover:bg-white hover:text-pine"
+                        >
+                          <LibraryBig className="h-3 w-3" />
                         </button>
                         <button
                           title={p.archived ? "Restore page" : "Hide from students (keeps their work)"}

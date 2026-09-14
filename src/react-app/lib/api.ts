@@ -200,3 +200,35 @@ export function pageSource(
     patternColor: p.pattern_color,
   };
 }
+
+/** A page saved to the teacher's library, as the list endpoint returns it. */
+export interface LibraryPageRec {
+  id: string;
+  title: string;
+  has_asset: number;
+  source_index: number;
+  width: number;
+  height: number;
+  pattern: string;
+  pattern_color: string;
+  created_at: string;
+}
+
+/**
+ * The same props for a library page.
+ *
+ * A saved page keeps its own copy of the document it came from, under the
+ * library's prefix rather than any notebook's, so it is served by its own route
+ * — the notebook asset route deliberately refuses keys from outside the
+ * notebook it was asked about.
+ */
+export function libraryPageSource(p: LibraryPageRec) {
+  return {
+    pdfUrl: `/api/my/page-library/${p.id}/asset`,
+    sourceIndex: p.source_index,
+    pageWidth: p.width,
+    pageHeight: p.height,
+    pattern: p.pattern,
+    patternColor: p.pattern_color,
+  };
+}

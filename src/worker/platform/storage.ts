@@ -50,6 +50,25 @@ export const storage = {
     await bucket().delete(key);
   },
 
+  /**
+   * Duplicate an object.
+   *
+   * R2's Workers binding has no server-side copy, so this reads the bytes and
+   * writes them back out — fine for the notebook-sized files this app stores,
+   * and worth avoiding on a hot path. Skips the work when the destination is
+   * already there, which is what makes copying the same source PDF for a
+   * second library page free.
+   */
+  async copy(from: string, to: string): Promise<boolean> {
+    if (await bucket().head(to)) return false;
+    const src = await bucket().get(from);
+    if (!src) return false;
+    await bucket().put(to, await src.arrayBuffer(), {
+      httpMetadata: src.httpMetadata,
+    });
+    return true;
+  },
+
   /** R2 takes up to a thousand keys per call, so anything larger goes in batches. */
   async deleteMany(keys: string[]): Promise<void> {
     for (let i = 0; i < keys.length; i += 1000) {

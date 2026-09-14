@@ -39,8 +39,9 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "September 14, 2026",
-    "A real admin panel for school admins, and a couple of places another school shouldn't have been visible.",
+    "A page library, a real admin panel for school admins, and a couple of places another school shouldn't have been visible.",
     [
+      ["new", "<b>Save a page to your library and use it again.</b> Any page — the Monday warm-up, a lab write-up frame, an exit ticket — can be saved from the page list, then dropped into any other notebook from <b>Add pages</b> &rarr; <b>Page library</b>. Its answer boxes and your own markup come with it. The saved copy is independent: editing or even deleting the notebook it came from leaves it untouched."],
       ["new", "<b>School admins now have their own admin panel.</b> Open Admin from Settings to manage your people, see your sign-in email delivery, and look over your school's notebooks, assignments and grades — without needing platform-wide access."],
       ["fixed", "Importing a Google Classroom roster, inviting a student by email, or adding a co-teacher by email could silently pull in someone who already had an account at a different school. Those cases are now called out by name instead."],
       ["fixed", "A school admin's sign-in email log showed activity from every school on the platform, not just their own. It's scoped to your school now."],

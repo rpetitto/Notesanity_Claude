@@ -96,6 +96,13 @@ const BODY = () => `
          also pick a file straight out of Drive, or start from blank paper.`,
       ],
       [
+        "Can I reuse a page in another notebook?",
+        `Yes — that's the page library. Hover a page in the page list and choose <b>Save to your page
+         library</b>, then add it to any other notebook from <b>Add pages</b> &rarr; <b>Page library</b>.
+         Its answer boxes and your own markup come across; nobody's work does. The saved copy stands on
+         its own, so changing or deleting the original notebook doesn't touch it.`,
+      ],
+      [
         "What blank paper is there?",
         `Lined (wide or college), graph, dot grid, music staves, engineering, isometric, a
          coordinate plane, or plain blank — in eight rule colors, and you choose how many

@@ -5,7 +5,7 @@ import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
   Pencil, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
-  FolderOpen,
+  FolderOpen, LibraryBig,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type FieldRec, type PageRec } from "../lib/api";
@@ -19,6 +19,7 @@ import PageCanvas, { type ToolState } from "../components/PageCanvas";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
 import InkToolbar from "../components/InkToolbar";
 import Tour from "../components/Tour";
+import PageLibraryModal from "../components/PageLibraryModal";
 import { emptyLayer, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData } from "../lib/ink";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
@@ -177,6 +178,7 @@ export default function NotebookEditor() {
   const [containerWidth, setContainerWidth] = useState(0);
   const addPagesRef = useRef<HTMLInputElement>(null);
   const [blankOpen, setBlankOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [busyMessage, setBusyMessage] = useState("");
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [coverBump, setCoverBump] = useState(0);
@@ -357,6 +359,22 @@ export default function NotebookEditor() {
       setBlankOpen(false);
       invalidate();
     },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const insertLibraryPage = useMutation({
+    mutationFn: (body: { entryId: string; insertAfterPageId: string | null }) =>
+      api.post<{ page: { id: string } }>(`/api/notebooks/${notebookId}/pages/from-library`, body),
+    onSuccess: () => {
+      toast.success("Page added from your library");
+      setLibraryOpen(false);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const saveToLibrary = useMutation({
+    mutationFn: (pageId: string) =>
+      api.post<{ title: string }>("/api/my/page-library", { notebookId, pageId }),
+    onSuccess: (res) => toast.success(`"${res.title}" saved to your library`),
     onError: (e: Error) => toast.error(e.message),
   });
   const updateField = useMutation({
@@ -572,9 +590,10 @@ export default function NotebookEditor() {
   };
 
   /**
-   * The three ways to add pages, in the order they're reached for: blank paper
-   * first because it needs nothing, then a file, then Drive — which is only
-   * offered where the school's Google project can actually open the picker.
+   * The ways to add pages, in the order they're reached for: the two that need
+   * nothing first — blank paper, then a page you already saved — and then a
+   * file, then Drive, which is only offered where the school's Google project
+   * can actually open the picker.
    */
   const ADD_PAGE_ITEMS: MenuItem[] = [
     {
@@ -582,6 +601,13 @@ export default function NotebookEditor() {
       icon: Rows3,
       hint: "Lined, graph, dot grid, staves…",
       onClick: () => setBlankOpen(true),
+      disabled: !!busyMessage,
+    },
+    {
+      label: "Page library",
+      icon: LibraryBig,
+      hint: "A page you saved from another notebook",
+      onClick: () => setLibraryOpen(true),
       disabled: !!busyMessage,
     },
     {
@@ -724,6 +750,7 @@ export default function NotebookEditor() {
           onArchiveToggle={(id, archived) => patchPage.mutate({ id, archived })}
           onDelete={(id) => confirmDelete([id])}
           onDuplicate={(id) => duplicatePages.mutate([id])}
+          onSaveToLibrary={(id) => saveToLibrary.mutate(id)}
           onArrange={(entries) => arrangePages.mutate(entries)}
           onRenameGroup={(from, to) => {
             const ids = allPages.filter((p) => (p.group_name ?? "") === from).map((p) => p.id);
@@ -1055,6 +1082,15 @@ export default function NotebookEditor() {
         />
       )}
 
+      {libraryOpen && (
+        <PageLibraryModal
+          pages={allPages}
+          busy={insertLibraryPage.isPending}
+          onClose={() => setLibraryOpen(false)}
+          onInsert={(body) => insertLibraryPage.mutate(body)}
+        />
+      )}
+
       {/* Annotate is a mode: while it is on, the field palette has nothing to
           do and only costs a row of an already short screen. */}
       {!annotateMode && (
@@ -1321,7 +1357,7 @@ export default function NotebookEditor() {
 
       {/* Held back until nothing is layered over the editor: a spotlight cut
           through a drawer or an inspector would ring the wrong thing. */}
-      {!blankOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && (
+      {!blankOpen && !libraryOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && (
         <Tour place="notebook" />
       )}
     </div>

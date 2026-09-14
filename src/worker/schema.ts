@@ -825,3 +825,40 @@ migrate("025_ink_to_r2", async () => {
     await db.prepare(`UPDATE layers SET byte_length = ? WHERE id = ?`).bind(size, r.id).run();
   }
 });
+
+/**
+ * A teacher's own library of pages worth keeping.
+ *
+ * Any page can be saved into it and dropped into any other notebook later — the
+ * warm-up sheet you use every Monday, the lab write-up frame, the exit ticket.
+ *
+ * It stores a *snapshot*, not a reference. The fields and the teacher's master
+ * ink are copied in as JSON rather than rows in `fields`/`page_annotations`,
+ * because nothing ever queries into them: a library entry is only ever written
+ * whole and read whole. Keeping them as rows would mean three tables to garbage
+ * collect and a page that changes shape when the notebook it came from is
+ * edited, which is the opposite of what a library is for.
+ *
+ * `asset_key` points at a library-owned copy of the backing PDF, never at the
+ * notebook's. Deleting a notebook sweeps its whole R2 prefix, so a library page
+ * that pointed at the original would quietly turn blank months later.
+ */
+migrate("026_page_library", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS library_pages (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      asset_key TEXT NOT NULL DEFAULT '',
+      source_index INTEGER NOT NULL DEFAULT 0,
+      width REAL NOT NULL DEFAULT 612,
+      height REAL NOT NULL DEFAULT 792,
+      pattern TEXT NOT NULL DEFAULT '',
+      pattern_color TEXT NOT NULL DEFAULT '',
+      fields TEXT NOT NULL DEFAULT '[]',
+      annotation TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_library_owner ON library_pages(owner_id, created_at)`).run();
+});
