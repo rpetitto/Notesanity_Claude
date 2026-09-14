@@ -2,9 +2,7 @@ import { app, db } from "../platform";
 import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { logActivity } from "../lib/activity";
-
-/** An empty ink layer still serializes to a few characters, so require real content. */
-const HAS_CONTENT = 24;
+import { HAS_INK_BYTES } from "../lib/ink";
 
 async function loadAssignment(c: any, assignmentId: string) {
   const a = await db.prepare(`SELECT * FROM assignments WHERE id = ?`).bind(assignmentId).first<any>();
@@ -26,8 +24,6 @@ async function loadAssignment(c: any, assignmentId: string) {
  * Ink and typed answers count equally — annotating a diagram is work in the
  * same way that filling a box is.
  */
-const HAS_INK = 24; // an empty layer still serializes to a few characters
-
 /**
  * The same signal for every student in a notebook at once, keyed by instance.
  *
@@ -35,6 +31,10 @@ const HAS_INK = 24; // an empty layer still serializes to a few characters
  * over six hundred queries to draw one status grid. The instances are reached
  * through a subquery rather than a bound list of ids so that the number of
  * parameters stays tied to the assignment's page count, not to the roster.
+ *
+ * This is also why `layers` kept its row when the ink itself moved to R2:
+ * `byte_length` is what makes "who has started" answerable in one query. Object
+ * storage cannot be asked this, so do not be tempted to move that column out.
  */
 async function workSignals(
   notebookId: string,
@@ -57,7 +57,7 @@ async function workSignals(
     .prepare(
       `SELECT instance_id, MAX(updated_at) AS t FROM layers
         WHERE instance_id IN (SELECT id FROM instances WHERE notebook_id = ?)
-          AND kind = 'student' AND LENGTH(data) > ${HAS_INK}
+          AND kind = 'student' AND byte_length > ${HAS_INK_BYTES}
           AND page_id IN (${placeholders})
         GROUP BY instance_id`,
     )
@@ -267,7 +267,7 @@ app.get("/api/assignments/:id/impact", handler(async (c) => {
         `SELECT COUNT(DISTINCT i.student_id) AS n
            FROM layers l JOIN instances i ON i.id = l.instance_id
           WHERE i.notebook_id = ? AND l.kind = 'student'
-            AND LENGTH(l.data) > ${HAS_CONTENT} AND l.page_id IN (${placeholders})`,
+            AND l.byte_length > ${HAS_INK_BYTES} AND l.page_id IN (${placeholders})`,
       )
       .bind(a.notebook_id, ...pageIds)
       .first<{ n: number }>();

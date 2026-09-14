@@ -11,6 +11,7 @@
  */
 
 import { migrate, db } from "./platform";
+import { inkKey, parseShape, writeInk } from "./lib/ink";
 
 /**
  * Platform owners. Seeded by address so the role exists before they do, and
@@ -770,4 +771,57 @@ migrate("024_impersonation", async () => {
     )
   `).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_impersonation_active ON impersonation_sessions(expires_at, ended_at)`).run();
+});
+
+/**
+ * Ink moves to R2, and `layers` keeps only the row that describes it.
+ *
+ * D1 has a hard 10 GB per-database ceiling and ink is the only thing here that
+ * grows without bound — a school-year of one class is measured in hundreds of
+ * megabytes. The strokes become one R2 object per layer; the row keeps `rev`,
+ * `updated_at` and a new `byte_length`, because three queries aggregate over
+ * ink across a whole roster at once and object storage cannot answer those.
+ *
+ * THIS MIGRATION MOVES DATA, and the data is student handwriting with no
+ * backup. It is written for the database it will actually run against: twenty
+ * layer rows, thirty kilobytes, no chunks. A table of any real size would need
+ * a background pass instead of a loop inside the first request after deploy —
+ * if you are reading this because the table grew, do not simply raise a limit.
+ *
+ * `data` is deliberately left populated. `026` blanks it a deploy later, once
+ * the R2 path has proven itself; until then `GET /work` falls back to it, so a
+ * Worker rollback still renders every page.
+ */
+migrate("025_ink_to_r2", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(layers)`).all<{ name: string }>();
+  if (!(cols.results ?? []).some((c) => c.name === "byte_length")) {
+    await db.prepare(`ALTER TABLE layers ADD COLUMN byte_length INTEGER NOT NULL DEFAULT 0`).run();
+  }
+
+  const rows = await db
+    .prepare(
+      `SELECT l.id, l.data, l.rev, l.page_id, l.kind, l.instance_id, i.notebook_id
+         FROM layers l JOIN instances i ON i.id = l.instance_id
+        WHERE l.byte_length = 0 AND l.data <> ''`,
+    )
+    .all<{
+      id: string; data: string; rev: number; page_id: string;
+      kind: string; instance_id: string; notebook_id: string;
+    }>();
+
+  for (const r of rows.results ?? []) {
+    const tail = await db
+      .prepare(`SELECT data FROM layer_chunks WHERE layer_id = ? ORDER BY seq`)
+      .bind(r.id)
+      .all<{ data: string }>();
+
+    // The pre-R2 read: chunk 0 carried the text/stamps/comments and the first
+    // twenty strokes, with the rest appended in order. Inlined here rather than
+    // imported so it can be deleted with the chunk table itself.
+    const shape = parseShape(r.data);
+    for (const t of tail.results ?? []) shape.s.push(...parseShape(t.data).s);
+
+    const size = await writeInk(inkKey(r.notebook_id, r.instance_id, r.page_id, r.kind), shape, r.rev);
+    await db.prepare(`UPDATE layers SET byte_length = ? WHERE id = ?`).bind(size, r.id).run();
+  }
 });

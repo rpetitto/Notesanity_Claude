@@ -2,6 +2,7 @@ import { app, db, storage } from "../platform";
 import {
   handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { sanitizeRichText } from "../lib/richtext";
+import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import { MAX_TEMPLATE_PAGES, TEMPLATES, templateFor } from "../lib/templates";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -498,7 +499,22 @@ async function deletePages(notebookId: string, pageIds: string[]) {
       .bind(pid)
       .run();
     await db.prepare(`DELETE FROM fields WHERE page_id = ?`).bind(pid).run();
-    // Chunks first: they are reached through the layer row that is about to go.
+
+    /*
+     * Ink lives in R2 and the row is the only record of its key, so the objects
+     * go first. If that fails the rows survive and the delete can be retried;
+     * the other order would strand the objects with no way left to name them.
+     */
+    const doomed = await db
+      .prepare(
+        `SELECT i.notebook_id, l.instance_id, l.page_id, l.kind FROM layers l
+           JOIN instances i ON i.id = l.instance_id WHERE l.page_id = ?`,
+      )
+      .bind(pid)
+      .all<{ notebook_id: string; instance_id: string; page_id: string; kind: string }>();
+    await deleteInk(
+      (doomed.results ?? []).map((r) => inkKey(r.notebook_id, r.instance_id, r.page_id, r.kind)),
+    );
     await db
       .prepare(`DELETE FROM layer_chunks WHERE layer_id IN (SELECT id FROM layers WHERE page_id = ?)`)
       .bind(pid)
@@ -870,7 +886,7 @@ app.put("/api/notebooks/:id/annotations/:pageId", handler(async (c) => {
 
   const { data } = await c.req.json<{ data: string }>();
   if (typeof data !== "string") throw new HttpError(400, "data must be a string");
-  if (data.length > 512 * 1024) throw new HttpError(413, "That page has too much ink to save");
+  if (data.length > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
 
   const existing = await db
     .prepare(`SELECT page_id, rev FROM page_annotations WHERE page_id = ?`)
@@ -1141,7 +1157,7 @@ app.delete("/api/my/personal-notebooks/:id", handler(async (c) => {
   return c.json({ ok: true });
 }));
 
-/** Remove a notebook and everything anchored to it, ink chunks included. */
+/** Remove a notebook and everything anchored to it, in both databases. */
 export async function deleteNotebookCascade(notebookId: string) {
   const instances = await db.prepare(`SELECT id FROM instances WHERE notebook_id = ?`).bind(notebookId).all<any>();
   for (const inst of instances.results ?? []) {
@@ -1159,6 +1175,15 @@ export async function deleteNotebookCascade(notebookId: string) {
   await db.prepare(`DELETE FROM page_annotations WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM pages WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM notebooks WHERE id = ?`).bind(notebookId).run();
+
+  /*
+   * Everything this notebook owns in R2, in one sweep — the ink, but also the
+   * source PDF, the cover, field media and student uploads, every one of which
+   * was previously left in the bucket forever. They all share the notebook's
+   * key prefix, which is precisely why the prefix is shaped that way.
+   */
+  const objects = await storage.listAll(`notebooks/${notebookId}/`);
+  await storage.deleteMany(objects.keys.map((o) => o.key));
 }
 
 /**

@@ -50,8 +50,34 @@ export const storage = {
     await bucket().delete(key);
   },
 
+  /** R2 takes up to a thousand keys per call, so anything larger goes in batches. */
+  async deleteMany(keys: string[]): Promise<void> {
+    for (let i = 0; i < keys.length; i += 1000) {
+      await bucket().delete(keys.slice(i, i + 1000));
+    }
+  },
+
   async list(prefix?: string): Promise<{ keys: { key: string; size: number }[] }> {
     const res = await bucket().list({ prefix });
     return { keys: res.objects.map((o) => ({ key: o.key, size: o.size })) };
+  },
+
+  /**
+   * `list` to the end, following the cursor.
+   *
+   * The plain `list` above returns one page and silently drops the rest, which
+   * is fine for the status probe that only asks whether the bucket answers, and
+   * wrong for anything that has to be exhaustive — a delete sweep that misses
+   * the second page leaves objects behind forever.
+   */
+  async listAll(prefix: string): Promise<{ keys: { key: string; size: number }[] }> {
+    const keys: { key: string; size: number }[] = [];
+    let cursor: string | undefined;
+    do {
+      const res = await bucket().list({ prefix, cursor });
+      for (const o of res.objects) keys.push({ key: o.key, size: o.size });
+      cursor = res.truncated ? res.cursor : undefined;
+    } while (cursor);
+    return { keys };
   },
 };

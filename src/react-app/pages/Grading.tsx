@@ -350,10 +350,21 @@ export default function Grading() {
     }
   };
 
+  /*
+   * Ask only for the pages this assignment covers.
+   *
+   * Grading always threw the rest away anyway (see `assignedPages` below), but
+   * now that a page's ink is an object fetch rather than a column, loading a
+   * whole notebook per student — and prefetching the next one — is the
+   * difference between a handful of reads and a hundred.
+   */
+  const scope = assignment?.pageIds?.length ? `&pages=${assignment.pageIds.join(",")}` : "";
+  const workUrl = (id: string) =>
+    `/api/notebooks/${assignment.notebookId}/work?student=${encodeURIComponent(id)}${scope}`;
+
   const work = useQuery({
-    queryKey: ["work", assignment?.notebookId, studentId],
-    queryFn: () =>
-      api.get<WorkResponse>(`/api/notebooks/${assignment.notebookId}/work?student=${encodeURIComponent(studentId!)}`),
+    queryKey: ["work", assignment?.notebookId, studentId, scope],
+    queryFn: () => api.get<WorkResponse>(workUrl(studentId!)),
     enabled: !!assignment?.notebookId && !!studentId,
   });
 
@@ -362,11 +373,10 @@ export default function Grading() {
     const next = rows[studentIdx + 1];
     if (!next || !assignment?.notebookId) return;
     qc.prefetchQuery({
-      queryKey: ["work", assignment.notebookId, next.student.id],
-      queryFn: () =>
-        api.get<WorkResponse>(`/api/notebooks/${assignment.notebookId}/work?student=${encodeURIComponent(next.student.id)}`),
+      queryKey: ["work", assignment.notebookId, next.student.id, scope],
+      queryFn: () => api.get<WorkResponse>(workUrl(next.student.id)),
     });
-  }, [rows, studentIdx, assignment?.notebookId, qc]);
+  }, [rows, studentIdx, assignment?.notebookId, qc, scope]);
 
   const notebookWork = useNotebookWork({
     notebookId: assignment?.notebookId ?? "",

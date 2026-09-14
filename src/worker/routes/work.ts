@@ -1,86 +1,10 @@
 import { app, db, storage } from "../platform";
 import { handler, now, uid, requireUser, requireClassMember, HttpError, param} from "../lib/session";
 import { logActivity, pageLock } from "../lib/activity";
-
-// A single page's ink payload. Generous for real handwriting (a dense page of
-// strokes compresses to well under this) while stopping a runaway client.
-const MAX_LAYER_BYTES = 512 * 1024;
-
-/**
- * Strokes per stored chunk.
- *
- * The whole point of chunking is that appending costs one chunk rather than one
- * page, so this trades write size against row count: at 50, a save rewrites a
- * few kilobytes instead of a hundred, and even a very full page is only a
- * handful of rows to read back.
- */
-const CHUNK_STROKES = 20;
-
-/**
- * Chunks one page may hold — 1,200 strokes, several times what a full page of
- * dense handwriting actually contains. This is what bounds a page now that a
- * save no longer carries the whole layer.
- */
-const MAX_CHUNKS = 60;
-
-interface LayerShape { v: 1; s: any[]; x: any[]; e: any[]; c: any[] }
-
-const emptyShape = (): LayerShape => ({ v: 1, s: [], x: [], e: [], c: [] });
-
-function parseShape(raw?: string | null): LayerShape {
-  if (!raw) return emptyShape();
-  try {
-    const p = JSON.parse(raw);
-    return {
-      v: 1,
-      s: Array.isArray(p.s) ? p.s : [],
-      x: Array.isArray(p.x) ? p.x : [],
-      e: Array.isArray(p.e) ? p.e : [],
-      c: Array.isArray(p.c) ? p.c : [],
-    };
-  } catch {
-    return emptyShape();
-  }
-}
-
-/**
- * Split a whole layer into the rows that store it.
- *
- * Chunk 0 carries the text, stamps and comments as well as its share of the
- * strokes, so a layer written before chunking existed is already a valid chunk
- * 0 and reads back correctly with no conversion.
- */
-function toChunks(layer: LayerShape): string[] {
-  const head = {
-    v: 1,
-    s: layer.s.slice(0, CHUNK_STROKES),
-    x: layer.x, e: layer.e, c: layer.c,
-  };
-  const out = [JSON.stringify(head)];
-  for (let i = CHUNK_STROKES; i < layer.s.length; i += CHUNK_STROKES) {
-    out.push(JSON.stringify({ s: layer.s.slice(i, i + CHUNK_STROKES) }));
-  }
-  return out;
-}
-
-/** Rebuild the single JSON payload the client has always received. */
-function assemble(head: string, tail: { data: string }[]): string {
-  if (tail.length === 0) return head;
-  const shape = parseShape(head);
-  for (const t of tail) shape.s.push(...parseShape(t.data).s);
-  return JSON.stringify(shape);
-}
-
-/** Replace every overflow chunk of a layer with the given ones. */
-async function writeTail(layerId: string, chunks: string[]) {
-  await db.prepare(`DELETE FROM layer_chunks WHERE layer_id = ?`).bind(layerId).run();
-  for (let i = 0; i < chunks.length; i++) {
-    await db
-      .prepare(`INSERT INTO layer_chunks (id, layer_id, seq, data) VALUES (?, ?, ?, ?)`)
-      .bind(uid(), layerId, i + 1, chunks[i])
-      .run();
-  }
-}
+import {
+  MAX_LAYER_BYTES, type LayerShape,
+  inkKey, parseShape, readInk, readInkMany, writeInk,
+} from "../lib/ink";
 
 const ARCHIVED_REASON =
   "This class has been archived — everything in it can be read, and nothing in it can be changed.";
@@ -212,58 +136,76 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
   const { nb, isTeacher, instance, studentId, readOnly, readOnlyReason, canAnnotate } =
     await resolveInstance(c, param(c, "id"), studentParam);
 
+  /**
+   * Narrow the whole response to the pages asked for.
+   *
+   * Ink is one R2 object per layer now, so the cost of this route scales with
+   * the number of pages a student has written on. Grading only ever shows the
+   * pages an assignment covers, and used to load the entire notebook and throw
+   * the rest away — with a next-student prefetch on top of it. Naming the pages
+   * turns a class of thirty into thirty small reads instead of thirty whole
+   * notebooks.
+   */
+  const wanted = (c.req.query("pages") || "").split(",").map((p) => p.trim()).filter(Boolean);
+  const pageFilter = wanted.length ? ` AND id IN (${wanted.map(() => "?").join(",")})` : "";
+  const layerFilter = wanted.length ? ` AND page_id IN (${wanted.map(() => "?").join(",")})` : "";
+
   const pages = await db
     .prepare(
       `SELECT id, seq, asset_key, source_index, width, height, label, group_name, pattern, pattern_color,
               teacher_annotate
-         FROM pages WHERE notebook_id = ? AND archived = 0 ORDER BY seq`,
+         FROM pages WHERE notebook_id = ? AND archived = 0${pageFilter} ORDER BY seq`,
     )
-    .bind(nb.id)
+    .bind(nb.id, ...wanted)
     .all();
   const fields = await db
     .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, content, media_key IS NOT NULL AS has_media
-         FROM fields WHERE notebook_id = ? AND archived = 0`)
-    .bind(nb.id)
+         FROM fields WHERE notebook_id = ? AND archived = 0${layerFilter}`)
+    .bind(nb.id, ...wanted)
     .all();
   const layerRows = await db
-    .prepare(`SELECT id, page_id, kind, data, rev FROM layers WHERE instance_id = ?`)
-    .bind(instance.id)
-    .all<{ id: string; page_id: string; kind: string; data: string; rev: number }>();
-
-  // One more query for the whole instance, not one per page: the chunks are
-  // grouped in memory so a hundred-page notebook still costs two reads.
-  const chunkRows = await db
     .prepare(
-      `SELECT c.layer_id, c.data FROM layer_chunks c
-         JOIN layers l ON l.id = c.layer_id
-        WHERE l.instance_id = ? ORDER BY c.layer_id, c.seq`,
+      `SELECT id, page_id, kind, data, rev, byte_length FROM layers
+        WHERE instance_id = ?${layerFilter}`,
     )
-    .bind(instance.id)
-    .all<{ layer_id: string; data: string }>();
+    .bind(instance.id, ...wanted)
+    .all<{ id: string; page_id: string; kind: string; data: string; rev: number; byte_length: number }>();
 
-  const tails = new Map<string, { data: string }[]>();
-  for (const r of chunkRows.results ?? []) {
-    const list = tails.get(r.layer_id);
-    if (list) list.push({ data: r.data });
-    else tails.set(r.layer_id, [{ data: r.data }]);
-  }
+  // Only layers that hold something are worth a fetch — a row exists for every
+  // page ever touched, including ones erased back to blank.
+  const inked = (layerRows.results ?? []).filter((l) => l.byte_length > 0 || l.data !== "");
+  const keys = inked.map((l) => inkKey(nb.id, instance.id, l.page_id, l.kind));
+  const blobs = await readInkMany(keys);
 
   const layers = {
-    results: (layerRows.results ?? []).map((l) => ({
-      page_id: l.page_id,
-      kind: l.kind,
-      data: assemble(l.data, tails.get(l.id) ?? []),
-      rev: l.rev,
-    })),
+    results: inked.map((l, i) => {
+      // Until `026` blanks it, a row the backfill hasn't reached still holds
+      // its payload in D1. Absent object, not failed read — `readInk` throws
+      // on a genuine R2 failure rather than quietly reporting an empty page.
+      const stored = blobs.get(keys[i]) ?? parseShape(l.data);
+      const { v, s, x, e, c: comments } = stored;
+      return {
+        page_id: l.page_id,
+        kind: l.kind,
+        // Rebuilt without the stored `rev`, so the client receives exactly the
+        // payload it always has.
+        data: JSON.stringify({ v, s, x, e, c: comments }),
+        rev: l.rev,
+      };
+    }),
   };
   const values = await db
     .prepare(`SELECT field_id, value, asset_key, content_type FROM field_values WHERE instance_id = ?`)
     .bind(instance.id)
     .all();
-  // Published teacher annotations on the master pages — the same for everyone.
+  // Published teacher annotations on the master pages — the same for everyone,
+  // and narrowed by `?pages=` for the same reason the layers are.
   const masterAnnotations = await db
-    .prepare(`SELECT page_id, published_data FROM page_annotations WHERE notebook_id = ? AND published_data <> ''`)
-    .bind(nb.id)
+    .prepare(
+      `SELECT page_id, published_data FROM page_annotations
+        WHERE notebook_id = ? AND published_data <> ''${layerFilter}`,
+    )
+    .bind(nb.id, ...wanted)
     .all<any>();
 
   const student = await db
@@ -373,10 +315,12 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     }
   }
 
+  const key = inkKey(instance.notebook_id, instance.id, pageId, kind);
+
   const existing = await db
-    .prepare(`SELECT id, rev FROM layers WHERE instance_id = ? AND page_id = ? AND kind = ?`)
+    .prepare(`SELECT id, rev, data FROM layers WHERE instance_id = ? AND page_id = ? AND kind = ?`)
     .bind(instance.id, pageId, kind)
-    .first<{ id: string; rev: number }>();
+    .first<{ id: string; rev: number; data: string }>();
 
   if (existing) {
     if (body.rev !== undefined && body.rev < existing.rev) {
@@ -384,6 +328,7 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     }
 
     const rev = existing.rev + 1;
+    let next: LayerShape;
 
     if (isDelta) {
       // A delta describes strokes appended to one exact revision. Anything
@@ -392,72 +337,41 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
       // never saw. The client answers a 409 by sending the whole layer.
       if (body.rev !== existing.rev) return c.json({ conflict: true, rev: existing.rev }, 409);
 
-      const head = await db
-        .prepare(`SELECT data FROM layers WHERE id = ?`)
-        .bind(existing.id)
-        .first<{ data: string }>();
-      const last = await db
-        .prepare(`SELECT id, seq, data FROM layer_chunks WHERE layer_id = ? ORDER BY seq DESC LIMIT 1`)
-        .bind(existing.id)
-        .first<{ id: string; seq: number; data: string }>();
+      const stored = await readInk(key);
+
+      /*
+       * The object already carries this revision, so a previous attempt's put
+       * landed and only the row update was lost. Appending the same strokes a
+       * second time would duplicate them, so reconcile the row and stop.
+       */
+      if (stored && stored.rev >= rev) {
+        const settled = JSON.stringify({ v: stored.v, s: stored.s, x: stored.x, e: stored.e, c: stored.c, rev: stored.rev });
+        await db
+          .prepare(`UPDATE layers SET rev = ?, byte_length = ?, updated_at = ? WHERE id = ?`)
+          .bind(rev, settled.length, now(), existing.id)
+          .run();
+        return c.json({ ok: true, rev });
+      }
 
       const d = body.delta!;
-      const headShape = parseShape(head?.data);
-      // Append into the chunk that is actually last — chunk 0 only while the
-      // page is still new. This is the whole saving: a full chunk is never
-      // rewritten just because another stroke arrived.
-      const tailShape = last ? parseShape(last.data) : headShape;
-      const room = Math.max(0, CHUNK_STROKES - tailShape.s.length);
-      const fill = d.s.slice(0, room);
-      const spill = d.s.slice(room);
-
-      if ((last ? last.seq : 0) + Math.ceil(spill.length / CHUNK_STROKES) > MAX_CHUNKS) {
-        throw new HttpError(413, "That page has too much ink to save");
-      }
-
-      // Text, stamps and comments live in chunk 0, so it is touched only when
-      // one of them actually changed — not on every stroke.
-      const metaChanged =
-        JSON.stringify([headShape.x, headShape.e, headShape.c]) !==
-        JSON.stringify([d.x ?? [], d.e ?? [], d.c ?? []]);
-
-      if (!last) {
-        const merged = { v: 1, s: [...headShape.s, ...fill], x: d.x ?? [], e: d.e ?? [], c: d.c ?? [] };
-        await db.prepare(`UPDATE layers SET data = ? WHERE id = ?`).bind(JSON.stringify(merged), existing.id).run();
-      } else {
-        if (fill.length) {
-          await db
-            .prepare(`UPDATE layer_chunks SET data = ? WHERE id = ?`)
-            .bind(JSON.stringify({ s: [...tailShape.s, ...fill] }), last.id)
-            .run();
-        }
-        if (metaChanged) {
-          await db
-            .prepare(`UPDATE layers SET data = ? WHERE id = ?`)
-            .bind(JSON.stringify({ ...headShape, x: d.x ?? [], e: d.e ?? [], c: d.c ?? [] }), existing.id)
-            .run();
-        }
-      }
-
-      let seq = (last?.seq ?? 0) + 1;
-      for (let i = 0; i < spill.length; i += CHUNK_STROKES) {
-        await db
-          .prepare(`INSERT INTO layer_chunks (id, layer_id, seq, data) VALUES (?, ?, ?, ?)`)
-          .bind(uid(), existing.id, seq++, JSON.stringify({ s: spill.slice(i, i + CHUNK_STROKES) }))
-          .run();
-      }
-
-      await db.prepare(`UPDATE layers SET rev = ?, updated_at = ? WHERE id = ?`).bind(rev, now(), existing.id).run();
+      // Falls back to the D1 column for a row the backfill hasn't reached.
+      const base = stored ?? parseShape(existing.data);
+      next = { v: 1, s: [...base.s, ...d.s], x: d.x ?? [], e: d.e ?? [], c: d.c ?? [] };
     } else {
-      // A full save replaces the layer outright, so it re-splits from scratch.
-      const chunks = toChunks(parseShape(body.data!));
-      if (chunks.length > MAX_CHUNKS) throw new HttpError(413, "That page has too much ink to save");
-      await db
-        .prepare(`UPDATE layers SET data = ?, rev = ?, updated_at = ? WHERE id = ?`)
-        .bind(chunks[0], rev, now(), existing.id)
-        .run();
-      await writeTail(existing.id, chunks.slice(1));
+      next = parseShape(body.data!);
     }
+
+    // R2 first, then the row. The recoverable failure is an object ahead of its
+    // row — the branch above repairs that. A row claiming a revision the object
+    // doesn't have is not recoverable: the next delta would append onto strokes
+    // the client never saw.
+    const size = await writeInk(key, next, rev);
+    if (size > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
+    await db
+      .prepare(`UPDATE layers SET data = '', byte_length = ?, rev = ?, updated_at = ? WHERE id = ?`)
+      .bind(size, rev, now(), existing.id)
+      .run();
+
     await logActivity({
       actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
       action: kind === "teacher" ? "annotate" : "edit",
@@ -471,19 +385,20 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   // No row yet, so a delta simply *is* the layer — but only if the client
   // believed it was starting from nothing too.
   if (isDelta && (body.rev ?? 0) !== 0) return c.json({ conflict: true, rev: 0 }, 409);
-  const fresh = isDelta
-    ? JSON.stringify({ v: 1, s: body.delta!.s, x: body.delta!.x ?? [], e: body.delta!.e ?? [], c: body.delta!.c ?? [] })
-    : body.data!;
-  if (fresh.length > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
+  const fresh: LayerShape = isDelta
+    ? { v: 1, s: body.delta!.s, x: body.delta!.x ?? [], e: body.delta!.e ?? [], c: body.delta!.c ?? [] }
+    : parseShape(body.data!);
 
-  const chunks = toChunks(parseShape(fresh));
-  if (chunks.length > MAX_CHUNKS) throw new HttpError(413, "That page has too much ink to save");
+  const size = await writeInk(key, fresh, 1);
+  if (size > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
   const layerId = uid();
   await db
-    .prepare(`INSERT INTO layers (id, instance_id, page_id, kind, data, rev, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)`)
-    .bind(layerId, instance.id, pageId, kind, chunks[0], now())
+    .prepare(
+      `INSERT INTO layers (id, instance_id, page_id, kind, data, byte_length, rev, updated_at)
+       VALUES (?, ?, ?, ?, '', ?, 1, ?)`,
+    )
+    .bind(layerId, instance.id, pageId, kind, size, now())
     .run();
-  await writeTail(layerId, chunks.slice(1));
   await logActivity({
     actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
     action: kind === "teacher" ? "annotate" : "edit",

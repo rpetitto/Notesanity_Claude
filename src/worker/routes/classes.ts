@@ -2,6 +2,7 @@ import { app, db, storage } from "../platform";
 import {
   handler, now, uid, requireUser, requireTeacher, requireClassTeacher, requireClassMember, findUserInOrg, HttpError, param,} from "../lib/session";
 import { queueMail } from "../lib/mailqueue";
+import { HAS_INK_BYTES } from "../lib/ink";
 import { deleteNotebookCascade } from "./notebooks";
 
 /** Where the invite should point people — this deployment, whatever it is. */
@@ -580,7 +581,7 @@ app.get("/api/classes/:id/students/:studentId/notebooks", handler(async (c) => {
               (SELECT COUNT(DISTINCT l.page_id) FROM layers l
                  JOIN instances i ON i.id = l.instance_id
                 WHERE i.notebook_id = n.id AND i.student_id = ?
-                  AND l.kind = 'student' AND LENGTH(l.data) > 24) AS pages_worked,
+                  AND l.kind = 'student' AND l.byte_length > ${HAS_INK_BYTES}) AS pages_worked,
               (SELECT MAX(l.updated_at) FROM layers l
                  JOIN instances i ON i.id = l.instance_id
                 WHERE i.notebook_id = n.id AND i.student_id = ? AND l.kind = 'student') AS last_worked_at
