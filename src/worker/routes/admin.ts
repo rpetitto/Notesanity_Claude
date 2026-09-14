@@ -17,8 +17,9 @@
 import { app, db } from "../platform";
 import { HttpError, handler, now, param, requireUser, uid } from "../lib/session";
 import { SUPERADMIN_EMAILS } from "../schema";
+import { page } from "../lib/paging";
 
-async function requireSuperadmin(c: any) {
+export async function requireSuperadmin(c: any) {
   const user = await requireUser(c);
   // The seed list is authoritative, so a superadmin still works if the column
   // was somehow missed — the migration and this check can't disagree.
@@ -26,69 +27,6 @@ async function requireSuperadmin(c: any) {
     throw new HttpError(403, "Superadmin access required");
   }
   return user;
-}
-
-/**
- * Paging, so a console page costs the same on day one and at fifty thousand users.
- *
- * These tables used to come back whole — every user, every notebook, every
- * grade — which was fine at a few hundred rows and 412 KB of JSON at two
- * thousand. The window is clamped rather than trusted: a crafted `limit` can't
- * ask for the table back.
- */
-const PAGE_DEFAULT = 100;
-const PAGE_MAX = 500;
-
-function paging(c: any): { limit: number; offset: number; q: string } {
-  const url = new URL(c.req.url);
-  // An absent parameter has to be caught before Number(), which reads both null
-  // and "" as 0 and would otherwise turn "no limit given" into a limit of zero.
-  const asInt = (raw: string | null, fallback: number) => {
-    if (raw === null || raw.trim() === "") return fallback;
-    const n = Number(raw);
-    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
-  };
-  return {
-    limit: Math.min(PAGE_MAX, Math.max(1, asInt(url.searchParams.get("limit"), PAGE_DEFAULT))),
-    offset: asInt(url.searchParams.get("offset"), 0),
-    q: (url.searchParams.get("q") ?? "").trim().slice(0, 100),
-  };
-}
-
-/** A case-insensitive contains-match across the columns worth searching. */
-function search(q: string, columns: string[]): { where: string; params: string[] } {
-  if (!q) return { where: "", params: [] };
-  const like = `%${q}%`;
-  return {
-    where: `WHERE (${columns.map((col) => `${col} LIKE ?`).join(" OR ")})`,
-    params: columns.map(() => like),
-  };
-}
-
-/**
- * Run one windowed query and its matching count.
- *
- * The count uses the same FROM and WHERE as the page, so the total a superadmin
- * reads always describes the rows they are actually looking through.
- */
-async function page(
-  c: any,
-  opts: { select: string; from: string; searchable: string[]; order: string },
-) {
-  const { limit, offset, q } = paging(c);
-  const { where, params } = search(q, opts.searchable);
-
-  const rows = await db
-    .prepare(`SELECT ${opts.select} FROM ${opts.from} ${where} ORDER BY ${opts.order} LIMIT ? OFFSET ?`)
-    .bind(...params, limit, offset)
-    .all<any>();
-
-  const counted = await db
-    .prepare(`SELECT COUNT(*) AS n FROM ${opts.from} ${where}`)
-    .bind(...params)
-    .first<{ n: number }>();
-
-  return c.json({ rows: rows.results ?? [], total: counted?.n ?? 0, limit, offset });
 }
 
 /** Fields a superadmin may change, per table. Anything not listed is read-only. */

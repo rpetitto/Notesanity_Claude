@@ -153,6 +153,9 @@ const TABLES: TableSpec[] = [
   },
 ];
 
+/** The oversight tables a school's own admin sees, alongside the school tab. Read-only — see AdminGrid's scope handling. */
+const ORG_TABLES = TABLES.filter((t) => t.key === "notebooks" || t.key === "assignments" || t.key === "grades");
+
 /** Dates render as "3 hours ago"; everything else as given. */
 const display = (columnId: string, value: unknown): string => {
   if (value === null || value === undefined) return "";
@@ -216,11 +219,16 @@ function NewSchool() {
   );
 }
 
-function AdminGrid({ spec }: { spec: TableSpec }) {
+/** Which base path a grid reads/writes — the superadmin console or one school's own view. */
+type AdminScope = "admin" | "org";
+
+function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminScope }) {
   const qc = useQueryClient();
   const [term, setTerm] = useState("");
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
+  const base = `/api/${scope}`;
+  const queryKey = [scope, spec.endpoint, q, offset];
 
   // Typing shouldn't put a query on the wire per keystroke.
   useEffect(() => {
@@ -232,10 +240,10 @@ function AdminGrid({ spec }: { spec: TableSpec }) {
   }, [term]);
 
   const { data, isLoading, error, isFetching } = useQuery({
-    queryKey: ["admin", spec.endpoint, q, offset],
+    queryKey,
     queryFn: () =>
       api.get<{ rows: Record<string, unknown>[]; total: number }>(
-        `/api/admin/${spec.endpoint}?limit=${PAGE_SIZE}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+        `${base}/${spec.endpoint}?limit=${PAGE_SIZE}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
       ),
     // Keeps the previous page painted while the next one loads, so paging
     // doesn't flash a spinner over the grid.
@@ -246,13 +254,13 @@ function AdminGrid({ spec }: { spec: TableSpec }) {
 
   const save = useMutation({
     mutationFn: ({ id, column, value }: { id: string; column: string; value: unknown }) =>
-      api.patch(`/api/admin/${spec.writeKind ?? spec.endpoint}/${id}`, { column, value }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", spec.endpoint] }),
+      api.patch(`${base}/${spec.writeKind ?? spec.endpoint}/${id}`, { column, value }),
+    onSuccess: () => qc.invalidateQueries({ queryKey }),
     onError: (e: Error) => {
       toast.error(e.message);
       // The grid already painted the new value optimistically; refetching puts
       // the rejected cell back to what the server actually holds.
-      qc.invalidateQueries({ queryKey: ["admin", spec.endpoint] });
+      qc.invalidateQueries({ queryKey });
     },
   });
 
@@ -266,7 +274,10 @@ function AdminGrid({ spec }: { spec: TableSpec }) {
       const column = spec.columns[col];
       const record = rows[row];
       const raw = record?.[column.id];
-      const editable = !!column.editable;
+      // The org-scoped console has no write endpoints — it's oversight, not
+      // the place to bypass the grading screen — so nothing in it is editable
+      // regardless of what the table spec allows in superadmin mode.
+      const editable = scope === "admin" && !!column.editable;
 
       if (column.kind === "boolean") {
         return { kind: GridCellKind.Boolean, data: !!raw, allowOverlay: false, readonly: !editable };
@@ -291,21 +302,21 @@ function AdminGrid({ spec }: { spec: TableSpec }) {
         readonly: !editable,
       };
     },
-    [rows, spec],
+    [rows, spec, scope],
   );
 
   const onCellEdited = useCallback(
     ([col, row]: Item, newValue: EditableGridCell) => {
       const column = spec.columns[col];
       const record = rows[row];
-      if (!column?.editable || !record?.id) return;
+      if (scope !== "admin" || !column?.editable || !record?.id) return;
       const value =
         newValue.kind === GridCellKind.Boolean ? !!newValue.data
         : newValue.kind === GridCellKind.Number ? newValue.data ?? null
         : String(newValue.data ?? "");
       save.mutate({ id: String(record.id), column: column.id, value });
     },
-    [rows, spec, save],
+    [rows, spec, save, scope],
   );
 
   if (isLoading) return <Spinner label={`Loading ${spec.label.toLowerCase()}…`} />;
@@ -637,6 +648,47 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
+/** A school's own admin — everyone but the superadmin sees just this, one tab, no bar to switch away from it. */
+function SchoolAdmin() {
+  return (
+    <Shell wide>
+      <h1 className="mb-4 text-2xl text-pine">My School</h1>
+      <OrgOverview />
+      <div className="mt-4 space-y-4">
+        <OrgSettings />
+        <MailLog />
+        <OrgUsers />
+      </div>
+      <div className="mt-6 space-y-6">
+        {ORG_TABLES.map((spec) => (
+          <div key={spec.key}>
+            <h2 className="mb-2 font-display text-[17px] text-pine">{spec.label}</h2>
+            <AdminGrid spec={spec} scope="org" />
+          </div>
+        ))}
+      </div>
+    </Shell>
+  );
+}
+
+function OrgOverview() {
+  const overview = useQuery({
+    queryKey: ["org", "overview"],
+    queryFn: () => api.get<Record<string, number>>("/api/org/overview"),
+  });
+  if (!overview.data) return null;
+  return (
+    <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <Stat label="Users" value={overview.data.users} />
+      <Stat label="Teachers" value={overview.data.teachers} />
+      <Stat label="Students" value={overview.data.students} />
+      <Stat label="Classes" value={overview.data.classes} />
+      <Stat label="Notebooks" value={overview.data.notebooks} />
+      <Stat label="Assignments" value={overview.data.assignments} />
+    </div>
+  );
+}
+
 export default function Admin() {
   const { user } = useSession();
   const [tab, setTab] = useState(TABLES[0].key);
@@ -646,18 +698,25 @@ export default function Admin() {
     enabled: !!user?.isSuperadmin,
   });
 
-  if (!user?.isSuperadmin) {
+  if (!user?.isAdmin && !user?.isSuperadmin) {
     return (
       <Shell>
         <Card className="p-5">
-          <h1 className="font-display text-[19px] text-pine">Superadmin only</h1>
+          <h1 className="font-display text-[19px] text-pine">Not available</h1>
           <p className="mt-2 text-[16px] text-pine/70">
-            This area is for the people who run Notesanity itself. If you manage a school, your settings are on the
-            Settings page.
+            This area is for people who manage a school's account on Notesanity. If that's not you, there's nothing
+            to see here.
           </p>
         </Card>
       </Shell>
     );
+  }
+
+  // A school's own admin gets exactly the school tab, unlabeled as a subset
+  // of a console they otherwise can't see. The full tab bar — every school's
+  // data, platform-wide — is superadmin only.
+  if (!user?.isSuperadmin) {
+    return <SchoolAdmin />;
   }
 
   const spec = TABLES.find((t) => t.key === tab) ?? TABLES[0];

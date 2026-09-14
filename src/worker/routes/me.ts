@@ -137,6 +137,36 @@ app.get("/api/org/users", handler(async (c) => {
   return c.json({ users: rows.results ?? [], total: counted?.n ?? 0, limit, offset });
 }));
 
+/**
+ * Admin-only: the same at-a-glance counts the superadmin overview shows,
+ * scoped to the admin's own school. Notebooks/assignments don't carry
+ * `org_id` directly, so they're reached by joining back through the class
+ * (or, for a personal notebook with no class, through its owner).
+ */
+app.get("/api/org/overview", handler(async (c) => {
+  const user = await requireUser(c);
+  if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  const one = async (sql: string, ...params: unknown[]) =>
+    (await db.prepare(sql).bind(...params).first<{ n: number }>())?.n ?? 0;
+  return c.json({
+    users: await one(`SELECT COUNT(*) AS n FROM users WHERE org_id = ?`, user.org_id),
+    teachers: await one(`SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND role = 'teacher'`, user.org_id),
+    students: await one(`SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND role = 'student'`, user.org_id),
+    classes: await one(`SELECT COUNT(*) AS n FROM classes WHERE org_id = ?`, user.org_id),
+    notebooks: await one(
+      `SELECT COUNT(*) AS n FROM notebooks n2
+        LEFT JOIN classes cl ON cl.id = n2.class_id
+        LEFT JOIN users owner ON owner.id = n2.owner_id
+        WHERE COALESCE(cl.org_id, owner.org_id) = ?`,
+      user.org_id,
+    ),
+    assignments: await one(
+      `SELECT COUNT(*) AS n FROM assignments a JOIN classes cl ON cl.id = a.class_id WHERE cl.org_id = ?`,
+      user.org_id,
+    ),
+  });
+}));
+
 app.patch("/api/org/users/:id", handler(async (c) => {
   const user = await requireUser(c);
   if (!user.is_admin) throw new HttpError(403, "Admin access required");
