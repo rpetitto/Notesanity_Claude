@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, ClipboardList, Eye, GraduationCap, LayoutGrid, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { BookOpen, ClipboardList, Eye, GraduationCap, LayoutGrid, LibraryBig, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { signOutHref, useSession } from "../lib/session";
 import { api } from "../lib/api";
 import { cn, initials } from "../lib/utils";
@@ -83,6 +83,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
     ? [
         { to: "/classes", label: "Classes", icon: LayoutGrid },
         { to: "/assignments", label: "Assignments", icon: ClipboardList },
+        { to: "/library", label: "Library", icon: LibraryBig },
         { to: "/settings", label: "Settings", icon: Settings },
       ]
     : [

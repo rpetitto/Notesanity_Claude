@@ -15,7 +15,7 @@ import StudentAssignmentNav, {
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
-import { Button, ButtonLink, Card, CardLink, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Textarea, type MenuItem } from "../components/ui";
+import { Button, ButtonLink, Card, CardLink, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea, type MenuItem } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
@@ -874,6 +874,47 @@ function NotebookCard({
   );
 }
 
+/**
+ * A student notebook as one line, not a card.
+ *
+ * A class of thirty makes thirty cards, which is a wall — a teacher looking for
+ * one student's work wants to scan names, not covers. The thumbnail stays
+ * because it's the only thing that tells two "Engineering Notebook"s apart.
+ */
+function StudentNotebookRow({ nb, byline }: { nb: ClassNotebook; byline?: string }) {
+  const accent = nb.accent_color || DEFAULT_ACCENT;
+  return (
+    <Link
+      to={`/notebooks/${nb.id}`}
+      className="flex items-center gap-3 border-b-2 border-pine/12 px-3 py-2.5 last:border-b-0 hover:bg-pine/6"
+    >
+      <div className="shrink-0">
+        {nb.has_cover ? (
+          <img src={`/api/notebooks/${nb.id}/cover`} alt="" className="h-10 w-8 rounded border-2 border-pine object-cover" />
+        ) : nb.first_asset_key || nb.first_pattern ? (
+          <PageThumb
+            pdfUrl={assetUrl(nb.id, nb.first_asset_key ?? undefined)}
+            sourceIndex={nb.first_source_index ?? 0}
+            pageWidth={nb.first_width ?? 612}
+            pageHeight={nb.first_height ?? 792}
+            pattern={nb.first_pattern ?? undefined}
+            patternColor={nb.first_pattern_color ?? undefined}
+            width={32}
+          />
+        ) : (
+          <div className="h-10 w-8 rounded border-2 border-pine" style={{ background: `linear-gradient(135deg, ${accent}22, ${accent}55)` }} />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-display text-[17px] text-pine">{nb.title}</div>
+        {byline && <div className="truncate text-[16px] text-pine/70">{byline}</div>}
+      </div>
+      <span className="hidden shrink-0 text-[16px] text-pine/70 sm:block">{nb.page_count} pages</span>
+      <span className="shrink-0 text-[16px] text-pine/50">{relativeTime(nb.updated_at)}</span>
+    </Link>
+  );
+}
+
 export default function ClassView() {
   const { classId } = useParams<{ classId: string }>();
   const id = classId ?? "";
@@ -953,7 +994,23 @@ export default function ClassView() {
   // is only about where they sit on the page.
   const allNotebooks = useMemo(() => classQ.data?.notebooks ?? [], [classQ.data]);
   const classNotebooks = useMemo(() => allNotebooks.filter((n) => n.kind !== "student"), [allNotebooks]);
-  const studentNotebooks = useMemo(() => allNotebooks.filter((n) => n.kind === "student"), [allNotebooks]);
+  const studentNotebooks = useMemo(
+    () => allNotebooks
+      .filter((n) => n.kind === "student")
+      .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")),
+    [allNotebooks],
+  );
+  /** Who actually has a notebook — a roster-wide list would be mostly dead options. */
+  const notebookOwners = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const n of studentNotebooks) if (n.owner_id) seen.set(n.owner_id, n.owner_name ?? "A student");
+    return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [studentNotebooks]);
+  const [ownerFilter, setOwnerFilter] = useState("");
+  const visibleStudentNotebooks = useMemo(
+    () => (ownerFilter ? studentNotebooks.filter((n) => n.owner_id === ownerFilter) : studentNotebooks),
+    [studentNotebooks, ownerFilter],
+  );
 
   // Fetched unconditionally (not gated on `tab === "assignments"`) — the nav's
   // to-do badge needs a count before the tab is ever opened.
@@ -1356,17 +1413,36 @@ export default function ClassView() {
                 </Button>
               )}
             </div>
-            {studentNotebooks.length === 0 ? (
+            {isTeacher && notebookOwners.length > 1 && (
+              <div className="mb-3 flex items-center gap-2">
+                <Label htmlFor="student-notebook-filter">Student</Label>
+                <Select
+                  id="student-notebook-filter"
+                  className="h-11 w-auto min-w-[200px] text-[16px]"
+                  value={ownerFilter}
+                  onChange={(e) => setOwnerFilter(e.target.value)}
+                >
+                  <option value="">Everyone ({studentNotebooks.length})</option>
+                  {notebookOwners.map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
+            {visibleStudentNotebooks.length === 0 ? (
               <p className="rounded-[12px] border-2 border-dashed border-pine/25 bg-white/60 px-4 py-5 text-[16px] text-pine/65">
-                {isTeacher ? "No student has made one yet." : "You haven't made one for this class yet."}
+                {!isTeacher
+                  ? "You haven't made one for this class yet."
+                  : ownerFilter
+                    ? "That student hasn't made one yet."
+                    : "No student has made one yet."}
               </p>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {studentNotebooks.map((nb) => (
-                  <NotebookCard
+              <div className="overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)]">
+                {visibleStudentNotebooks.map((nb) => (
+                  <StudentNotebookRow
                     key={nb.id}
                     nb={nb}
-                    to={`/notebooks/${nb.id}`}
                     byline={isTeacher ? nb.owner_name ?? "A student" : undefined}
                   />
                 ))}

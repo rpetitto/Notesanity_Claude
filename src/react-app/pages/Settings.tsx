@@ -10,6 +10,14 @@ import { Button, ButtonLink, Card, Chip } from "../components/ui";
 
 const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
 
+/** One plain sentence per way of having a plan, keyed by how the plan was reached. */
+const PLAN_BLURBS: Record<Plan["source"], string> = {
+  free: "Up to 10 class notebooks, unlimited students, and every marking tool.",
+  pro: "Unlimited class notebooks, plus a page library you can reuse across them.",
+  department: "A Pro seat from your school's department bundle — unlimited notebooks and the page library.",
+  school: "Everything Notesanity does, for every teacher in your school, plus the admin panel.",
+};
+
 /**
  * What the person is on, and the one thing they can do about it.
  *
@@ -45,10 +53,12 @@ function PlanCard({ plan, isTeacher }: { plan: Plan; isTeacher: boolean }) {
           <> {plan.cancelAtPeriodEnd ? "Ends" : "Renews"} on {new Date(plan.renewsAt).toLocaleDateString("en-US")}.</>
         )}
       </p>
-      {plan.beta && isTeacher && (
+      {isTeacher && (
         <p className="mt-2 text-[16px] text-pine/70">
-          Every Pro feature is on for everyone during the beta. Pro will be {dollars(plan.prices.pro)} a year,
-          and you'll get a full semester's notice before that.
+          {PLAN_BLURBS[plan.source]}{" "}
+          <a href="/pricing" className="font-bold text-pine underline decoration-2 underline-offset-2 hover:bg-mint/40">
+            Compare plans
+          </a>
         </p>
       )}
       {plan.seats && (

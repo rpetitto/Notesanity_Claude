@@ -21,6 +21,7 @@ import Workspace from "./pages/Workspace";
 import AssignmentEditor from "./pages/AssignmentEditor";
 import Grading from "./pages/Grading";
 import TeacherAssignments from "./pages/TeacherAssignments";
+import PageLibrary from "./pages/PageLibrary";
 import StudentNotebook, { StudentNotebookList } from "./pages/StudentNotebook";
 
 /**
@@ -81,6 +82,7 @@ export default function App() {
       <Route path="/classes/:classId/students/:studentId" element={<StudentNotebookList />} />
       <Route path="/classes/:classId/students/:studentId/notebooks/:notebookId" element={<StudentNotebook />} />
       <Route path="/assignments" element={<TeacherAssignments />} />
+      <Route path="/library" element={<PageLibrary />} />
       <Route path="/assignments/:assignmentId" element={<AssignmentRoute />} />
       <Route path="/assignments/:assignmentId/edit" element={<AssignmentEditor />} />
       <Route path="/notebooks/:notebookId/edit" element={<NotebookEditor />} />

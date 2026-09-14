@@ -385,10 +385,23 @@ export default function NotebookEditor() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  /**
+   * Saving is sequential rather than parallel: each one may copy a source PDF
+   * into the library, and a handful of 25 MB round trips at once is a worse
+   * experience than waiting a moment longer.
+   */
   const saveToLibrary = useMutation({
-    mutationFn: (pageId: string) =>
-      api.post<{ title: string }>("/api/my/page-library", { notebookId, pageId }),
-    onSuccess: (res) => toast.success(`"${res.title}" saved to your library`),
+    mutationFn: async (pageIds: string[]) => {
+      let last = "";
+      for (const pageId of pageIds) {
+        last = (await api.post<{ title: string }>("/api/my/page-library", { notebookId, pageId })).title;
+      }
+      return { count: pageIds.length, last };
+    },
+    onSuccess: ({ count, last }) => {
+      setSelection(new Set());
+      toast.success(count === 1 ? `"${last}" saved to your library` : `${count} pages saved to your library`);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const updateField = useMutation({
@@ -777,7 +790,6 @@ export default function NotebookEditor() {
           onArchiveToggle={(id, archived) => patchPage.mutate({ id, archived })}
           onDelete={(id) => confirmDelete([id])}
           onDuplicate={(id) => duplicatePages.mutate([id])}
-          onSaveToLibrary={(id) => saveToLibrary.mutate(id)}
           annotations={railAnnotations}
           onArrange={(entries) => arrangePages.mutate(entries)}
           onRenameGroup={(from, to) => {
@@ -1338,6 +1350,15 @@ export default function NotebookEditor() {
                 className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
               >
                 <CopyPlus className="h-3.5 w-3.5" strokeWidth={2.5} /> Duplicate
+              </button>
+              <button
+                onClick={() => saveToLibrary.mutate(Array.from(selection))}
+                disabled={saveToLibrary.isPending}
+                title="Keep a copy in your page library, to reuse in any notebook"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
+              >
+                <LibraryBig className="h-3.5 w-3.5" strokeWidth={2.5} />
+                {saveToLibrary.isPending ? "Saving…" : "Save to library"}
               </button>
               <button
                 onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "archive" })}
