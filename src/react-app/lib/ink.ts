@@ -220,7 +220,17 @@ export function straightenHighlight(p: number[], nibWidth: number): number[] {
  * so each can carry its own width. Highlighters and pressure-less input draw as a
  * single smoothed path, which is both faster and visually cleaner.
  */
-export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, scale: number) {
+export function drawStroke(
+  ctx: CanvasRenderingContext2D,
+  stroke: Stroke,
+  scale: number,
+  /**
+   * Floor for the rendered width, in device pixels. Zero everywhere the ink is
+   * shown at reading size; a thumbnail passes ~1, because scaling a 3pt nib
+   * down to a 52px preview gives a quarter of a pixel and draws nothing.
+   */
+  minWidth = 0,
+) {
   const p = stroke.p;
   if (p.length < 3) return;
 
@@ -235,7 +245,7 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, scale:
     ctx.globalCompositeOperation = "multiply";
   }
 
-  const width = stroke.w * scale;
+  const width = Math.max(stroke.w * scale, minWidth);
 
   // A single point renders as a dot.
   if (p.length === 3) {
@@ -268,7 +278,7 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, scale:
 
   for (let i = 0; i + 5 < p.length; i += 3) {
     const pressure = (p[i + 2] + p[i + 5]) / 2;
-    ctx.lineWidth = Math.max(0.4, width * (0.35 + 0.65 * pressure));
+    ctx.lineWidth = Math.max(0.4, minWidth, width * (0.35 + 0.65 * pressure));
     ctx.beginPath();
     ctx.moveTo(p[i] * scale, p[i + 1] * scale);
     ctx.lineTo(p[i + 3] * scale, p[i + 4] * scale);
@@ -288,9 +298,39 @@ function hasPressureVariation(p: number[]): boolean {
 }
 
 /** Repaint an entire layer. Highlighters first so pen ink stays on top. */
-export function drawLayer(ctx: CanvasRenderingContext2D, layer: LayerData, scale: number) {
-  for (const s of layer.s) if (s.t === "h") drawStroke(ctx, s, scale);
-  for (const s of layer.s) if (s.t !== "h") drawStroke(ctx, s, scale);
+export function drawLayer(ctx: CanvasRenderingContext2D, layer: LayerData, scale: number, minWidth = 0) {
+  for (const s of layer.s) if (s.t === "h") drawStroke(ctx, s, scale, minWidth);
+  for (const s of layer.s) if (s.t !== "h") drawStroke(ctx, s, scale, minWidth);
+}
+
+/**
+ * Paint a layer into a thumbnail.
+ *
+ * Deliberately not the same as `drawLayer`. A preview is answering "is there
+ * anything on this page?", and at a fiftieth of full size faithful rendering
+ * answers it with an invisible hairline — so strokes get a width floor and
+ * come out heavier than they really are. Stamps are drawn here as well, which
+ * `drawLayer` never does: on the live page they are DOM elements sitting over
+ * the canvas, and a thumbnail has no DOM to put them in.
+ *
+ * Text boxes and comment pins are left out. Both are UI as much as content —
+ * a bordered box, a numbered marker — and at this size they'd read as specks
+ * rather than as writing.
+ */
+export function drawLayerThumb(ctx: CanvasRenderingContext2D, layer: LayerData, scale: number, minWidth = 1) {
+  drawLayer(ctx, layer, scale, minWidth);
+
+  if (!layer.e.length) return;
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const stamp of layer.e) {
+    // Matches how the live page places them: centred on the point, sized in
+    // page units (see the stamp layer in PageCanvas).
+    ctx.font = `${Math.max(6, stamp.s * scale)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+    ctx.fillText(stamp.e, stamp.x * scale, stamp.y * scale);
+  }
+  ctx.restore();
 }
 
 // Ink has to stay legible over a printed page, so these are saturated enough to

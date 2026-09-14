@@ -16,6 +16,7 @@ import {
   ChevronDown, ChevronRight, CopyPlus, EyeOff, GripVertical, LibraryBig, Pencil, RotateCcw, Trash2,
 } from "lucide-react";
 import PageThumb from "./PageThumb";
+import type { LayerData } from "../lib/ink";
 import { pageSource, type PageRec } from "../lib/api";
 import { cn } from "../lib/utils";
 
@@ -44,6 +45,8 @@ interface Props {
   onDuplicate: (pageId: string) => void;
   /** Keep a copy of this page in the teacher's own library, to reuse elsewhere. */
   onSaveToLibrary: (pageId: string) => void;
+  /** The teacher's own markup per page, so a preview shows what's been drawn on. */
+  annotations?: Record<string, LayerData>;
   onArrange: (entries: ArrangeEntry[]) => void;
   onRenameGroup: (from: string, to: string) => void;
 }
@@ -56,7 +59,7 @@ interface Section {
 export default function NotebookPageList({
   notebookId, pages, assignmentCounts, currentPageId, selection,
   onSelectionChange, onOpenPage, onRename, onArchiveToggle, onDelete, onDuplicate, onSaveToLibrary,
-  onArrange, onRenameGroup,
+  onArrange, onRenameGroup, annotations,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -234,6 +237,7 @@ export default function NotebookPageList({
                         {...pageSource(notebookId, p)}
                         width={52}
                         dimmed={!!p.archived}
+                        overlays={annotations?.[p.id] ? [annotations[p.id]] : undefined}
                       />
                       {count > 0 && (
                         <span

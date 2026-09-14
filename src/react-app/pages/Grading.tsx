@@ -108,13 +108,19 @@ export function DeleteAssignmentModal({
 }
 
 function PageRail({
-  pages, pageNumbers, notebookId, activePageId, onSelect,
+  pages, pageNumbers, notebookId, activePageId, onSelect, ink,
 }: {
   pages: PageRec[];
   pageNumbers?: number[];
   notebookId: string;
   activePageId: string;
   onSelect: (index: number, pageId: string) => void;
+  /**
+   * The three layers stacked on each page, so the rail shows which ones this
+   * student actually wrote on — the question a teacher is asking when they
+   * scan it — and which have already been marked.
+   */
+  ink?: { master?: LayerMap; student?: LayerMap; teacher?: LayerMap };
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -133,6 +139,7 @@ function PageRail({
             <PageThumb
               {...pageSource(notebookId, page)}
               width={64}
+              overlays={ink && [ink.master?.[page.id], ink.student?.[page.id], ink.teacher?.[page.id]]}
             />
             <span className="w-full truncate text-center text-[16px] text-pine/70">
               Page {pageNumbers?.[i] ?? i + 1}
@@ -719,6 +726,11 @@ export default function Grading() {
               notebookId={assignment.notebookId}
               activePageId={visiblePage}
               onSelect={goToRailPage}
+              ink={{
+                master: masterLayers,
+                student: notebookWork.studentLayers,
+                teacher: notebookWork.teacherLayers,
+              }}
             />
           </aside>
         </div>
@@ -740,6 +752,11 @@ export default function Grading() {
               notebookId={assignment.notebookId}
               activePageId={visiblePage}
               onSelect={goToRailPage}
+              ink={{
+                master: masterLayers,
+                student: notebookWork.studentLayers,
+                teacher: notebookWork.teacherLayers,
+              }}
             />
           </aside>
         )}

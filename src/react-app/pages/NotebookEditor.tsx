@@ -244,6 +244,20 @@ export default function NotebookEditor() {
   const annotationRows = annotationsQuery.data?.annotations ?? [];
   const hasUnpublishedAnnotations = annotationRows.some((a) => a.unpublished);
 
+  /**
+   * Every page's markup, for the rail's previews.
+   *
+   * The page being edited comes from local state rather than the query, so a
+   * stroke shows up in its own thumbnail as it's drawn instead of waiting for
+   * the autosave to land and the query to refetch.
+   */
+  const railAnnotations = useMemo(() => {
+    const map: Record<string, LayerData> = {};
+    for (const row of annotationRows) if (row.data) map[row.pageId] = parseLayer(row.data);
+    if (page) map[page.id] = annotationLayer;
+    return map;
+  }, [annotationRows, page, annotationLayer]);
+
   // Load the current page's draft annotation into local state whenever the
   // page changes (or the query first resolves) — but never while the teacher
   // is actively mid-edit, so a background refetch can't clobber their strokes.
@@ -764,6 +778,7 @@ export default function NotebookEditor() {
           onDelete={(id) => confirmDelete([id])}
           onDuplicate={(id) => duplicatePages.mutate([id])}
           onSaveToLibrary={(id) => saveToLibrary.mutate(id)}
+          annotations={railAnnotations}
           onArrange={(entries) => arrangePages.mutate(entries)}
           onRenameGroup={(from, to) => {
             const ids = allPages.filter((p) => (p.group_name ?? "") === from).map((p) => p.id);
