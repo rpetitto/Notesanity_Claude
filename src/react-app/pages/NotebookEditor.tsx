@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
@@ -671,6 +671,19 @@ export default function NotebookEditor() {
   if (query.isLoading) return <Spinner label="Loading notebook…" />;
   if (query.error) return <Shell><ErrorNote error={query.error as Error} /></Shell>;
   if (!query.data) return null;
+
+  /*
+   * Authoring rights come from the class, not from the account.
+   *
+   * Being a teacher is not the same as teaching *this* class: an account
+   * enrolled here as a student — a teacher keeping a test student, say — holds
+   * student rights over these notebooks however their own role reads. The
+   * server has always said so in `isTeacher` and this screen used to ignore it,
+   * so it offered page actions, the field palette and Publish to someone every
+   * one of those calls would refuse. Send them to the working view, which is
+   * the thing they can actually use.
+   */
+  if (!query.data.isTeacher) return <Navigate to={`/notebooks/${notebookId}`} replace />;
 
   const { notebook } = query.data;
   /**

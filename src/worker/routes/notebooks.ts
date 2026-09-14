@@ -14,6 +14,20 @@ export const FIELD_TYPES = [
   "richtext", "figure",
 ];
 
+/**
+ * Why someone with no authoring rights here hasn't got them.
+ *
+ * "Teacher access required" was the answer to every one of these, which is
+ * actively misleading to the commonest case: an account that *is* a teacher but
+ * is enrolled in this particular class as a student. Rights come from the
+ * enrollment, not the account, and the message should say which.
+ */
+const NOT_THIS_CLASS =
+  "You're in this class as a student, so its notebooks are read-only for you. " +
+  "Rights come from how you're enrolled, not from your account role.";
+const OTHERS_NOTEBOOK =
+  "This is the student's own notebook — you can read it, not write in it.";
+
 /** Teacher-or-enrolled-student access to a notebook, resolved via its class. */
 async function notebookAccess(c: any, notebookId: string) {
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
@@ -36,7 +50,7 @@ async function notebookAccess(c: any, notebookId: string) {
   if (nb.kind === "student") {
     const { user, isTeacher: teachesClass } = await requireClassMember(c, nb.class_id);
     if (nb.owner_id === user.id) return { nb, user, isTeacher: true };
-    if (teachesClass) return { nb, user, isTeacher: false };
+    if (teachesClass) return { nb, user, isTeacher: false, denied: OTHERS_NOTEBOOK };
     // Classmates never see each other's notebooks.
     throw new HttpError(404, "Notebook not found");
   }
@@ -51,7 +65,19 @@ async function notebookAccess(c: any, notebookId: string) {
   // Archiving is the teacher putting it away for everyone, so it leaves a
   // student's world at the same moment it leaves the class list.
   if (!isTeacher && nb.archived) throw new HttpError(404, "Notebook not found");
-  return { nb, user, isTeacher };
+  return { nb, user, isTeacher, denied: isTeacher ? undefined : NOT_THIS_CLASS };
+}
+
+/**
+ * The guard every authoring route in this file runs.
+ *
+ * It exists so the refusal can explain itself — `notebookAccess` knows exactly
+ * why it withheld authoring rights, and this is what carries that reason out to
+ * the person instead of flattening every case into "Teacher access required".
+ */
+function requireNotebookTeacher<T extends { isTeacher: boolean; denied?: string }>(access: T): T {
+  if (!access.isTeacher) throw new HttpError(403, access.denied ?? "Teacher access required");
+  return access;
 }
 
 /**
@@ -87,8 +113,7 @@ app.post("/api/classes/:id/notebooks", handler(async (c) => {
 
 /** Upload an additional source PDF whose pages can be appended to an existing notebook. */
 app.post("/api/notebooks/:id/assets", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const form = await c.req.parseBody();
   const file = form["file"] as File | undefined;
   if (!file) throw new HttpError(400, "No file uploaded");
@@ -196,8 +221,7 @@ async function syncPageCount(notebookId: string) {
  * work is never re-anchored.
  */
 app.post("/api/notebooks/:id/pages", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const body = await c.req.json<{
     assetKey?: string;
     pages: { sourceIndex: number; width: number; height: number }[];
@@ -242,8 +266,7 @@ const MAX_BLANK_PAGES = 50;
  * US Letter for a notebook that has none yet.
  */
 app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const body = await c.req.json<{
     pattern?: string;
     color?: string;
@@ -301,8 +324,7 @@ app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
  * second page would be a bug wearing a feature's clothes.
  */
 app.post("/api/notebooks/:id/pages/:pageId/duplicate", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const source = await db
     .prepare(`SELECT * FROM pages WHERE id = ? AND notebook_id = ?`)
     .bind(param(c, "pageId"), nb.id)
@@ -380,8 +402,7 @@ function copyLabel(label: string | null | undefined): string {
  * reappears intact if the page is restored.
  */
 app.patch("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const page = await db
     .prepare(`SELECT * FROM pages WHERE id = ? AND notebook_id = ?`)
     .bind(param(c, "pageId"), nb.id)
@@ -426,8 +447,7 @@ app.patch("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
  * restoring. Backs the selection toolbar in the notebook's page list.
  */
 app.post("/api/notebooks/:id/pages/bulk", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const { pageIds, action, groupName } = await c.req.json<{
     pageIds: string[];
     action: "group" | "ungroup" | "archive" | "restore" | "delete" | "open-to-teacher" | "close-to-teacher";
@@ -534,8 +554,7 @@ async function deletePages(notebookId: string, pageIds: string[]) {
 }
 
 app.delete("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const result = await deletePages(nb.id, [param(c, "pageId")]);
   return c.json({ ok: true, ...result });
 }));
@@ -546,8 +565,7 @@ app.delete("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
  * dragged into a section lands exactly where it was dropped.
  */
 app.post("/api/notebooks/:id/pages/arrange", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const { pages } = await c.req.json<{ pages: { id: string; groupName?: string }[] }>();
   if (!Array.isArray(pages) || pages.length === 0) throw new HttpError(400, "No pages to arrange");
 
@@ -612,8 +630,7 @@ app.get("/api/notebooks/:id/assignments", handler(async (c) => {
 
 /** Reorder the whole notebook in one call (drag-and-drop commit). */
 app.post("/api/notebooks/:id/reorder", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const { pageIds } = await c.req.json<{ pageIds: string[] }>();
   let seq = 1;
   for (const pid of pageIds ?? []) {
@@ -624,8 +641,7 @@ app.post("/api/notebooks/:id/reorder", handler(async (c) => {
 }));
 
 app.post("/api/notebooks/:id/fields", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const body = await c.req.json<{
     pageId: string; type: string; x: number; y: number; w: number; h: number;
     label?: string; options?: string[]; prompt?: string; content?: string;
@@ -654,8 +670,7 @@ app.post("/api/notebooks/:id/fields", handler(async (c) => {
 
 /** Move/resize/relabel a field. Student values stay attached via the field UUID. */
 app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const field = await db
     .prepare(`SELECT * FROM fields WHERE id = ? AND notebook_id = ?`)
     .bind(param(c, "fieldId"), nb.id)
@@ -684,8 +699,7 @@ const MAX_FIELD_MEDIA_BYTES = 6 * 1024 * 1024;
 
 /** Attach a teacher-supplied image — a prompt illustration or a `figure` block. */
 app.post("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const fieldId = param(c, "fieldId");
   const field = await db
     .prepare(`SELECT id FROM fields WHERE id = ? AND notebook_id = ?`)
@@ -723,8 +737,7 @@ app.get("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
 }));
 
 app.delete("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   await db
     .prepare(`UPDATE fields SET media_key = NULL, updated_at = ? WHERE id = ? AND notebook_id = ?`)
     .bind(now(), param(c, "fieldId"), nb.id)
@@ -733,8 +746,7 @@ app.delete("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
 }));
 
 app.delete("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   await db
     .prepare(`UPDATE fields SET archived = 1, updated_at = ? WHERE id = ? AND notebook_id = ?`)
     .bind(now(), param(c, "fieldId"), nb.id)
@@ -743,8 +755,7 @@ app.delete("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
 }));
 
 app.patch("/api/notebooks/:id", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const b = await c.req.json<{
     title?: string; accentColor?: string; clearCover?: boolean;
     /** Put the notebook away (or bring it back) for the whole class at once. */
@@ -778,8 +789,7 @@ app.patch("/api/notebooks/:id", handler(async (c) => {
  * can be undone; this cannot.
  */
 app.delete("/api/notebooks/:id", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   if (nb.kind !== "class") throw new HttpError(400, "That isn't a class notebook");
   if (nb.status === "published" || nb.last_published_at) {
     throw new HttpError(
@@ -802,8 +812,7 @@ const MAX_COVER_BYTES = 4 * 1024 * 1024;
 
 /** Upload a cover image for the notebook tile. */
 app.post("/api/notebooks/:id/cover", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const form = await c.req.parseBody();
   const file = form["file"] as File | undefined;
   if (!file) throw new HttpError(400, "No image uploaded");
@@ -859,8 +868,7 @@ app.get("/api/notebooks/:id/annotations", handler(async (c) => {
 }));
 
 app.put("/api/notebooks/:id/annotations/:pageId", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const pageId = param(c, "pageId");
   const page = await db
     .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
@@ -903,8 +911,7 @@ app.put("/api/notebooks/:id/annotations/:pageId", handler(async (c) => {
  * pressed into doing nothing and calling it a success.
  */
 app.post("/api/notebooks/:id/discard-drafts", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const pending = await db
     .prepare(`SELECT COUNT(*) AS n FROM page_annotations WHERE notebook_id = ? AND draft_data <> published_data`)
     .bind(nb.id)
@@ -925,8 +932,7 @@ app.post("/api/notebooks/:id/discard-drafts", handler(async (c) => {
  * report what changed. Nothing student-authored is ever rewritten here.
  */
 app.post("/api/notebooks/:id/publish", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
-  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
 
   const since = nb.last_published_at;
   const summary = since
