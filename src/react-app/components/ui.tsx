@@ -44,6 +44,15 @@ const base =
   "active:shadow-none disabled:pointer-events-none disabled:opacity-50 " +
   "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-pine/30";
 
+/**
+ * A button's classes without a button around them — for the few places that
+ * need the look on something else, like a menu trigger that has to read as the
+ * primary action rather than as a "…".
+ */
+export function buttonClass(variant: Variant = "secondary", size: Size = "md", className?: string) {
+  return cn(base, SIZES[size], VARIANTS[variant], className);
+}
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   size?: Size;
@@ -51,7 +60,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = "secondary", size = "md", className, ...props }, ref) => (
-    <button ref={ref} className={cn(base, SIZES[size], VARIANTS[variant], className)} {...props} />
+    <button ref={ref} className={buttonClass(variant, size, className)} {...props} />
   ),
 );
 Button.displayName = "Button";
@@ -66,7 +75,7 @@ export function ButtonLink({
   className?: string;
   children: ReactNode;
 } & Record<string, unknown>) {
-  const cls = cn(base, SIZES[size], VARIANTS[variant], className);
+  const cls = buttonClass(variant, size, className);
   if (to) return <Link to={to} className={cls} {...rest}>{children}</Link>;
   return <a href={href} className={cls} {...rest}>{children}</a>;
 }
@@ -292,12 +301,14 @@ export interface MenuItem {
  * are themselves links: without it, opening the menu would navigate away.
  */
 export function Menu({
-  items, label = "More actions", trigger, align = "right", className, disabled, tour,
+  items, label = "More actions", trigger, triggerClassName, align = "right", className, disabled, tour,
 }: {
   items: MenuItem[];
   label?: string;
   /** Defaults to a "…" icon button sized like every other icon button. */
   trigger?: ReactNode;
+  /** Replaces the round icon-button shape — pass `buttonClass(...)` for a pill. */
+  triggerClassName?: string;
   align?: "left" | "right";
   className?: string;
   disabled?: boolean;
@@ -314,13 +325,13 @@ export function Menu({
    * a menu rendered inside one is a menu with its bottom half sliced off. The
    * cost is positioning it by hand, which is this.
    */
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const [at, setAt] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const place = useCallback(() => {
     const el = triggerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const width = Math.min(272, window.innerWidth - 24);
+    const width = Math.min(Math.max(272, r.width), window.innerWidth - 24);
     // Flips above the trigger when there isn't room below — a menu on a card
     // near the bottom of a long page otherwise opens off-screen.
     const estimated = 64 * items.length + 12;
@@ -329,7 +340,7 @@ export function Menu({
     const left = align === "right"
       ? Math.max(12, Math.min(r.right - width, window.innerWidth - width - 12))
       : Math.max(12, Math.min(r.left, window.innerWidth - width - 12));
-    setAt({ top, left });
+    setAt({ top, left, width });
   }, [align, items.length]);
 
   useEffect(() => {
@@ -368,7 +379,10 @@ export function Menu({
           setOpen((v) => !v);
         }}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        className={cn(
+        // A pill trigger replaces the icon-button shape outright rather than
+        // merging with it — the round 44px width is exactly what a labelled
+        // button must not inherit.
+        className={triggerClassName ?? cn(
           "inline-flex h-11 w-11 items-center justify-center rounded-full border-[3px] border-transparent",
           "text-pine transition-colors hover:bg-pine/10 disabled:opacity-40",
           "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-pine/30",
@@ -381,11 +395,11 @@ export function Menu({
       {open && at && createPortal(
         <div
           role="menu"
-          style={{ top: at.top, left: at.left }}
+          style={{ top: at.top, left: at.left, width: at.width }}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           className={cn(
-            "fixed z-[60] w-[min(17rem,calc(100vw-24px))] overflow-hidden rounded-[16px]",
+            "fixed z-[60] overflow-hidden rounded-[16px]",
             "border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)]",
           )}
         >

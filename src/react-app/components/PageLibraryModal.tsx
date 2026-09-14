@@ -18,19 +18,28 @@ import { ErrorNote, Spinner } from "./Shell";
 import PageThumb from "./PageThumb";
 
 export default function PageLibraryModal({
-  pages, busy, onClose, onInsert,
+  pages, currentPageId, busy, onClose, onInsert,
 }: {
   pages: PageRec[];
+  /** The page on screen behind the modal, if there is one. */
+  currentPageId?: string | null;
   busy: boolean;
   onClose: () => void;
   onInsert: (body: { entryId: string; insertAfterPageId: string | null }) => void;
 }) {
   const qc = useQueryClient();
   const [picked, setPicked] = useState<string | null>(null);
-  const [after, setAfter] = useState("");
   const [removing, setRemoving] = useState<LibraryPageRec | null>(null);
 
   const live = pages.filter((p) => !p.archived);
+  /**
+   * "Right here" is what a teacher almost always means: they were looking at a
+   * page when they reached for the library. So it leads the list and it is the
+   * default — the end of a forty-page notebook is a long scroll from wherever
+   * they were.
+   */
+  const currentIdx = currentPageId ? live.findIndex((p) => p.id === currentPageId) : -1;
+  const [after, setAfter] = useState(currentIdx >= 0 ? live[currentIdx].id : "");
 
   const library = useQuery({
     queryKey: ["page-library"],
@@ -100,6 +109,9 @@ export default function PageLibraryModal({
           <div className="mt-5">
             <label className="label-caps mb-1 block text-pine/70" htmlFor="library-after">Where</label>
             <Select id="library-after" value={after} onChange={(e) => setAfter(e.target.value)}>
+              {currentIdx >= 0 && (
+                <option value={live[currentIdx].id}>After the current page (page {currentIdx + 1})</option>
+              )}
               <option value="">At the end</option>
               {live.map((p, i) => (
                 <option key={p.id} value={p.id}>

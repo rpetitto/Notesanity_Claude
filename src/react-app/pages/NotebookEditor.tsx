@@ -400,6 +400,10 @@ export default function NotebookEditor() {
     },
     onSuccess: ({ count, last }) => {
       setSelection(new Set());
+      // The library is read by the insert modal and by /library, both of which
+      // can be opened a second later — a saved page that isn't there yet reads
+      // as a save that didn't happen.
+      void qc.invalidateQueries({ queryKey: ["page-library"] });
       toast.success(count === 1 ? `"${last}" saved to your library` : `${count} pages saved to your library`);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -1125,6 +1129,7 @@ export default function NotebookEditor() {
       {libraryOpen && (
         <PageLibraryModal
           pages={allPages}
+          currentPageId={page?.id}
           busy={insertLibraryPage.isPending}
           onClose={() => setLibraryOpen(false)}
           onInsert={(body) => insertLibraryPage.mutate(body)}

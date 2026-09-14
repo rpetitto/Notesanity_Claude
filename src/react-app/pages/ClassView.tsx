@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  Archive, BookOpen, Check, ClipboardList, Copy, Eye, FolderOpen, GraduationCap, Palette, Plus,
+  Archive, BookOpen, Check, ChevronDown, ClipboardList, Copy, Eye, FolderOpen, GraduationCap, Palette, Plus,
   RefreshCw, RotateCcw, Settings2, Trash2, Upload, UserPlus, UserX, Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -15,7 +15,7 @@ import StudentAssignmentNav, {
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
-import { Button, ButtonLink, Card, CardLink, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea, type MenuItem } from "../components/ui";
+import { Button, ButtonLink, buttonClass, Card, CardLink, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea, type MenuItem } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
@@ -967,27 +967,50 @@ export default function ClassView() {
   const isTeacher = classQ.data?.myRole === "teacher";
 
   /**
-   * The three ways to start a notebook, defined once and rendered in two
-   * places — above the grid, or inside the empty card when there is no grid
-   * yet. Two sources would drift the moment one of them gained an option.
+   * One button, three ways to start a notebook — the same shape as "New
+   * assignment", so the two things a teacher creates are created the same way.
+   * Three pills side by side made the choice look like three separate features
+   * and pushed the notebooks themselves below the fold.
+   *
+   * Defined once and rendered in two places: above the grid, or inside the
+   * empty card when there is no grid yet.
    */
   const notebookActions = (
-    <>
-      <Button type="button" variant="secondary" onClick={() => setNewNotebookOpen(true)}>
-        <Plus className="h-4 w-4" strokeWidth={2.5} />
-        Start from blank
-      </Button>
-      <Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}>
-        <Upload className="h-4 w-4" strokeWidth={2.5} />
-        Choose a file
-      </Button>
-      {hasDrivePicker && (
-        <Button type="button" variant="primary" onClick={() => void importFromDrive()} disabled={!!driveBusy}>
-          <FolderOpen className="h-4 w-4" strokeWidth={2.5} />
-          {driveBusy || "From Google Drive"}
-        </Button>
-      )}
-    </>
+    <Menu
+      label="New notebook"
+      align="right"
+      triggerClassName={buttonClass("primary", "md")}
+      trigger={
+        <>
+          <Plus className="h-4 w-4" strokeWidth={2.5} />
+          New notebook
+          <ChevronDown className="h-4 w-4" strokeWidth={2.5} />
+        </>
+      }
+      items={[
+        {
+          label: "Start from blank",
+          hint: "Lined, grid, dotted or plain paper",
+          icon: <Plus className="h-5 w-5" strokeWidth={2.5} />,
+          onClick: () => setNewNotebookOpen(true),
+        },
+        {
+          label: "Choose a file",
+          hint: "A PDF, Word or PowerPoint file on this device",
+          icon: <Upload className="h-5 w-5" strokeWidth={2.5} />,
+          onClick: () => fileInputRef.current?.click(),
+        },
+        ...(hasDrivePicker
+          ? [{
+              label: "From Google Drive",
+              hint: driveBusy || "Pick a file out of your Drive",
+              icon: <FolderOpen className="h-5 w-5" strokeWidth={2.5} />,
+              disabled: !!driveBusy,
+              onClick: () => void importFromDrive(),
+            }]
+          : []),
+      ]}
+    />
   );
 
   // The server already decides who may see which of these; splitting them here
