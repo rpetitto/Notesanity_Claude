@@ -222,18 +222,22 @@ function InviteModal({ classId, onClose }: { classId: string; onClose: () => voi
   const mutation = useMutation({
     mutationFn: () => {
       const emails = text.split(/[,\n]/).map((e) => e.trim()).filter(Boolean);
-      return api.post<{ added: number }>("/api/classes/" + classId + "/invite", { emails });
+      return api.post<{ added: number; skipped: { email: string; reason: string }[] }>(
+        "/api/classes/" + classId + "/invite",
+        { emails },
+      );
     },
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["class", classId] });
       // Say "on the way", not "sent": invites are queued and go out over the
       // next few minutes, because the platform caps sends per minute.
-      toast.success(
-        res.added === 0
-          ? "Everyone on that list was already in this class"
-          : `Invited ${res.added} student${res.added === 1 ? "" : "s"} — their emails are on the way`,
-      );
-      onClose();
+      if (res.added > 0) {
+        toast.success(`Invited ${res.added} student${res.added === 1 ? "" : "s"} — their emails are on the way`);
+      } else if (!res.skipped?.length) {
+        toast.success("Everyone on that list was already in this class");
+      }
+      for (const s of res.skipped ?? []) toast.error(`${s.email}: ${s.reason}`);
+      if (res.added > 0 || !res.skipped?.length) onClose();
     },
     onError: (err: Error) => toast.error(err.message),
   });

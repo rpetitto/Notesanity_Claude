@@ -1,6 +1,6 @@
 import { app, db, storage } from "../platform";
 import {
-  handler, now, uid, requireUser, requireTeacher, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+  handler, now, uid, requireUser, requireTeacher, requireClassTeacher, requireClassMember, findUserInOrg, HttpError, param,} from "../lib/session";
 import { queueMail } from "../lib/mailqueue";
 import { deleteNotebookCascade } from "./notebooks";
 
@@ -145,10 +145,16 @@ app.post("/api/classes/import-classroom", handler(async (c) => {
   }
 
   let added = 0;
+  const skipped: { email: string; reason: string }[] = [];
   for (const s of body.students ?? []) {
     const email = s.email?.toLowerCase();
     if (!email) continue;
-    let student = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first<any>();
+    const existingAnywhere = await db.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first<any>();
+    let student = await findUserInOrg(email, user.org_id);
+    if (!student && existingAnywhere) {
+      skipped.push({ email, reason: "That account belongs to another school." });
+      continue;
+    }
     if (!student) {
       // Pre-create the account so the roster is complete before they ever sign in.
       const sid = uid();
@@ -159,22 +165,22 @@ app.post("/api/classes/import-classroom", handler(async (c) => {
         )
         .bind(sid, user.org_id, email, s.name || email, s.photoUrl ?? null, now())
         .run();
-      student = { id: sid };
+      student = { id: sid } as any;
     }
     const existing = await db
       .prepare(`SELECT id FROM enrollments WHERE class_id = ? AND user_id = ?`)
-      .bind(cls.id, student.id)
+      .bind(cls.id, student!.id)
       .first();
     if (!existing) {
       await db
         .prepare(`INSERT INTO enrollments (id, class_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'student', 'active', ?)`)
-        .bind(uid(), cls.id, student.id, now())
+        .bind(uid(), cls.id, student!.id, now())
         .run();
-      await provisionForStudent(cls.id, student.id);
+      await provisionForStudent(cls.id, student!.id);
       added++;
     }
   }
-  return c.json({ class: cls, added });
+  return c.json({ class: cls, added, skipped });
 }));
 
 app.get("/api/classes/:id", handler(async (c) => {
@@ -411,29 +417,35 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
   const cls = await db.prepare(`SELECT name FROM classes WHERE id = ?`).bind(classId).first<any>();
   if (!cls) throw new HttpError(404, "Class not found");
   let added = 0;
+  const skipped: { email: string; reason: string }[] = [];
   for (const raw of emails) {
     const email = String(raw ?? "").trim().toLowerCase();
     // Something before the @, something after, and a dot in the domain.
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
-    let student = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first<any>();
+    const existingAnywhere = await db.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first<any>();
+    let student = await findUserInOrg(email, teacher.org_id);
+    if (!student && existingAnywhere) {
+      skipped.push({ email, reason: "That account belongs to another school." });
+      continue;
+    }
     if (!student) {
       const sid = uid();
       await db
         .prepare(`INSERT INTO users (id, org_id, email, name, role, is_admin, created_at) VALUES (?, ?, ?, ?, 'student', 0, ?)`)
         .bind(sid, teacher.org_id, email, email, now())
         .run();
-      student = { id: sid };
+      student = { id: sid } as any;
     }
     const exists = await db
       .prepare(`SELECT id FROM enrollments WHERE class_id = ? AND user_id = ?`)
-      .bind(classId, student.id)
+      .bind(classId, student!.id)
       .first();
     if (!exists) {
       await db
         .prepare(`INSERT INTO enrollments (id, class_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'student', 'active', ?)`)
-        .bind(uid(), classId, student.id, now())
+        .bind(uid(), classId, student!.id, now())
         .run();
-      await provisionForStudent(classId, student.id);
+      await provisionForStudent(classId, student!.id);
 
       /*
        * Tell them. Inviting used to create the account and the enrolment in
@@ -447,6 +459,7 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
       await queueMail({
         address: email,
         kind: "invite",
+        orgId: teacher.org_id,
         subject: `${teacher.name} added you to ${cls.name} on Notesanity`,
         content: {
           preheader: `You've been added to ${cls.name}. Sign in to see your work.`,
@@ -464,7 +477,7 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
   }
   // Queued, not sent: the platform allows three sends a minute, so a whole
   // class goes out over the next few minutes rather than mostly vanishing.
-  return c.json({ added, invitesQueued: added });
+  return c.json({ added, invitesQueued: added, skipped });
 }));
 
 /**
@@ -483,7 +496,12 @@ app.post("/api/classes/:id/teachers", handler(async (c) => {
     const email = raw.trim().toLowerCase();
     if (!email.includes("@")) continue;
 
-    let person = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first<any>();
+    const existingAnywhere = await db.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first<any>();
+    let person = await findUserInOrg(email, teacher.org_id);
+    if (!person && existingAnywhere) {
+      skipped.push({ email, reason: "That account belongs to another school." });
+      continue;
+    }
     if (!person) {
       // Pre-create so they're a co-teacher the moment they first sign in.
       const pid = uid();
@@ -491,18 +509,18 @@ app.post("/api/classes/:id/teachers", handler(async (c) => {
         .prepare(`INSERT INTO users (id, org_id, email, name, role, is_admin, created_at) VALUES (?, ?, ?, ?, 'teacher', 0, ?)`)
         .bind(pid, teacher.org_id, email, email, now())
         .run();
-      person = { id: pid, role: "teacher" };
+      person = { id: pid, role: "teacher" } as any;
     } else if (person.role === "student") {
       skipped.push({ email, reason: "That account is a student — an admin can change their role in Settings." });
       continue;
     }
 
     const cls = await db.prepare(`SELECT owner_id FROM classes WHERE id = ?`).bind(classId).first<any>();
-    if (cls?.owner_id === person.id) { skipped.push({ email, reason: "Already the class owner" }); continue; }
+    if (cls?.owner_id === person!.id) { skipped.push({ email, reason: "Already the class owner" }); continue; }
 
     const existing = await db
       .prepare(`SELECT id, role FROM enrollments WHERE class_id = ? AND user_id = ?`)
-      .bind(classId, person.id)
+      .bind(classId, person!.id)
       .first<any>();
     if (existing) {
       await db
@@ -512,7 +530,7 @@ app.post("/api/classes/:id/teachers", handler(async (c) => {
     } else {
       await db
         .prepare(`INSERT INTO enrollments (id, class_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'teacher', 'active', ?)`)
-        .bind(uid(), classId, person.id, now())
+        .bind(uid(), classId, person!.id, now())
         .run();
     }
     added.push(email);

@@ -8,19 +8,20 @@ export type MailStatus =
   | "rate_limited"    // the platform's 3-per-minute cap
   | "failed";         // the provider rejected it
 
-/** Keep the log useful without letting it grow forever. */
-const KEEP = 200;
+/** Keep the log useful without letting it grow forever. Matches the promise on privacy.mjs. */
+const KEEP = 500;
 
 export async function logMail(input: {
   address: string;
   kind: string;
   status: MailStatus;
   detail?: string;
+  orgId?: string | null;
 }): Promise<void> {
   try {
     await db
-      .prepare(`INSERT INTO mail_log (id, address, kind, status, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .bind(uid(), input.address, input.kind, input.status, input.detail ?? "", now())
+      .prepare(`INSERT INTO mail_log (id, address, kind, status, detail, org_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .bind(uid(), input.address, input.kind, input.status, input.detail ?? "", input.orgId ?? null, now())
       .run();
     await db
       .prepare(

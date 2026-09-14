@@ -312,14 +312,16 @@ app.post("/api/auth/magic/request", handler(async (c) => {
   if (!address.includes("@")) throw new HttpError(400, "Enter a valid email address.");
 
   // Only send when the address could actually sign in, but never say which.
-  const user = await db.prepare(`SELECT id FROM users WHERE email = ?`).bind(address).first();
-  const allowed = user ? true : Boolean(await resolveOrgFor(address).catch(() => null));
+  const user = await db.prepare(`SELECT id, org_id FROM users WHERE email = ?`).bind(address).first<{ id: string; org_id: string }>();
+  const resolved = user ? null : await resolveOrgFor(address).catch(() => null);
+  const allowed = user ? true : Boolean(resolved);
+  const orgId = user?.org_id ?? resolved?.orgId ?? null;
 
   if (!allowed) {
     // Nothing is sent, and the caller is told the same thing either way — so
     // record it, or a domain that was never on the allowlist is indistinguishable
     // from a mail that got filtered.
-    await logMail({ address, kind, status: "refused_domain",
+    await logMail({ address, kind, status: "refused_domain", orgId,
       detail: "Address is not on the org's allowed domains, so no email was sent." });
   }
 
@@ -349,9 +351,9 @@ app.post("/api/auth/magic/request", handler(async (c) => {
       });
       // The provider reports failure by return value as well as by throwing.
       if (result && result.success === false) {
-        await logMail({ address, kind, status: "failed", detail: "Provider reported the send as unsuccessful." });
+        await logMail({ address, kind, status: "failed", orgId, detail: "Provider reported the send as unsuccessful." });
       } else {
-        await logMail({ address, kind, status: "sent", detail: result?.messageId ?? "" });
+        await logMail({ address, kind, status: "sent", orgId, detail: result?.messageId ?? "" });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -359,7 +361,7 @@ app.post("/api/auth/magic/request", handler(async (c) => {
       // hits it easily, and the failure is otherwise completely silent.
       const limited = message.includes("PLUGIN_RATE_LIMIT_EXCEEDED");
       await logMail({
-        address, kind,
+        address, kind, orgId,
         status: limited ? "rate_limited" : "failed",
         detail: limited ? "Hit the 3-per-minute send limit. Ask them to try again in a minute." : message,
       });

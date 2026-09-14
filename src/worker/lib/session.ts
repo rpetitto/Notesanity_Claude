@@ -85,6 +85,21 @@ export async function orgForDomain(domain: string): Promise<Org | null> {
     .first<Org>();
 }
 
+/**
+ * Look up a user by email, scoped to one school.
+ *
+ * A plain `WHERE email = ?` finds the row regardless of which school it
+ * belongs to — fine for sign-in, where the email is the whole identity, but
+ * wrong for anything a teacher does from inside their own class (importing a
+ * roster, inviting a student, adding a co-teacher). Those call sites need to
+ * know "does this email belong to *my* school", not just "does it exist
+ * anywhere", or a teacher can silently enroll or grant class access to a
+ * user who belongs to a different school entirely.
+ */
+export async function findUserInOrg(email: string, orgId: string): Promise<AppUser | null> {
+  return db.prepare(`SELECT * FROM users WHERE email = ? AND org_id = ?`).bind(email, orgId).first<AppUser>();
+}
+
 /** Which role a domain implies within its school; "pending" when it says nothing. */
 export function roleForDomain(org: Org, domain: string): AppUser["role"] {
   if (csv(org.teacher_domains ?? "").includes(domain)) return "teacher";

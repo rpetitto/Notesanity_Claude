@@ -159,12 +159,17 @@ export const touchedAt = now;
  * The request endpoint answers identically whatever the outcome, so this is the
  * only place the difference between "refused", "rate limited" and "sent" is
  * visible. Admin-only because it lists addresses that tried to sign in.
+ *
+ * Scoped to the admin's own school — a school admin has no business seeing
+ * another school's sign-in email history, and this endpoint used to return
+ * the whole platform's regardless of who asked.
  */
 app.get("/api/org/mail", handler(async (c) => {
   const user = await requireUser(c);
   if (!user.is_admin) throw new HttpError(403, "Admin access required");
   const rows = await db
-    .prepare(`SELECT address, kind, status, detail, created_at FROM mail_log ORDER BY created_at DESC LIMIT 50`)
+    .prepare(`SELECT address, kind, status, detail, created_at FROM mail_log WHERE org_id = ? ORDER BY created_at DESC LIMIT 50`)
+    .bind(user.org_id)
     .all<any>();
   return c.json({ entries: rows.results ?? [] });
 }));

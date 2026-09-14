@@ -713,3 +713,26 @@ migrate("021_archiving_and_class_details", async () => {
     await db.prepare(`ALTER TABLE classes ADD COLUMN archived_at TEXT`).run();
   }
 });
+
+/**
+ * Which school a mail_log row belongs to.
+ *
+ * `GET /api/org/mail` used to return the platform's last 50 mail events with
+ * no filter at all — any school's admin could read every other school's
+ * sign-in and invite email history. Stamping the sending org at insert time,
+ * rather than joining through `users.email` at read time, keeps the fix
+ * durable even for addresses that never became a user row (an invite to
+ * someone who hasn't signed in yet).
+ */
+migrate("022_mail_log_org_scope", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(mail_log)`).all<{ name: string }>();
+  if (!(cols.results ?? []).some((c) => c.name === "org_id")) {
+    await db.prepare(`ALTER TABLE mail_log ADD COLUMN org_id TEXT`).run();
+  }
+  // mail_queue also needs it, so a queued invite's org survives to the drain
+  // step that eventually writes the mail_log row above.
+  const qCols = await db.prepare(`PRAGMA table_info(mail_queue)`).all<{ name: string }>();
+  if (!(qCols.results ?? []).some((c) => c.name === "org_id")) {
+    await db.prepare(`ALTER TABLE mail_queue ADD COLUMN org_id TEXT`).run();
+  }
+});

@@ -163,16 +163,20 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
     setImportingId(course.id);
     try {
       const students = await listStudents(course.id);
-      const result = await api.post<{ added: number }>("/api/classes/import-classroom", {
-        courseId: course.id,
-        name: course.name,
-        section: course.section ?? "",
-        description: course.description ?? course.descriptionHeading ?? "",
-        room: course.room ?? "",
-        students: students.map((s) => ({ email: s.email, name: s.name, photoUrl: s.photoUrl })),
-      });
+      const result = await api.post<{ added: number; skipped: { email: string; reason: string }[] }>(
+        "/api/classes/import-classroom",
+        {
+          courseId: course.id,
+          name: course.name,
+          section: course.section ?? "",
+          description: course.description ?? course.descriptionHeading ?? "",
+          room: course.room ?? "",
+          students: students.map((s) => ({ email: s.email, name: s.name, photoUrl: s.photoUrl })),
+        },
+      );
       await qc.invalidateQueries({ queryKey: ["classes"] });
-      toast.success(`Imported ${result.added} student${result.added === 1 ? "" : "s"}`);
+      if (result.added > 0) toast.success(`Imported ${result.added} student${result.added === 1 ? "" : "s"}`);
+      for (const s of result.skipped ?? []) toast.error(`${s.email}: ${s.reason}`);
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Import failed");

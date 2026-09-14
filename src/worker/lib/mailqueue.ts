@@ -12,13 +12,13 @@ import { logMail } from "./maillog";
  * which is the only way a class of twenty-five all get one when the platform
  * allows three sends a minute.
  */
-export async function queueMail(input: { address: string; kind: string; subject: string; content: EmailContent }) {
+export async function queueMail(input: { address: string; kind: string; subject: string; content: EmailContent; orgId?: string | null }) {
   await db
     .prepare(
-      `INSERT INTO mail_queue (id, address, kind, payload, subject, status, created_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+      `INSERT INTO mail_queue (id, address, kind, payload, subject, org_id, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
     )
-    .bind(uid(), input.address, input.kind, JSON.stringify(input.content), input.subject, now())
+    .bind(uid(), input.address, input.kind, JSON.stringify(input.content), input.subject, input.orgId ?? null, now())
     .run();
 }
 
@@ -55,7 +55,7 @@ export async function drainMailQueue(limit = 20): Promise<{ sent: number; failed
       const result = await mailer.send({ to: row.address, subject: row.subject, text, html });
       if (result && result.success === false) throw new Error("Provider reported the send as unsuccessful.");
       await db.prepare(`UPDATE mail_queue SET status = 'sent', sent_at = ? WHERE id = ?`).bind(now(), row.id).run();
-      await logMail({ address: row.address, kind: row.kind, status: "sent", detail: result?.messageId ?? "" });
+      await logMail({ address: row.address, kind: row.kind, status: "sent", orgId: row.org_id, detail: result?.messageId ?? "" });
       sent++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -70,7 +70,7 @@ export async function drainMailQueue(limit = 20): Promise<{ sent: number; failed
         .run();
       if (giveUp || limited) {
         await logMail({
-          address: row.address, kind: row.kind,
+          address: row.address, kind: row.kind, orgId: row.org_id,
           status: limited ? "rate_limited" : "failed",
           detail: limited ? "Waiting for the per-minute send limit to clear." : message,
         });
