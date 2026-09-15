@@ -1,0 +1,102 @@
+/**
+ * Object storage, matching the small slice of Fling's `storage` the app uses.
+ *
+ * Only `get` and `put` are called anywhere in this codebase, and both map
+ * straight onto R2. The shapes are kept identical to what the call sites
+ * already destructure — `arrayBuffer()` on a get, `{ contentType }` on a put —
+ * so nothing in the app has to change.
+ */
+
+import { currentEnv } from "./context";
+
+export interface StoragePutOptions {
+  contentType?: string;
+}
+
+export interface StorageObject {
+  key: string;
+  size: number;
+  contentType?: string;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  text(): Promise<string>;
+}
+
+const bucket = () => currentEnv().BUCKET;
+
+export const storage = {
+  async get(key: string): Promise<StorageObject | null> {
+    const obj = await bucket().get(key);
+    if (!obj) return null;
+    return {
+      key,
+      size: obj.size,
+      contentType: obj.httpMetadata?.contentType,
+      arrayBuffer: () => obj.arrayBuffer(),
+      text: () => obj.text(),
+    };
+  },
+
+  async put(
+    key: string,
+    value: ArrayBuffer | ArrayBufferView | string | ReadableStream,
+    options: StoragePutOptions = {},
+  ): Promise<void> {
+    await bucket().put(key, value as any, {
+      httpMetadata: options.contentType ? { contentType: options.contentType } : undefined,
+    });
+  },
+
+  async delete(key: string): Promise<void> {
+    await bucket().delete(key);
+  },
+
+  /**
+   * Duplicate an object.
+   *
+   * R2's Workers binding has no server-side copy, so this reads the bytes and
+   * writes them back out — fine for the notebook-sized files this app stores,
+   * and worth avoiding on a hot path. Skips the work when the destination is
+   * already there, which is what makes copying the same source PDF for a
+   * second library page free.
+   */
+  async copy(from: string, to: string): Promise<boolean> {
+    if (await bucket().head(to)) return false;
+    const src = await bucket().get(from);
+    if (!src) return false;
+    await bucket().put(to, await src.arrayBuffer(), {
+      httpMetadata: src.httpMetadata,
+    });
+    return true;
+  },
+
+  /** R2 takes up to a thousand keys per call, so anything larger goes in batches. */
+  async deleteMany(keys: string[]): Promise<void> {
+    for (let i = 0; i < keys.length; i += 1000) {
+      await bucket().delete(keys.slice(i, i + 1000));
+    }
+  },
+
+  async list(prefix?: string): Promise<{ keys: { key: string; size: number }[] }> {
+    const res = await bucket().list({ prefix });
+    return { keys: res.objects.map((o) => ({ key: o.key, size: o.size })) };
+  },
+
+  /**
+   * `list` to the end, following the cursor.
+   *
+   * The plain `list` above returns one page and silently drops the rest, which
+   * is fine for the status probe that only asks whether the bucket answers, and
+   * wrong for anything that has to be exhaustive — a delete sweep that misses
+   * the second page leaves objects behind forever.
+   */
+  async listAll(prefix: string): Promise<{ keys: { key: string; size: number }[] }> {
+    const keys: { key: string; size: number }[] = [];
+    let cursor: string | undefined;
+    do {
+      const res = await bucket().list({ prefix, cursor });
+      for (const o of res.objects) keys.push({ key: o.key, size: o.size });
+      cursor = res.truncated ? res.cursor : undefined;
+    } while (cursor);
+    return { keys };
+  },
+};

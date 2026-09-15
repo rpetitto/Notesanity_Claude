@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+/**
+ * Notesanity brand system (Brand Book v1.0).
+ *
+ * Three colors only. Pine and Oat carry nearly everything; Mint marks the one
+ * thing to do next and the work that has come back done. If two things on a
+ * screen are Mint, one of them is wrong.
+ *
+ * Type is a deliberate jump, never a blend: Space Grotesk 700 announces,
+ * Nunito 400 is read. Nothing in between.
+ */
+@theme {
+  --color-pine: #20302c;
+  --color-mint: #7fd1ae;
+  --color-oat: #f4efe6;
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Nunito", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --radius-card: 22px;
+  --radius-input: 12px;
+  --radius-pill: 999px;
+
+  /* Hard offset, Pine, down-right. Pressable things only. */
+  --shadow-press: 4px 4px 0 0 var(--color-pine);
+  --shadow-press-sm: 3px 3px 0 0 var(--color-pine);
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.6;
+  background: var(--color-oat);
+  color: var(--color-pine);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* Anything that announces itself. Flush left, sentence case, never letterspaced. */
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+/* The wordmark is the one place with the book's exact tracking. */
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+/* Labels are the only caps in the system. */
+.label-caps {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/**
+ * Structural rules between regions.
+ *
+ * The book's 3px Pine outline describes an *object* — a card, a button, an
+ * input. Running that same weight across a whole header or down a panel edge
+ * reads as a hard black bar and chops the screen up, so regions are separated
+ * with a light Pine tint instead and the full-strength outline stays on things
+ * you can pick up or press.
+ */
+.rule-b { border-bottom: 2px solid rgba(32, 48, 44, 0.12); }
+.rule-t { border-top: 2px solid rgba(32, 48, 44, 0.12); }
+.rule-r { border-right: 2px solid rgba(32, 48, 44, 0.12); }
+.rule-l { border-left: 2px solid rgba(32, 48, 44, 0.12); }
+
+/* iOS Safari zooms the page when an input under 16px takes focus. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
+button,
+[role="button"],
+a {
+  touch-action: manipulation;
+}
+
+/* Body copy caps at 68 characters. */
+.measure {
+  max-width: 68ch;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(32, 48, 44, 0.28);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.h-dvh {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/**
+ * Teacher-authored rich text on a page.
+ *
+ * Tailwind's reset flattens headings and lists, which is right everywhere else
+ * but wrong here: this is prose a teacher wrote and expects to look like prose.
+ * Sizes are in em so a block scales with whatever the page is set to.
+ */
+.rich-text { font-size: 15px; line-height: 1.4; }
+.rich-text p { margin: 0 0 0.5em; }
+.rich-text p:last-child { margin-bottom: 0; }
+.rich-text h1 { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 1.5em; margin: 0 0 0.4em; }
+.rich-text h2 { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 1.25em; margin: 0 0 0.4em; }
+.rich-text h3 { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 1.1em; margin: 0 0 0.35em; }
+.rich-text ul,
+.rich-text ol { margin: 0 0 0.5em; padding-left: 1.4em; }
+.rich-text ul { list-style: disc; }
+.rich-text ol { list-style: decimal; }
+.rich-text li { margin: 0.15em 0; }
+.rich-text strong, .rich-text b { font-weight: 700; }
+.rich-text em, .rich-text i { font-style: italic; }
+.rich-text u { text-decoration: underline; }
+.rich-text s { text-decoration: line-through; }
+.rich-text blockquote {
+  margin: 0 0 0.5em;
+  padding-left: 0.7em;
+  border-left: 3px solid var(--color-pine);
+  opacity: 0.85;
+}
+.rich-text a { color: var(--color-pine); text-decoration: underline; }
