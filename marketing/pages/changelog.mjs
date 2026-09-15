@@ -38,6 +38,19 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 15, 2026",
+    "Lower prices, and annotations you can pick up and move.",
+    [
+      ["better", "<b>Prices are lower.</b> Pro is $49 a year instead of $59, and Department is $499 a year for 20 Pro seats instead of $649. School stays $999. Nothing changes for you today — everything is still free while we're in beta, and you'll still get a full semester's notice before that ends. See <a href=\"/pricing\">pricing</a>."],
+      ["new", "<b>Select an annotation to move, resize or rotate it.</b> Tap a pen stroke, stamp or typed note and it gets a box with handles: drag the box to move it, a corner or edge to resize, the handle above to turn it. Tapping one while the annotation tools are put away opens them for you with that mark already selected."],
+      ["new", "<b>Your page library has its own tab</b> in the top navigation, next to Assignments, where you can rename or remove saved pages. Saving to the library now happens from the toolbar that appears when you check pages, and saves every checked page at once."],
+      ["better", "Adding a library page offers <b>After the current page</b> first, and a page you've just saved shows up in the library right away rather than after a refresh."],
+      ["better", "The three ways to start a notebook are one <b>New notebook</b> button now, the same shape as New assignment."],
+      ["better", "A class's student notebooks are a list sorted by most recently updated, with a filter by student, instead of a wall of cards."],
+      ["better", "The Plan card in Settings describes the plan you're on and links to the pricing page."],
+    ],
+  ],
+  [
     "September 14, 2026",
     "A page library, a real admin panel for school admins, and a couple of places another school shouldn't have been visible.",
     [

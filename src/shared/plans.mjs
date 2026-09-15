@@ -31,11 +31,11 @@ export const PLANS = {
     notebookLimit: FREE_NOTEBOOK_LIMIT, pageLibrary: false, schoolAdmin: false, selfServe: false,
   },
   pro: {
-    label: "Pro", priceCents: 5900, interval: "year", seats: 1,
+    label: "Pro", priceCents: 4900, interval: "year", seats: 1,
     notebookLimit: null, pageLibrary: true, schoolAdmin: false, selfServe: true,
   },
   department: {
-    label: "Department", priceCents: 64900, interval: "year", seats: 20,
+    label: "Department", priceCents: 49900, interval: "year", seats: 20,
     notebookLimit: null, pageLibrary: true, schoolAdmin: false, selfServe: false,
   },
   school: {
