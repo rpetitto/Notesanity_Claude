@@ -17,6 +17,7 @@ import Tour from "../components/Tour";
 import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, buttonClass, Card, CardLink, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea, type MenuItem } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
+import { useSession } from "../lib/session";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 
@@ -958,6 +959,7 @@ export default function ClassView() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const { user } = useSession();
   const classQ = useQuery({
     queryKey: ["class", id],
     queryFn: () => api.get<ClassResponse>(`/api/classes/${id}`),
@@ -972,13 +974,19 @@ export default function ClassView() {
    * Three pills side by side made the choice look like three separate features
    * and pushed the notebooks themselves below the fold.
    *
-   * Defined once and rendered in two places: above the grid, or inside the
-   * empty card when there is no grid yet.
+   * A student gets the identical menu for their own notebook: the same three
+   * sources, aimed at the student routes. The one experience a student has of
+   * making a notebook should not be a lesser copy of the teacher's.
+   *
+   * Built by a function rather than held once, because the teacher's copy is
+   * rendered in two places (above the grid, or inside the empty card) and the
+   * student's in a third.
    */
-  const notebookActions = (
+  const newNotebookMenu = (mine: boolean) => (
     <Menu
       label="New notebook"
       align="right"
+      tour={mine ? "class-my-notebook" : undefined}
       triggerClassName={buttonClass("primary", "md")}
       trigger={
         <>
@@ -992,13 +1000,13 @@ export default function ClassView() {
           label: "Start from blank",
           hint: "Lined, grid, dotted or plain paper",
           icon: <Plus className="h-5 w-5" strokeWidth={2.5} />,
-          onClick: () => setNewNotebookOpen(true),
+          onClick: () => (mine ? setMyNotebookOpen(true) : setNewNotebookOpen(true)),
         },
         {
           label: "Choose a file",
           hint: "A PDF, Word or PowerPoint file on this device",
           icon: <Upload className="h-5 w-5" strokeWidth={2.5} />,
-          onClick: () => fileInputRef.current?.click(),
+          onClick: () => { uploadMine.current = mine; fileInputRef.current?.click(); },
         },
         ...(hasDrivePicker
           ? [{
@@ -1006,12 +1014,13 @@ export default function ClassView() {
               hint: driveBusy || "Pick a file out of your Drive",
               icon: <FolderOpen className="h-5 w-5" strokeWidth={2.5} />,
               disabled: !!driveBusy,
-              onClick: () => void importFromDrive(),
+              onClick: () => void importFromDrive(mine),
             }]
           : []),
       ]}
     />
   );
+  const notebookActions = newNotebookMenu(false);
 
   // The server already decides who may see which of these; splitting them here
   // is only about where they sit on the page.
@@ -1172,7 +1181,13 @@ export default function ClassView() {
    * PDF and then joins the same import the upload button uses, so there is one
    * path that turns a document into pages rather than two.
    */
-  const importFromDrive = async () => {
+  /**
+   * Whose notebook the next chosen file becomes. One hidden input serves both
+   * menus, so the menu that opened it says which routes the upload page uses.
+   */
+  const uploadMine = useRef(false);
+
+  const importFromDrive = async (mine: boolean) => {
     try {
       setDriveBusy("Opening Drive…");
       const picked = await pickDriveFile();
@@ -1181,7 +1196,7 @@ export default function ClassView() {
       const blob = await driveFileAsPdf(picked);
       const base = picked.name.replace(/\.[^.]+$/, "");
       const file = new File([blob], `${base}.pdf`, { type: "application/pdf" });
-      navigate(`/classes/${id}/upload`, { state: { file } });
+      navigate(`/classes/${id}/upload`, { state: { file, mine } });
     } catch (e) {
       const m = (e as Error).message;
       // The likeliest cause by far is the Picker API not being enabled for the
@@ -1198,7 +1213,7 @@ export default function ClassView() {
 
   const onFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) navigate(`/classes/${id}/upload`, { state: { file } });
+    if (file) navigate(`/classes/${id}/upload`, { state: { file, mine: uploadMine.current } });
     e.target.value = "";
   };
 
@@ -1264,6 +1279,15 @@ export default function ClassView() {
               </span>
             )}
             <h1 className="truncate font-display text-[24px] text-oat">{cls.name}</h1>
+            {/* Only a teacher's account needs telling: a student already knows.
+                For a teacher, everything they usually see here is missing, and
+                this is the one line that explains why. */}
+            {!isTeacher && user?.role === "teacher" && (
+              <Chip tone="quiet" className="ml-auto shrink-0 border-oat/70 bg-oat/90 text-pine">
+                <GraduationCap className="h-3.5 w-3.5" strokeWidth={2.5} />
+                You're a student in this class
+              </Chip>
+            )}
           </div>
         </div>
         {/* Everything in this row is conditional — the section label, and the
@@ -1378,15 +1402,13 @@ export default function ClassView() {
           <section data-tour="class-notebooks">
             {/* One input for both places the buttons appear, so it can't fall
                 out of the tree when the toolbar above the grid is hidden. */}
-            {isTeacher && (
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,.pptx,application/pdf"
-                className="hidden"
-                onChange={onFileChosen}
-              />
-            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.pptx,application/pdf"
+              className="hidden"
+              onChange={onFileChosen}
+            />
             {/* With no notebooks the same actions sit inside the empty card,
                 where a teacher is already looking — repeating them above it
                 would just be the same row twice. */}
@@ -1429,12 +1451,7 @@ export default function ClassView() {
                     : "Your own notebook for this class. Your teacher can look in, but can't write in it or assign it."}
                 </p>
               </div>
-              {!isTeacher && (
-                <Button type="button" variant="primary" data-tour="class-my-notebook" onClick={() => setMyNotebookOpen(true)} className="shrink-0">
-                  <Plus className="h-4 w-4" strokeWidth={2.5} />
-                  New notebook
-                </Button>
-              )}
+              {!isTeacher && newNotebookMenu(true)}
             </div>
             {isTeacher && notebookOwners.length > 1 && (
               <div className="mb-3 flex items-center gap-2">
@@ -1540,7 +1557,7 @@ export default function ClassView() {
         </div>
       )}
 
-      {tab === "gradebook" && <Gradebook embedded classId={id} />}
+      {tab === "gradebook" && <Gradebook embedded classId={id} classRole={isTeacher ? "teacher" : "student"} />}
 
       {tab === "roster" && isTeacher && (
         <div>

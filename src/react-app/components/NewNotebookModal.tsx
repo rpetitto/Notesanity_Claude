@@ -28,7 +28,12 @@ import { cn } from "../lib/utils";
 
 /** The most pages one new notebook may start with. Mirrored on the server. */
 const MAX_PAGES = 100;
-const DEFAULT_PAGES = 50;
+/**
+ * A teacher's class notebook is a semester's worth of paper; a student's own
+ * notebook is a place to jot, and ten pages is enough to start without a wall
+ * of empty ones to scroll past. Either can be changed before creating.
+ */
+const defaultPages = (kind: "class" | "student" | "personal") => (kind === "student" ? 10 : 50);
 
 /** A sample of the paper, drawn with the code that paints the real page. */
 function Sample({ pattern, color, width = 58 }: { pattern: string; color: string; width?: number }) {
@@ -58,7 +63,7 @@ export default function NewNotebookModal({
   const [color, setColor] = useState(DEFAULT_PATTERN_COLOR);
   // Held as text so the field can be empty while being retyped, rather than
   // snapping back to a number under the cursor.
-  const [pages, setPages] = useState(String(DEFAULT_PAGES));
+  const [pages, setPages] = useState(String(defaultPages(destination.kind)));
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -71,13 +76,14 @@ export default function NewNotebookModal({
     : destination.kind === "student" ? `/api/classes/${destination.classId}/my-notebooks`
     : "/api/my/personal-notebooks";
 
-  // A teacher's class notebook is uploaded from the class page itself, so only
-  // the two personal cases bring their own file in here.
+  // Class notebooks and a student's class notebook are both uploaded from the
+  // class page's own New notebook menu, so only a personal notebook — which
+  // has no such menu — brings its own file in here.
   const uploadUrl =
     destination.kind === "student"
       ? `/api/classes/${destination.classId}/my-notebooks/upload`
       : "/api/my/personal-notebooks/upload";
-  const canImport = destination.kind !== "class";
+  const canImport = destination.kind === "personal";
 
   const create = useMutation({
     mutationFn: () =>

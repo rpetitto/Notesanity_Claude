@@ -144,6 +144,11 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
             <EmptyState title="No assignments yet" body="Grades will show up here once your teacher assigns work." />
           ) : (
             <div className="flex flex-col gap-3">
+              {data.assignments.every((a) => !a.grade) && (
+                <p className="rounded-[12px] border-2 border-dashed border-pine/30 bg-white/60 px-4 py-3 text-[16px] text-pine/70">
+                  Nothing has been graded yet. Your grades will appear here as your teacher grades your work.
+                </p>
+              )}
               {data.assignments.map((a) => (
                 <Link
                   key={a.id}
@@ -261,14 +266,27 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
  * `embedded` drops the page chrome (Shell + back button) so it sits inside the
  * class tabs without a second header.
  */
-export default function Gradebook({ embedded, classId: classIdProp }: { embedded?: boolean; classId?: string } = {}) {
+export default function Gradebook({
+  embedded, classId: classIdProp, classRole,
+}: { embedded?: boolean; classId?: string; classRole?: "teacher" | "student" } = {}) {
   const params = useParams<{ classId: string }>();
   const id = classIdProp ?? params.classId ?? "";
   const { user, isLoading } = useSession();
 
-  if (isLoading) return <Spinner label="Loading…" />;
+  // Which gradebook you get is decided by your place in *this* class, not by
+  // your account: a teacher enrolled in a colleague's class as a student has
+  // grades to see here, and the teacher matrix would only refuse them. The
+  // class page knows the role and passes it; the standalone route asks.
+  const classQ = useQuery({
+    queryKey: ["class", id],
+    queryFn: () => api.get<{ myRole: "teacher" | "student" }>(`/api/classes/${id}`),
+    enabled: !!id && !classRole,
+  });
+  const role = classRole ?? classQ.data?.myRole ?? (user?.role === "student" ? "student" : undefined);
 
-  return user?.role === "student"
+  if (isLoading || !role) return <Spinner label="Loading…" />;
+
+  return role === "student"
     ? <StudentGrades classId={id} embedded={embedded} />
     : <TeacherGradebook classId={id} embedded={embedded} />;
 }

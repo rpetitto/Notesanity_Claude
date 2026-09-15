@@ -48,6 +48,8 @@ const RELEASES = [
       ["better", "The three ways to start a notebook are one <b>New notebook</b> button now, the same shape as New assignment."],
       ["better", "A class's student notebooks are a list sorted by most recently updated, with a filter by student, instead of a wall of cards."],
       ["better", "The Plan card in Settings describes the plan you're on and links to the pricing page."],
+      ["better", "<b>A student's New notebook works like a teacher's.</b> The same three ways in — blank paper, a file on this device, or Google Drive — from one button in My notebooks. A blank one starts at 10 pages instead of 50; change it before you create if you want more."],
+      ["fixed", "A teacher who joined a colleague's class as a student saw a \"You don't teach this class\" error on the Grades tab. It now shows their grades, and says so plainly when nothing has been graded yet. The class card and the class page also say when you're a student in a class rather than its teacher."],
     ],
   ],
   [

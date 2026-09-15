@@ -5,7 +5,7 @@ import { Archive, Plus, RotateCcw, Settings2, Users, BookOpen, Import } from "lu
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
-import { Button, ConfirmModal, Input, Label, Menu, Modal, type MenuItem } from "../components/ui";
+import { Button, ConfirmModal, Input, Label, Menu, Modal, type MenuItem, Chip } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
 import { DEFAULT_ACCENT } from "../lib/utils";
@@ -64,6 +64,11 @@ function ClassCard({ cls, menu }: { cls: ClassRow; menu?: MenuItem[] }) {
               {[cls.section, cls.room].filter(Boolean).join(" · ") || " "}
             </div>
           </div>
+          {/* A teacher can be enrolled in a colleague's class as a student — to
+              try the student side, or because they're genuinely taking it.
+              Without this the card looks like every class they teach, and
+              the missing Customize button and gradebook inside read as bugs. */}
+          {cls.my_role === "student" && <Chip tone="quiet" className="shrink-0">Student here</Chip>}
           {menu && menu.length > 0 && <Menu items={menu} className="-mr-1" />}
         </div>
         <div className="mt-4 flex items-center gap-4 text-[16px] text-pine/70">

@@ -22,7 +22,15 @@ export default function UploadNotebook() {
   const { classId = "" } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const incoming = (location.state as { file?: File } | null)?.file;
+  const state = location.state as { file?: File; mine?: boolean } | null;
+  const incoming = state?.file;
+  /**
+   * A student's own notebook rather than a teacher's class notebook: the same
+   * screen, aimed at the student routes, landing in the student's working view
+   * instead of the editor. Carried in navigation state alongside the file, so
+   * the class page decides and this page only obeys.
+   */
+  const mine = !!state?.mine;
 
   const [file, setFile] = useState<File | null>(incoming ?? null);
   const [title, setTitle] = useState(incoming ? incoming.name.replace(/\.[^.]+$/, "") : "");
@@ -52,8 +60,8 @@ export default function UploadNotebook() {
       const form = new FormData();
       form.append("file", new File([pdf], source.name.replace(/\.[^.]+$/, ".pdf"), { type: "application/pdf" }));
       form.append("title", notebookTitle.trim() || source.name.replace(/\.[^.]+$/, ""));
-      const created = await api.upload<{ notebook: { id: string; assetKey: string } }>(
-        `/api/classes/${classId}/notebooks`,
+      const created = await api.upload<{ notebook: { id: string; assetKey?: string } }>(
+        mine ? `/api/classes/${classId}/my-notebooks/upload` : `/api/classes/${classId}/notebooks`,
         form,
       );
 
@@ -64,19 +72,20 @@ export default function UploadNotebook() {
 
       setPhase("creating");
       setMessage(`Creating ${sizes.length} page${sizes.length === 1 ? "" : "s"}…`);
+      // The student route already knows its own asset, so it hands back no key.
       await api.post(`/api/notebooks/${created.notebook.id}/pages`, {
-        assetKey: created.notebook.assetKey,
+        ...(created.notebook.assetKey ? { assetKey: created.notebook.assetKey } : {}),
         pages: sizes,
       });
 
       setPhase("done");
       toast.success(`Notebook ready — ${sizes.length} pages`);
-      navigate(`/notebooks/${created.notebook.id}/edit`, { replace: true });
+      navigate(mine ? `/notebooks/${created.notebook.id}` : `/notebooks/${created.notebook.id}/edit`, { replace: true });
     } catch (err) {
       setPhase("idle");
       setError(err as Error);
     }
-  }, [classId, navigate]);
+  }, [classId, mine, navigate]);
 
   // A file handed over from the class screen starts immediately.
   useEffect(() => {
@@ -93,8 +102,9 @@ export default function UploadNotebook() {
       <div className="mx-auto max-w-xl">
         <h1 className="text-xl text-pine">New notebook</h1>
         <p className="measure mt-1 text-[16px] text-pine/70">
-          Upload a PDF, Word document, or PowerPoint. Notesanity keeps the original layout exactly as it is and
-          turns each page into a workspace your students can write on.
+          {mine
+            ? "Upload a PDF, Word document, or PowerPoint to make a notebook of your own for this class. Notesanity keeps the original layout exactly as it is and turns each page into a page you can write on."
+            : "Upload a PDF, Word document, or PowerPoint. Notesanity keeps the original layout exactly as it is and turns each page into a workspace your students can write on."}
         </p>
 
         <Card className="mt-6 p-6">
