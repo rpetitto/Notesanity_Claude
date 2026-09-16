@@ -25,7 +25,9 @@
     // URL — and has no secret to protect. The secret key and the webhook
     // secret are secrets and never appear here (see CLAUDE.md). This is the
     // test-mode id until launch; the launch commit swaps in the live one.
-    "STRIPE_PRICE_PRO": "price_1UFZcEHP3mSWS17rttMNRyXl"
+    // Stripe prices are immutable, so the $49 Pro price is a new Price on the
+    // same Product; the $59 one it replaced was never sold.
+    "STRIPE_PRICE_PRO": "price_1UGHlbHP3mSWS17rclEHkaBM"
   },
 
   // The built SPA is served straight from the edge; only /api/* reaches the
