@@ -5,7 +5,7 @@ import { Archive, Plus, RotateCcw, Settings2, Users, BookOpen, Import } from "lu
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
-import { Button, ConfirmModal, Input, Label, Menu, Modal, type MenuItem, Chip } from "../components/ui";
+import { Button, ConfirmModal, Input, Label, Menu, Modal, type MenuItem } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
 import { DEFAULT_ACCENT } from "../lib/utils";
@@ -64,21 +64,28 @@ function ClassCard({ cls, menu }: { cls: ClassRow; menu?: MenuItem[] }) {
               {[cls.section, cls.room].filter(Boolean).join(" · ") || " "}
             </div>
           </div>
-          {/* A teacher can be enrolled in a colleague's class as a student — to
-              try the student side, or because they're genuinely taking it.
-              Without this the card looks like every class they teach, and
-              the missing Customize button and gradebook inside read as bugs. */}
-          {cls.my_role === "student" && <Chip tone="quiet" className="shrink-0">Student here</Chip>}
           {menu && menu.length > 0 && <Menu items={menu} className="-mr-1" />}
         </div>
-        <div className="mt-4 flex items-center gap-4 text-[16px] text-pine/70">
-          <span className="flex items-center gap-1.5">
+        {/* The counts never break inside themselves; if the row is too narrow
+            for all three, the tag drops to a second line whole. */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-[16px] text-pine/70">
+          <span className="flex items-center gap-1 whitespace-nowrap">
             <Users className="h-3.5 w-3.5" strokeWidth={2.5} />
             {cls.student_count} student{cls.student_count === 1 ? "" : "s"}
           </span>
-          <span className="flex items-center gap-1.5">
+          <span className="flex items-center gap-1 whitespace-nowrap">
             <BookOpen className="h-3.5 w-3.5" strokeWidth={2.5} />
             {cls.notebook_count} notebook{cls.notebook_count === 1 ? "" : "s"}
+          </span>
+          {/* A teacher can be enrolled in a colleague's class as a student — to
+              try the student side, or because they're genuinely taking it.
+              Every card says which, so the two read as a pair rather than a
+              warning, and it sits down here with the counts rather than
+              beside the name, which it was crowding. Sentence case at the
+              body size — the header's uppercase label pill is a third wider
+              and pushed the counts onto a second line at card width. */}
+          <span className="ml-auto shrink-0 rounded-full bg-pine/8 px-2 py-0.5 font-display text-[16px] font-bold text-pine/70">
+            {cls.my_role === "teacher" ? "Teaching" : "Enrolled"}
           </span>
         </div>
       </div>
