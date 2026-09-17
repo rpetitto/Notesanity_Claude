@@ -28,10 +28,8 @@ import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
 
 /** Header controls share one height so a row of them lines up. */
-const BUTTON_ROW =
-  "inline-flex h-12 items-center gap-2 rounded-full border-[3px] border-pine bg-white px-5 " +
-  "font-display text-[17px] font-bold text-pine shadow-[4px_4px_0_0_var(--color-pine)] " +
-  "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none";
+/** The header's three actions: a size that fits three across a phone, the full size from `sm`. */
+const COMPACT = "h-11 px-2.5 text-[16px] sm:h-12 sm:px-5 sm:text-[17px]";
 
 type FieldTool = "none" | "text" | "checkbox" | "choice" | "prompt" | "image" | "audio" | "richtext" | "figure";
 
@@ -848,18 +846,29 @@ export default function NotebookEditor() {
   return (
     <div className="flex h-dvh flex-col bg-oat">
       <div className="h-1 shrink-0" style={{ backgroundColor: notebook.accentColor || "#20302C" }} />
-      <header className="relative flex flex-wrap items-center gap-3 border-b-2 border-pine/12 bg-white px-3 py-2">
+      {/* Two rows on a phone, one on anything wider.
+
+          Below `sm` the row is Back · Pages · title · "…", and the three
+          actions get a full-width row of their own beneath it, at a size
+          that fits three across a 375px screen. From `sm` up the actions
+          wrapper dissolves (`contents`) and its children take their places
+          in the single row by `order`, so the wide layout is exactly what it
+          was. Before this, everything wrapped where it fell and a phone got
+          three ragged rows with the title squeezed between two pills. */}
+      <header className="relative flex flex-wrap items-center gap-2 border-b-2 border-pine/12 bg-white px-3 py-2 sm:gap-3">
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
-        <button
-          type="button"
+        {/* Icon only: the word cost a third of the row on a phone. */}
+        <IconButton
+          label="Pages"
+          variant="secondary"
           data-tour="nb-pages-button"
           onClick={() => setPagesDrawerOpen(true)}
-          className={cn(BUTTON_ROW, "sm:hidden")}
+          className="sm:hidden"
         >
-          <PanelLeft className="h-4 w-4" strokeWidth={2.5} /> Pages
-        </button>
+          <PanelLeft className="h-4 w-4" strokeWidth={2.5} />
+        </IconButton>
         <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate font-display text-[16px] font-bold text-pine">{notebook.title}</div>
           {/* The status belongs to the notebook, not to the row of things you
@@ -881,7 +890,7 @@ export default function NotebookEditor() {
           </div>
         </div>
 
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        <div className="order-4 flex w-full items-center justify-between gap-2 sm:contents">
           {/* One verb, three sources. Blank paper, a file and Drive were three
               buttons competing for the same header row while saying the same
               thing — the question is never "which button", it's "where are the
@@ -889,12 +898,21 @@ export default function NotebookEditor() {
           <ActionMenu
             tour="nb-add-pages"
             label="Add pages"
+            className="sm:order-4 sm:ml-auto"
+            buttonClassName={COMPACT}
             trigger={
               <>
                 {busyMessage
                   ? <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2.5} />
-                  : <Plus className="h-5 w-5" strokeWidth={2.5} />}
-                {busyMessage || "Add pages"}
+                  // On a phone the chevron alone says "menu"; the plus was the
+                  // 28px that pushed the third button off the screen.
+                  : <Plus className="hidden h-5 w-5 sm:block" strokeWidth={2.5} />}
+                {busyMessage || (
+                  <>
+                    <span className="sm:hidden">Add</span>
+                    <span className="hidden sm:inline">Add pages</span>
+                  </>
+                )}
                 <ChevronDown className="h-4 w-4" strokeWidth={2.5} />
               </>
             }
@@ -903,64 +921,12 @@ export default function NotebookEditor() {
           <Button
             variant="secondary"
             data-tour="nb-annotate"
-        onClick={() => { setTool("none"); setPendingMark(null); setAnnotateMode((v) => !v); }}
+            onClick={() => { setTool("none"); setPendingMark(null); setAnnotateMode((v) => !v); }}
             aria-pressed={annotateMode}
-            className={cn(annotateMode && "border-pine bg-pine text-oat hover:bg-pine")}
+            className={cn(COMPACT, "sm:order-5", annotateMode && "border-pine bg-pine text-oat hover:bg-pine")}
           >
             <Pen className="h-5 w-5" strokeWidth={2.5} /> Annotate
           </Button>
-          {/* Everything you do *to* the notebook rather than *in* it, on every
-              width. Appearance keeps its own button at xl where there's room;
-              here it's listed too, so the menu is a complete answer to "what
-              can I do with this notebook" rather than a leftovers drawer. */}
-          <Menu
-            tour="nb-more"
-            label="Notebook actions"
-            items={[
-              {
-                label: "Rename",
-                icon: <Pencil className="h-5 w-5" strokeWidth={2.5} />,
-                hint: "What it's called for you and your students.",
-                onClick: () => setRenameOpen(true),
-              },
-              {
-                label: "Appearance",
-                icon: <Palette className="h-5 w-5" strokeWidth={2.5} />,
-                hint: "Cover image and the color on its tile.",
-                onClick: () => setAppearanceOpen(true),
-              },
-              {
-                label: notebook.archived ? "Bring back to the class" : "Archive",
-                icon: notebook.archived
-                  ? <RotateCcw className="h-5 w-5" strokeWidth={2.5} />
-                  : <Archive className="h-5 w-5" strokeWidth={2.5} />,
-                hint: notebook.archived
-                  ? "Students see it again, with their work as they left it."
-                  : "Puts it away for the class. No work is lost, and you can bring it back.",
-                onClick: () => setConfirming(notebook.archived ? "unarchive" : "archive"),
-              },
-              ...(notebook.status === "published" ? [{
-                label: "Discard unsent writing",
-                icon: <Undo2 className="h-5 w-5" strokeWidth={2.5} />,
-                danger: true,
-                disabled: !hasUnpublishedAnnotations,
-                hint: hasUnpublishedAnnotations
-                  ? "Throws away your ink on this notebook since the last update. Nothing sent is touched."
-                  : "Nothing unsent right now — everything you've written is already with your students.",
-                onClick: () => setConfirming("discard"),
-              }] : []),
-              {
-                label: "Delete notebook",
-                icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
-                danger: true,
-                disabled: notebook.status === "published",
-                hint: notebook.status === "published"
-                  ? "Not while students have copies — archive it instead."
-                  : "Gone for good. Only possible before it's published.",
-                onClick: () => setConfirming("delete"),
-              },
-            ]}
-          />
           {/* The button is the status.
               A separate chip saying "your writing isn't sent yet" sat beside a
               button saying "Update student notebooks", which is two controls
@@ -976,13 +942,72 @@ export default function NotebookEditor() {
             onClick={() => publish.mutate()}
             disabled={publish.isPending || upToDate}
             title={upToDate ? "Everything you've written is with your students" : undefined}
+            className={cn(COMPACT, "sm:order-7")}
           >
             {upToDate
               ? <><Check className="h-5 w-5" strokeWidth={2.5} /> Up to date</>
               : <><Send className="h-5 w-5" strokeWidth={2.5} />
-                  {notebook.status === "published" ? "Update student notebooks" : "Publish to students"}</>}
+                  {/* The verb alone on a phone; who it goes to is obvious there. */}
+                  <span className="sm:hidden">{notebook.status === "published" ? "Update" : "Publish"}</span>
+                  <span className="hidden sm:inline">{notebook.status === "published" ? "Update student notebooks" : "Publish to students"}</span></>}
           </Button>
         </div>
+        {/* A direct child of the header, not of the actions row: its `order`
+            is what puts it in the title row on a phone, and order only works
+            among siblings. */}
+        {/* Everything you do *to* the notebook rather than *in* it, on every
+            width. Appearance keeps its own button at xl where there's room;
+            here it's listed too, so the menu is a complete answer to "what
+            can I do with this notebook" rather than a leftovers drawer. */}
+        <Menu
+          tour="nb-more"
+          label="Notebook actions"
+          className="order-3 sm:order-6"
+          items={[
+            {
+              label: "Rename",
+              icon: <Pencil className="h-5 w-5" strokeWidth={2.5} />,
+              hint: "What it's called for you and your students.",
+              onClick: () => setRenameOpen(true),
+            },
+            {
+              label: "Appearance",
+              icon: <Palette className="h-5 w-5" strokeWidth={2.5} />,
+              hint: "Cover image and the color on its tile.",
+              onClick: () => setAppearanceOpen(true),
+            },
+            {
+              label: notebook.archived ? "Bring back to the class" : "Archive",
+              icon: notebook.archived
+                ? <RotateCcw className="h-5 w-5" strokeWidth={2.5} />
+                : <Archive className="h-5 w-5" strokeWidth={2.5} />,
+              hint: notebook.archived
+                ? "Students see it again, with their work as they left it."
+                : "Puts it away for the class. No work is lost, and you can bring it back.",
+              onClick: () => setConfirming(notebook.archived ? "unarchive" : "archive"),
+            },
+            ...(notebook.status === "published" ? [{
+              label: "Discard unsent writing",
+              icon: <Undo2 className="h-5 w-5" strokeWidth={2.5} />,
+              danger: true,
+              disabled: !hasUnpublishedAnnotations,
+              hint: hasUnpublishedAnnotations
+                ? "Throws away your ink on this notebook since the last update. Nothing sent is touched."
+                : "Nothing unsent right now — everything you've written is already with your students.",
+              onClick: () => setConfirming("discard"),
+            }] : []),
+            {
+              label: "Delete notebook",
+              icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
+              danger: true,
+              disabled: notebook.status === "published",
+              hint: notebook.status === "published"
+                ? "Not while students have copies — archive it instead."
+                : "Gone for good. Only possible before it's published.",
+              onClick: () => setConfirming("delete"),
+            },
+          ]}
+        />
         <input
           ref={addPagesRef}
           type="file"
@@ -1980,12 +2005,13 @@ interface MenuItem {
  * secondary actions one tap away on a narrow screen.
  */
 function ActionMenu({
-  items, trigger, label, className, tour,
+  items, trigger, label, className, buttonClassName, tour,
 }: {
   items: MenuItem[];
   trigger: React.ReactNode;
   label: string;
   className?: string;
+  buttonClassName?: string;
   tour?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -2008,6 +2034,7 @@ function ActionMenu({
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
+        className={buttonClassName}
         onPointerDown={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
       >
         {trigger}
