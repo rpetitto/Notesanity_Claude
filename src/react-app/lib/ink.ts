@@ -43,6 +43,12 @@ export interface TextBox {
    * two the angle is stored and applied at paint time.
    */
   r?: number;
+  /**
+   * Auto width: `w` is whatever the text last measured, not a width anyone
+   * chose. Set on a note placed with a tap; cleared the moment a handle
+   * resizes it, which is the person choosing.
+   */
+  a?: 1;
   ts?: number;
 }
 
@@ -564,7 +570,8 @@ export function transformMark(layer: LayerData, ref: MarkRef, op: MarkOp): Layer
         const w = Math.max(24, t.w * Math.abs(growX));
         // The font follows the box's height; widening alone just rewraps.
         const size = Math.max(6, t.s * Math.abs(growY));
-        const grown = { ...t, w, s: size, r: (t.r ?? 0) + turn };
+        // A resize is the person picking a width, so the note stops sizing itself.
+        const grown = { ...t, w, s: size, r: (t.r ?? 0) + turn, ...(op.kind === "scale" ? { a: undefined } : {}) };
         const gh = textHeight(grown);
         return { ...grown, x: c.x - w / 2, y: c.y - gh / 2, ...((grown.r % 360) === 0 ? { r: undefined } : {}) };
       }),

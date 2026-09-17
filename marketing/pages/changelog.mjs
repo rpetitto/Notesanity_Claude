@@ -38,6 +38,14 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 17, 2026",
+    "Tap and type.",
+    [
+      ["new", "<b>Just tap and type.</b> With <b>Scroll only</b> up, tap anywhere on the paper and start typing — a note appears right there and grows with what you write, up to the edge of the page. No need to pick the Text tool first. The note is like any other mark afterwards: tap it to select, then move, resize or turn it."],
+      ["better", "<b>The Text tool taps or draws.</b> A tap puts down a note that sizes itself to your text; a drag draws a box of the width you want, which is what a teacher setting up an answer area on an assignment page is usually after. Resizing a self-sizing note with a handle pins its width."],
+    ],
+  ],
+  [
     "September 15, 2026",
     "Lower prices, and annotations you can pick up and move.",
     [

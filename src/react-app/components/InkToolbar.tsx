@@ -30,16 +30,16 @@ interface Props {
   onClearPage?: () => void;
 }
 
-const BASE_TOOLS: { kind: ToolKind; icon: typeof Pen; label: string }[] = [
+const BASE_TOOLS: { kind: ToolKind; icon: typeof Pen; label: string; hint?: string }[] = [
   { kind: "pen", icon: Pen, label: "Pen" },
   { kind: "highlighter", icon: Highlighter, label: "Highlighter" },
   { kind: "eraser", icon: Eraser, label: "Eraser" },
-  { kind: "text", icon: Type, label: "Text" },
+  { kind: "text", icon: Type, label: "Text", hint: "Text — tap to type, drag to draw a box" },
   { kind: "stamp", icon: Smile, label: "Stamp" },
   { kind: "select", icon: Hand, label: "Scroll only" },
 ];
 
-const COMMENT_TOOL = { kind: "comment" as ToolKind, icon: MessageSquarePlus, label: "Add comment" };
+const COMMENT_TOOL: (typeof BASE_TOOLS)[number] = { kind: "comment", icon: MessageSquarePlus, label: "Add comment" };
 
 const ZOOM_OPTIONS: { value: string; label: string }[] = [
   { value: "page", label: "Fit page" },
@@ -73,11 +73,11 @@ export default function InkToolbar({
       style={{ touchAction: "manipulation", scrollbarWidth: "thin" }}
     >
       <div data-tour="ink-tools" className="flex shrink-0 items-center gap-1 rounded-lg bg-oat p-1">
-        {TOOLS.map(({ kind, icon: Icon, label }) => (
+        {TOOLS.map(({ kind, icon: Icon, label, hint }) => (
           <button
             key={kind}
             type="button"
-            title={label}
+            title={hint ?? label}
             aria-label={label}
             aria-pressed={tool.kind === kind}
             onClick={() => onToolChange({ ...tool, kind })}

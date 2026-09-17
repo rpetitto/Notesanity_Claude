@@ -44,7 +44,7 @@ import {
 import { toast } from "sonner";
 import type { FieldRec } from "../lib/api";
 import {
-  type LayerData, type MarkHit, type MarkOp, type MarkRef, type Stroke, type ToolKind,
+  type LayerData, type MarkHit, type MarkOp, type MarkRef, type Stroke, type TextBox, type ToolKind,
   drawLayer, drawStroke, hitStroke, markAt, markBox, markRefAt, straightenHighlight, transformMark,
 } from "../lib/ink";
 import MarkSelection from "./MarkSelection";
@@ -277,6 +277,29 @@ export default function PageCanvas({
   const justDragged = useRef(false);
   const draggableMarks = canWrite && tool.kind === "select";
 
+  // ---- typing ----
+  /**
+   * A press with the Text tool, held until it declares itself: released in
+   * place it's a tap and puts down a note that sizes to its text; dragged past
+   * the slop it draws a box of a chosen width. Same gesture split as the pen's
+   * pending tap, for the same reason — a press alone doesn't say which.
+   */
+  const textPress = useRef<{
+    x: number; y: number; clientX: number; clientY: number; pointerId: number;
+    /** The rectangle so far, kept here as well as in state so the release reads what was drawn, not what was last rendered. */
+    rect: { x: number; y: number; w: number; h: number } | null;
+  } | null>(null);
+  /** The rectangle being drawn with the Text tool, in page units, while it is. */
+  const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  /**
+   * Where a Scroll-only tap landed on bare paper. The next printable key
+   * starts a note there — so a student who just wants to jot something never
+   * has to find the Text tool first. Cleared by any later press, and when the
+   * tool changes.
+   */
+  const typeAt = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => { if (!draggableMarks) typeAt.current = null; }, [draggableMarks]);
+
   // A selection means nothing once the tool that acts on it is put down, and a
   // stroke index means nothing on a different page.
   useEffect(() => { if (!draggableMarks) setSelected(null); }, [draggableMarks]);
@@ -426,14 +449,16 @@ export default function PageCanvas({
 
     const surface = e.currentTarget;
     const { x, y } = toPage(e, surface);
+    typeAt.current = null;
 
     // Select: pick up your own mark if the press landed on one, otherwise let
     // go of whatever was held and do nothing at all, so the page scrolls as it
-    // always has.
+    // always has — except remember the spot, in case the next thing that
+    // happens is typing.
     if (tool.kind === "select") {
       const ref = markRefAt(activeLayer, x, y, 6 / scale);
       if (ref) beginMarkDrag(ref, e);
-      else setSelected(null);
+      else { setSelected(null); typeAt.current = { x, y }; }
       return;
     }
 
@@ -452,12 +477,9 @@ export default function PageCanvas({
       // clobbers the new box's autoFocus, leaving the student typing into
       // nothing.
       e.preventDefault();
-      const id = uid();
-      onLayerChange?.({
-        ...activeLayer,
-        x: [...activeLayer.x, { id, x, y, w: Math.min(220, pageWidth - x - 8), s: tool.fontSize, c: tool.color, v: "", ts: Date.now() }],
-      });
-      setEditingText(id);
+      activePointer.current = e.pointerId;
+      surface.setPointerCapture(e.pointerId);
+      textPress.current = { x, y, clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId, rect: null };
       return;
     }
 
@@ -525,6 +547,20 @@ export default function PageCanvas({
       return;
     }
 
+    const tp = textPress.current;
+    if (tp) {
+      if (!tp.rect) {
+        const dx = e.clientX - tp.clientX;
+        const dy = e.clientY - tp.clientY;
+        if (dx * dx + dy * dy < DRAG_SLOP * DRAG_SLOP) return;
+      }
+      e.preventDefault();
+      const { x, y } = toPage(e, surface);
+      tp.rect = { x: Math.min(tp.x, x), y: Math.min(tp.y, y), w: Math.abs(x - tp.x), h: Math.abs(y - tp.y) };
+      setDraft(tp.rect);
+      return;
+    }
+
     // Movement past the slop turns a held tap into a stroke, starting from where
     // the press actually began so no ink is lost.
     if (pendingTap.current) {
@@ -561,6 +597,15 @@ export default function PageCanvas({
     if (activePointer.current !== e.pointerId) return;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
     activePointer.current = null;
+
+    const tp = textPress.current;
+    if (tp) {
+      textPress.current = null;
+      setDraft(null);
+      if (tp.rect) placeNote(tp.rect.x, tp.rect.y, "", Math.max(24, tp.rect.w));
+      else placeNote(tp.x, tp.y, "");
+      return;
+    }
 
     // Released without moving, over something typeable — that was a tap to type,
     // not a stroke. Hand the gesture to the element the user aimed at.
@@ -643,10 +688,71 @@ export default function PageCanvas({
     if (stamp) onLayerChange({ ...activeLayer, e: activeLayer.e.filter((s) => s.id !== stamp.id) });
   };
 
-  const updateText = (id: string, v: string) => {
+  /**
+   * Put down a typed note and open it for typing.
+   *
+   * With no width given the note sizes itself to its text (`a`), from a
+   * three-em start so the caret has somewhere to be, up to the page's right
+   * edge. With a width — drawn with the Text tool — it's a box of that width
+   * and wraps inside it, as boxes always have.
+   */
+  const placeNote = (x: number, y: number, v: string, w?: number) => {
     if (!onLayerChange) return;
-    onLayerChange({ ...activeLayer, x: activeLayer.x.map((t) => (t.id === id ? { ...t, v } : t)) });
+    const id = uid();
+    const auto = w === undefined;
+    const width = auto ? Math.min(tool.fontSize * 3, pageWidth - x - 8) : Math.min(w, pageWidth - x - 8);
+    onLayerChange({
+      ...activeLayer,
+      x: [...activeLayer.x, { id, x, y, w: width, s: tool.fontSize, c: tool.color, v, ts: Date.now(), ...(auto ? { a: 1 as const } : {}) }],
+    });
+    setEditingText(id);
   };
+
+  /**
+   * How wide a self-sizing note needs to be to hold its text on one line per
+   * paragraph, in page units — measured in the textarea's own font, so the
+   * stored width and the rendered width can't disagree. Capped at the page's
+   * right edge, after which the note wraps like any box would.
+   */
+  const measureNote = (t: TextBox, v: string, el: HTMLTextAreaElement | null) => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return t.w;
+    const cs = el ? getComputedStyle(el) : null;
+    ctx.font = cs
+      ? `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+      : `${t.s * scale}px sans-serif`;
+    let widest = 0;
+    for (const line of v.split("\n")) widest = Math.max(widest, ctx.measureText(line).width);
+    // Padding and border of the box, plus room for the caret at the line's end.
+    const px = widest + 8 + 2 + t.s * scale * 0.6;
+    return Math.max(t.s * 3, Math.min(px / scale, pageWidth - t.x - 8));
+  };
+
+  const updateText = (id: string, v: string, el?: HTMLTextAreaElement | null) => {
+    if (!onLayerChange) return;
+    onLayerChange({
+      ...activeLayer,
+      x: activeLayer.x.map((t) => (t.id === id ? { ...t, v, ...(t.a ? { w: measureNote(t, v, el ?? null) } : {}) } : t)),
+    });
+  };
+
+  // Scroll only, tap on paper, type: the first printable key becomes the
+  // note's first letter, so nothing typed is lost to the note appearing.
+  useEffect(() => {
+    if (!draggableMarks) return;
+    const onKey = (e: KeyboardEvent) => {
+      const at = typeAt.current;
+      if (!at || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+      const focus = document.activeElement as HTMLElement | null;
+      if (focus && (/^(INPUT|TEXTAREA|SELECT)$/.test(focus.tagName) || focus.isContentEditable)) return;
+      e.preventDefault();
+      typeAt.current = null;
+      placeNote(at.x, at.y, e.key);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const removeText = (id: string) => {
     if (!onLayerChange) return;
     onLayerChange({ ...activeLayer, x: activeLayer.x.filter((t) => t.id !== id) });
@@ -755,6 +861,15 @@ export default function PageCanvas({
         />
       )}
 
+      {/* The box being drawn with the Text tool — the same dashed draft the
+          field editor draws, so drawing a box means one thing everywhere. */}
+      {draft && (
+        <div
+          className="pointer-events-none absolute rounded border-2 border-dashed border-pine bg-mint/20"
+          style={{ left: draft.x * scale, top: draft.y * scale, width: draft.w * scale, height: draft.h * scale }}
+        />
+      )}
+
       {/* Layer 2 — form fields.
           The overlay itself never takes the pointer; only the fields on it do.
           As one full-page hit target it swallowed every press that missed a
@@ -834,16 +949,24 @@ export default function PageCanvas({
             {own && editingText === t.id ? (
               <textarea
                 autoFocus
+                // The caret belongs after what's there: a note seeded with its
+                // first letter would otherwise take the rest in front of it.
+                onFocus={(e) => { const n = e.target.value.length; e.target.setSelectionRange(n, n); }}
                 value={t.v}
-                onChange={(e) => updateText(t.id, e.target.value)}
+                onChange={(e) => updateText(t.id, e.target.value, e.target)}
                 onBlur={() => { if (!t.v.trim()) removeText(t.id); else setEditingText(null); }}
                 className="w-full resize-none rounded border border-pine bg-white/95 px-1 py-0.5 outline-none"
                 style={{ fontSize: t.s * scale, lineHeight: 1.25, color: t.c }}
-                rows={2}
+                rows={Math.max(t.a ? 1 : 2, (t.v.match(/\n/g)?.length ?? 0) + 1)}
               />
             ) : (
               <div
-                onClick={() => { if (own && !justDragged.current) setEditingText(t.id); }}
+                // With the select tool up, the first tap selects and the second
+                // — on the selection box, which now covers this — opens typing.
+                // Opening on the first tap would hide the handles behind the
+                // textarea before anyone could reach them. With any other tool
+                // that isn't a pen, a tap still opens the note straight away.
+                onClick={() => { if (own && !justDragged.current && !draggableMarks) setEditingText(t.id); }}
                 className={cn("whitespace-pre-wrap break-words", own && "cursor-text rounded hover:bg-mint/20/50")}
                 style={{ fontSize: t.s * scale, lineHeight: 1.25, color: t.c }}
               >
