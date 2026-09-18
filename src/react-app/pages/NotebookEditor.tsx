@@ -5,15 +5,15 @@ import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
   Pencil, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
-  FolderOpen, LibraryBig,
+  FolderOpen, LibraryBig, Wand2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, pageSource, type FieldRec, type PageRec } from "../lib/api";
-import { readPageSizes } from "../lib/pdf";
+import { api, assetUrl, pageSource, type FieldRec, type PageRec } from "../lib/api";
+import { loadPdf, readPageSizes } from "../lib/pdf";
 import { convertToPdf, driveFileAsPdf, hasDrivePicker, needsConversion, pickDriveFile } from "../lib/google";
 import {
   PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
-  renderPatternToCanvas, type PatternKey,
+  isPattern, renderPatternToCanvas, type PatternKey,
 } from "../lib/patterns";
 import PageCanvas, { type ToolState } from "../components/PageCanvas";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
@@ -22,6 +22,7 @@ import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
 import { emptyLayer, markRefAt, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
 import { usePinchZoom } from "../lib/usePinchZoom";
+import { detectFieldsOnPage, type FieldCandidate } from "../lib/formFields";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea } from "../components/ui";
@@ -415,6 +416,56 @@ export default function NotebookEditor() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  /**
+   * Blanks found on this page, awaiting a yes.
+   *
+   * Held here rather than in `FieldLayer`, which carries `key={page.id}` and
+   * remounts on every page change — a review that vanished when you glanced at
+   * the next page would be worse than no review.
+   */
+  const [candidates, setCandidates] = useState<FieldCandidate[] | null>(null);
+  const [dropped, setDropped] = useState<Set<string>>(new Set());
+  const [finding, setFinding] = useState(false);
+  // Found for *this* page; turning the page throws them away rather than
+  // leaving boxes hovering over a document they don't describe.
+  useEffect(() => { setCandidates(null); setDropped(new Set()); }, [page?.id]);
+
+  const findFields = async () => {
+    if (!page || isPattern(page.pattern)) return;
+    setFinding(true);
+    try {
+      const doc = await loadPdf(assetUrl(notebookId, page.asset_key));
+      const pdfPage = await doc.getPage(page.source_index + 1);
+      const found = await detectFieldsOnPage(pdfPage, fields);
+      setDropped(new Set());
+      setCandidates(found);
+      if (!found.length) {
+        toast("Nothing to fill in found on this page", {
+          description: "Blanks are found from the document's own text. A scanned page is a picture, so there is nothing to read.",
+        });
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setFinding(false);
+    }
+  };
+
+  const addFound = useMutation({
+    mutationFn: (picked: FieldCandidate[]) =>
+      api.post<{ ids: string[] }>(`/api/notebooks/${notebookId}/fields/bulk`, {
+        pageId: page!.id,
+        fields: picked.map(({ type, x, y, w, h }) => ({ type, x, y, w, h })),
+      }),
+    onSuccess: (_res, picked) => {
+      setCandidates(null);
+      setDropped(new Set());
+      invalidate();
+      toast.success(`Added ${picked.length} field${picked.length === 1 ? "" : "s"}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const updateField = useMutation({
     mutationFn: ({ id, ...body }: any) => api.patch(`/api/notebooks/${notebookId}/fields/${id}`, body),
     onSuccess: () => invalidate(),
@@ -1213,6 +1264,24 @@ export default function NotebookEditor() {
         ))}
         {tool !== "none" && <span className="text-[16px] text-pine/60">Drag on the page to place it</span>}
 
+        {/* Its own group: this one doesn't arm a tool, it reads the page. */}
+        <span className="mx-1 h-5 w-px bg-pine/20" aria-hidden />
+        <button
+          data-tour="nb-find-fields"
+          onClick={() => void findFields()}
+          disabled={finding || !page || isPattern(page.pattern)}
+          title={page && isPattern(page.pattern)
+            ? "Blank paper has no document to read — this looks for the blanks in an uploaded worksheet"
+            : "Look for blanks in this page and offer to make them fillable"}
+          className={cn(
+            "inline-flex h-11 items-center gap-2 rounded-full border-2 px-4 font-display text-[16px] font-bold transition-colors",
+            "border-pine/20 text-pine/70 hover:bg-oat disabled:opacity-40 disabled:hover:bg-transparent",
+          )}
+        >
+          <Wand2 className="h-3.5 w-3.5" strokeWidth={2.5} />
+          {finding ? "Looking…" : "Find fields"}
+        </button>
+
 
         <div className="ml-auto">
           <select
@@ -1369,11 +1438,60 @@ export default function NotebookEditor() {
                         return true;
                       }}
                     />
+                    {/* What "Find fields" turned up, in the same dashed draft
+                        look a teacher gets dragging a field out by hand.
+                        Nothing here exists yet — tapping one drops it. */}
+                    {candidates && (
+                      <div className="absolute inset-0">
+                        {candidates.map((c) => {
+                          const off = dropped.has(c.id);
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              aria-pressed={!off}
+                              title={off ? "Skipped — tap to put it back" : "Tap to skip this one"}
+                              onClick={() => setDropped((d) => {
+                                const next = new Set(d);
+                                if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                                return next;
+                              })}
+                              className={cn(
+                                "absolute rounded border-2 border-dashed transition-colors",
+                                off ? "border-pine/25" : "border-pine bg-mint/20",
+                              )}
+                              style={{ left: c.x * scale, top: c.y * scale, width: c.w * scale, height: c.h * scale }}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
             </div>
           )}
+
+          {candidates && candidates.length > 0 && (() => {
+            const kept = candidates.filter((c) => !dropped.has(c.id));
+            return (
+              <div className="sticky bottom-4 z-20 mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-2 rounded-full border-[3px] border-pine bg-white px-3 py-2 shadow-[4px_4px_0_0_var(--color-pine)]">
+                <span className="px-1 font-display text-[16px] font-bold text-pine">
+                  {kept.length
+                    ? `Found ${kept.length} place${kept.length === 1 ? "" : "s"} to fill in`
+                    : "None selected"}
+                </span>
+                <Button variant="secondary" onClick={() => setCandidates(null)}>Cancel</Button>
+                <Button
+                  variant="primary"
+                  disabled={!kept.length || addFound.isPending}
+                  onClick={() => addFound.mutate(kept)}
+                >
+                  {addFound.isPending ? "Adding…" : "Add them"}
+                </Button>
+              </div>
+            );
+          })()}
 
           {/* Floating action bar for the current page multi-selection. */}
           {selection.size > 0 && (
@@ -1456,7 +1574,7 @@ export default function NotebookEditor() {
 
       {/* Held back until nothing is layered over the editor: a spotlight cut
           through a drawer or an inspector would ring the wrong thing. */}
-      {!blankOpen && !libraryOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && (
+      {!blankOpen && !libraryOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && (
         <Tour place="notebook" />
       )}
     </div>

@@ -771,6 +771,59 @@ app.post("/api/notebooks/:id/fields", handler(async (c) => {
   return c.json({ field: { id } });
 }));
 
+/**
+ * Place several fields at once.
+ *
+ * "Find form fields" turns one press into a dozen, and one request each would
+ * be a dozen round trips, each re-checking the page and touching the notebook,
+ * with the client refetching the whole notebook after every one. Same argument
+ * as `pages/arrange` above, and the same answer: build the statements and send
+ * them together.
+ *
+ * Validation is stricter than the single-field route because nothing here was
+ * typed by a person: coordinates come from a detector, so a NaN or a box off
+ * the page would be a bug rather than a typo, and should not be stored.
+ */
+app.post("/api/notebooks/:id/fields/bulk", handler(async (c) => {
+  const { nb } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
+  const body = await c.req.json<{
+    pageId: string;
+    fields: { type: string; x: number; y: number; w: number; h: number; label?: string }[];
+  }>();
+  const wanted = Array.isArray(body.fields) ? body.fields : [];
+  if (!wanted.length) throw new HttpError(400, "No fields to add");
+  if (wanted.length > 200) throw new HttpError(400, "That's more fields than one page can hold");
+
+  const page = await db
+    .prepare(`SELECT id, width, height FROM pages WHERE id = ? AND notebook_id = ?`)
+    .bind(body.pageId, nb.id)
+    .first<{ id: string; width: number; height: number }>();
+  if (!page) throw new HttpError(404, "Page not found");
+
+  const fits = (n: unknown) => typeof n === "number" && Number.isFinite(n);
+  for (const f of wanted) {
+    if (!FIELD_TYPES.includes(f.type)) throw new HttpError(400, "Unsupported field type");
+    if (![f.x, f.y, f.w, f.h].every(fits)) throw new HttpError(400, "A field has no position");
+    if (f.w <= 0 || f.h <= 0) throw new HttpError(400, "A field has no size");
+    if (f.x < 0 || f.y < 0 || f.x + f.w > page.width + 1 || f.y + f.h > page.height + 1) {
+      throw new HttpError(400, "A field falls outside the page");
+    }
+  }
+
+  const ids = wanted.map(() => uid());
+  const statements = wanted.map((f, i) =>
+    db
+      .prepare(
+        `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(ids[i], nb.id, page.id, f.type, f.x, f.y, f.w, f.h, f.label ?? "", "[]", "", "", now(), now()),
+  );
+  statements.push(db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id));
+  await db.batch(statements);
+  return c.json({ ids });
+}));
+
 /** Move/resize/relabel a field. Student values stay attached via the field UUID. */
 app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
