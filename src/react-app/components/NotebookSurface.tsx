@@ -59,6 +59,8 @@ interface Props {
   fieldsEditable: boolean;
   /** Teacher view: hovering a student's mark reveals when it was made. */
   showMarkHistory?: boolean;
+  /** Teacher previewing their own notebook: fields take typing, uploads don't happen. */
+  preview?: boolean;
   onLayerChange: (pageId: string, layer: LayerData) => void;
   onFieldChange: (fieldId: string, value: string) => void;
   onVisiblePageChange?: (pageId: string) => void;
@@ -72,7 +74,7 @@ interface Props {
 
 export default function NotebookSurface({
   notebookId, pages, fields, studentLayers, teacherLayers, masterLayers, fieldValues,
-  writeTarget, tool, fingerDraw, zoom, onZoomChange, authorName, fieldsEditable, showMarkHistory,
+  writeTarget, tool, fingerDraw, zoom, onZoomChange, authorName, fieldsEditable, showMarkHistory, preview,
   onLayerChange, onFieldChange, onVisiblePageChange, scrollRef, header,
   studentId, onResponseUploaded,
 }: Props) {
@@ -191,6 +193,7 @@ export default function NotebookSurface({
                 authorName={authorName}
                 notebookId={notebookId}
                 studentId={studentId}
+                preview={preview}
                 onResponseUploaded={onResponseUploaded}
               />
             </LazyPage>

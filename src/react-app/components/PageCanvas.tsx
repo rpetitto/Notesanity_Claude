@@ -125,6 +125,13 @@ interface Props {
   /** Teacher view: hovering a student's mark reveals when it was made. */
   showMarkHistory?: boolean;
   /**
+   * A teacher looking at their own notebook as a student would. Fields still
+   * take typing, because that is the thing being checked, but an image or
+   * audio field must not actually upload — a preview that wrote a response
+   * would be inventing a student's work.
+   */
+  preview?: boolean;
+  /**
    * A mark to have selected on arrival — how a tap made outside annotate mode
    * carries its target into the editor that opens because of it.
    */
@@ -165,7 +172,7 @@ export default function PageCanvas({
   fields, fieldValues, onFieldChange,
   studentLayer, teacherLayer, masterLayer, onLayerChange,
   writeTarget, tool, fingerDraw, fieldsEditable, authorName, className,
-  notebookId = "", studentId, onResponseUploaded, showMarkHistory, initialSelection = null,
+  notebookId = "", studentId, onResponseUploaded, showMarkHistory, preview, initialSelection = null,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const masterRef = useRef<HTMLCanvasElement>(null);
@@ -909,6 +916,7 @@ export default function PageCanvas({
             scale={scale}
             value={fieldValues[f.id]}
             editable={fieldsEditable}
+            preview={preview}
             onChange={(v) => onFieldChange?.(f.id, v)}
             notebookId={notebookId}
             studentId={studentId}
@@ -1118,7 +1126,7 @@ function CommentPin({
 }
 
 function FieldControl({
-  field, scale, value, editable, onChange, typeable, notebookId, studentId, onResponseUploaded,
+  field, scale, value, editable, onChange, typeable, notebookId, studentId, onResponseUploaded, preview,
 }: {
   field: FieldLike;
   scale: number;
@@ -1130,6 +1138,8 @@ function FieldControl({
   onResponseUploaded?: (fieldId: string) => void;
   /** Marks the control as a tap target while a marking tool is active. */
   typeable?: boolean;
+  /** Preview: everything else behaves, but nothing uploads. */
+  preview?: boolean;
 }) {
   const style = {
     left: field.x * scale,
@@ -1221,7 +1231,7 @@ function FieldControl({
       <ResponseImageField
         field={field}
         style={style}
-        editable={editable}
+        editable={editable && !preview}
         notebookId={notebookId}
         studentId={studentId}
         onResponseUploaded={onResponseUploaded}
@@ -1235,7 +1245,7 @@ function FieldControl({
       <ResponseAudioField
         field={field}
         style={style}
-        editable={editable}
+        editable={editable && !preview}
         notebookId={notebookId}
         studentId={studentId}
         onResponseUploaded={onResponseUploaded}

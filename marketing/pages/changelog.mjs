@@ -41,6 +41,7 @@ const RELEASES = [
     "September 18, 2026",
     "Pinch zooms the page, and worksheets fill themselves in.",
     [
+      ["new", "<b>See your notebook the way your class will.</b> <b>Preview as a student</b>, in a notebook's ··· menu, opens it exactly as a student gets it — your writing on the pages, your answer boxes ready to fill in. It includes writing you haven't sent yet, so you can check a page before you publish it. Nothing you type or draw in a preview is saved, and it never touches a real student's notebook."],
       ["new", "<b>Find the blanks in a worksheet for you.</b> Open a page you made from a PDF and press <b>Find fields</b>: Notesanity reads the document and offers an answer box for every fill-in line it finds, and a checkbox for every tick box. They appear as dashed outlines first — tap any one to skip it — and nothing is added to the page until you say so. It reads the document's own text, so a worksheet you scanned as a picture has nothing to find."],
       ["better", "<b>On a phone or tablet, pinching zooms the page, not the app.</b> Two fingers on a page make that page bigger or smaller around the spot under your fingers, and the toolbar's zoom menu shows where you landed. The header and toolbars stay put. Before, a pinch scaled the whole screen the way it would on any website, and the buttons went with it."],
       ["fixed", "With finger drawing on, starting a pinch no longer leaves a dot where the first finger touched down."],

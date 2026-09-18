@@ -5,7 +5,7 @@ import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette, Pen,
   Pencil, PenLine, Plus, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
-  FolderOpen, LibraryBig, Wand2,
+  FolderOpen, LibraryBig, Wand2, Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, pageSource, type FieldRec, type PageRec } from "../lib/api";
@@ -15,12 +15,13 @@ import {
   PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
   isPattern, renderPatternToCanvas, type PatternKey,
 } from "../lib/patterns";
-import PageCanvas, { type ToolState } from "../components/PageCanvas";
+import PageCanvas, { type FieldValue, type ToolState } from "../components/PageCanvas";
+import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
 import InkToolbar from "../components/InkToolbar";
 import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
-import { emptyLayer, markRefAt, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
+import { emptyLayer, markRefAt, parseLayer, PEN_COLORS, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
 import { usePinchZoom } from "../lib/usePinchZoom";
 import { detectFieldsOnPage, type FieldCandidate } from "../lib/formFields";
 import type { SaveStatus } from "../lib/autosave";
@@ -426,6 +427,32 @@ export default function NotebookEditor() {
   const [candidates, setCandidates] = useState<FieldCandidate[] | null>(null);
   const [dropped, setDropped] = useState<Set<string>>(new Set());
   const [finding, setFinding] = useState(false);
+
+  /**
+   * The notebook as a student will get it.
+   *
+   * Everything a student would be shown is already loaded here — the pages,
+   * every page's fields, and the annotations from `railAnnotations`, which
+   * holds the *draft* markup including strokes not yet published. So the
+   * preview needs no request at all, which is the point: `GET /work` looks
+   * like a read but creates a work instance for whoever calls it, and a
+   * preview that fabricated a student's notebook would be worse than none.
+   * Everything typed or drawn in here lives in these two pieces of state and
+   * is dropped on the way out.
+   */
+  const [previewing, setPreviewing] = useState(false);
+  const [previewLayers, setPreviewLayers] = useState<Record<string, LayerData>>({});
+  const [previewValues, setPreviewValues] = useState<Record<string, FieldValue>>({});
+  const [previewZoom, setPreviewZoom] = useState<ZoomMode>("page");
+  const [previewFinger, setPreviewFinger] = useState(false);
+  const [previewTool, setPreviewTool] = useState<ToolState>({
+    kind: "pen", color: PEN_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14, erase: "quick",
+  });
+  const openPreview = () => {
+    setPreviewLayers({});
+    setPreviewValues({});
+    setPreviewing(true);
+  };
   // Found for *this* page; turning the page throws them away rather than
   // leaving boxes hovering over a document they don't describe.
   useEffect(() => { setCandidates(null); setDropped(new Set()); }, [page?.id]);
@@ -1018,6 +1045,12 @@ export default function NotebookEditor() {
           className="order-3 sm:order-6"
           items={[
             {
+              label: "Preview as a student",
+              icon: <Eye className="h-5 w-5" strokeWidth={2.5} />,
+              hint: "See this notebook the way your class will, including writing you haven't sent yet.",
+              onClick: openPreview,
+            },
+            {
               label: "Rename",
               icon: <Pencil className="h-5 w-5" strokeWidth={2.5} />,
               hint: "What it's called for you and your students.",
@@ -1572,9 +1605,56 @@ export default function NotebookEditor() {
         )}
       </div>
 
+      {previewing && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-oat">
+          {/* The same amber as the impersonation banner: this is the app
+              telling you it is not behaving normally. */}
+          <div className="flex flex-wrap items-center gap-3 border-b-2 border-[#8a6a1f] bg-[#fdf1cf] px-4 py-2 text-[16px] text-[#5c4713]">
+            <Eye className="h-4 w-4 shrink-0" />
+            <span>
+              Previewing as a student — including writing you haven't sent yet.
+              Nothing you do here is saved.
+            </span>
+            <Button variant="secondary" className="ml-auto shrink-0" onClick={() => setPreviewing(false)}>
+              Exit preview
+            </Button>
+          </div>
+          <div className="overflow-x-auto">
+            <InkToolbar
+              tool={previewTool}
+              onToolChange={setPreviewTool}
+              fingerDraw={previewFinger}
+              onFingerDrawChange={setPreviewFinger}
+              zoom={previewZoom}
+              onZoomChange={setPreviewZoom}
+            />
+          </div>
+          <div className="min-h-0 flex-1">
+            <NotebookSurface
+              notebookId={notebookId}
+              pages={livePages}
+              fields={query.data?.fields ?? []}
+              studentLayers={previewLayers}
+              teacherLayers={{}}
+              masterLayers={railAnnotations}
+              fieldValues={previewValues}
+              writeTarget="student"
+              tool={previewTool}
+              fingerDraw={previewFinger}
+              zoom={previewZoom}
+              onZoomChange={setPreviewZoom}
+              fieldsEditable
+              preview
+              onLayerChange={(pageId, layer) => setPreviewLayers((m) => ({ ...m, [pageId]: layer }))}
+              onFieldChange={(fieldId, value) => setPreviewValues((m) => ({ ...m, [fieldId]: value }))}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Held back until nothing is layered over the editor: a spotlight cut
           through a drawer or an inspector would ring the wrong thing. */}
-      {!blankOpen && !libraryOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && (
+      {!blankOpen && !libraryOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && !previewing && (
         <Tour place="notebook" />
       )}
     </div>
