@@ -2043,7 +2043,11 @@ function ActionMenu({
         <div
           role="menu"
           onPointerDown={(e) => e.stopPropagation()}
-          className="absolute right-0 top-full z-40 mt-2 w-[min(19rem,calc(100vw-24px))] overflow-hidden rounded-[16px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)]"
+          // Hangs from the button's left edge on a phone, where the button is
+          // the first thing in its row and a right-anchored panel wider than
+          // the button falls off the screen; from the right on wider screens,
+          // where the button sits at the right end of the header.
+          className="absolute left-0 top-full z-40 mt-2 w-[min(19rem,calc(100vw-24px))] overflow-hidden rounded-[16px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)] sm:left-auto sm:right-0"
         >
           {items.map(({ label: item, icon: Icon, onClick, disabled, hint }) => (
             <button
