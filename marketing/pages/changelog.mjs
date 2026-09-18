@@ -38,6 +38,14 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 18, 2026",
+    "Pinch zooms the page.",
+    [
+      ["better", "<b>On a phone or tablet, pinching zooms the page, not the app.</b> Two fingers on a page make that page bigger or smaller around the spot under your fingers, and the toolbar's zoom menu shows where you landed. The header and toolbars stay put. Before, a pinch scaled the whole screen the way it would on any website, and the buttons went with it."],
+      ["fixed", "With finger drawing on, starting a pinch no longer leaves a dot where the first finger touched down."],
+    ],
+  ],
+  [
     "September 17, 2026",
     "Tap and type.",
     [

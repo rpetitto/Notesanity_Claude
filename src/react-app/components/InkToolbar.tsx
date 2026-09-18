@@ -232,6 +232,10 @@ export default function InkToolbar({
           {ZOOM_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
+          {/* A pinch lands between the presets; the menu says where. */}
+          {typeof zoom === "number" && !ZOOM_OPTIONS.some((o) => String(o.value) === String(zoom)) && (
+            <option value={String(zoom)}>{Math.round(zoom * 100)}%</option>
+          )}
         </select>
 
         {status && <SaveIndicator status={status} />}

@@ -780,6 +780,7 @@ export default function Grading() {
               tool={tool}
               fingerDraw={fingerDraw}
               zoom={zoom}
+              onZoomChange={setZoom}
               fieldsEditable={false}
               showMarkHistory
               onLayerChange={notebookWork.setLayer}

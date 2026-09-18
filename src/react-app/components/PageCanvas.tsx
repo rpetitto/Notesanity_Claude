@@ -413,6 +413,24 @@ export default function PageCanvas({
     if (ctx) ctx.clearRect(0, 0, cssW, cssH);
   }, [activeLayer, onLayerChange, tool, cssW, cssH]);
 
+  /**
+   * A second finger means a pinch, not a stroke. With finger drawing on, the
+   * first finger has already started a mark by the time the second lands;
+   * that mark is discarded rather than left as a dot where the pinch began.
+   */
+  const cancelGesture = () => {
+    drawing.current = false;
+    pendingTap.current = null;
+    points.current = [];
+    activePointer.current = null;
+    markDrag.current = null;
+    textPress.current = null;
+    setPending(null);
+    setDraft(null);
+    const ctx = liveRef.current?.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, cssW, cssH);
+  };
+
   const drawLive = useCallback(() => {
     const ctx = liveRef.current?.getContext("2d");
     if (!ctx) return;
@@ -825,6 +843,7 @@ export default function PageCanvas({
       className={cn("relative bg-white shadow-sm select-none", className)}
       onMouseMove={onHoverMove}
       onMouseLeave={() => setMarkHover(null)}
+      onTouchStart={(e) => { if (e.touches.length > 1) cancelGesture(); }}
       style={{
         width: cssW,
         height: cssH,

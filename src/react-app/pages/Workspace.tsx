@@ -1156,6 +1156,7 @@ export default function Workspace() {
             tool={tool}
             fingerDraw={fingerDraw}
             zoom={zoom}
+            onZoomChange={setZoom}
             authorName={user?.name}
             fieldsEditable={!locked}
             onLayerChange={work.setLayer}

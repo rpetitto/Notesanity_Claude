@@ -21,6 +21,7 @@ import InkToolbar from "../components/InkToolbar";
 import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
 import { emptyLayer, markRefAt, parseLayer, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
+import { usePinchZoom } from "../lib/usePinchZoom";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea } from "../components/ui";
@@ -355,6 +356,7 @@ export default function NotebookEditor() {
     const usable = Math.max(280, containerWidth - 48);
     return Math.min(1.8, usable / page.width) * zoom;
   }, [page, containerWidth, zoom]);
+  usePinchZoom(containerRef, zoom, setZoom);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["notebook", notebookId] });
@@ -1220,6 +1222,7 @@ export default function NotebookEditor() {
             aria-label="Zoom"
           >
             {[0.5, 0.75, 1, 1.25, 1.5].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
+            {![0.5, 0.75, 1, 1.25, 1.5].includes(zoom) && <option value={zoom}>{Math.round(zoom * 100)}%</option>}
           </select>
         </div>
       </div>

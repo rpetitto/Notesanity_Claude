@@ -36,6 +36,8 @@ body,
 #root {
   height: 100%;
 }
+/* The app never zooms as a whole: two fingers zoom the page they're on. */
+html { touch-action: pan-x pan-y; }
 
 body {
   margin: 0;

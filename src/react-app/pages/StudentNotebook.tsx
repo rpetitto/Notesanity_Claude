@@ -365,6 +365,7 @@ export default function StudentNotebook() {
             tool={tool}
             fingerDraw={fingerDraw}
             zoom={zoom}
+            onZoomChange={setZoom}
             authorName={user?.name}
             fieldsEditable={false}
             showMarkHistory

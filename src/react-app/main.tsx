@@ -12,6 +12,15 @@ const queryClient = new QueryClient({
   },
 });
 
+// A pinch anywhere is never the browser's to act on: the page surfaces take
+// it (usePinchZoom) and everywhere else it does nothing, rather than scaling
+// the header off the screen. iOS ignores `user-scalable=no` in the browser
+// and only honours a cancelled two-finger move and its own gesture events.
+document.addEventListener("touchmove", (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

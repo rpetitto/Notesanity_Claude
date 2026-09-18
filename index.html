@@ -4,7 +4,9 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/notesanity.svg" />
     <link rel="apple-touch-icon" href="/app-icon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- No viewport zoom: a pinch zooms the notebook page instead (usePinchZoom),
+         and interface text never drops below 16px so there is nothing to squint at. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <!-- Pine, per the brand book's app-icon rule: always a Pine ground. -->
     <meta name="theme-color" content="#20302C" />
     <meta name="description" content="Notesanity — every notebook a teacher has, every page a student needs." />

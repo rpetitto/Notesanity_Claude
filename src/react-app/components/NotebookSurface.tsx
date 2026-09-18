@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePinchZoom } from "../lib/usePinchZoom";
 import { pageSource, type FieldRec, type LayerRec, type PageRec } from "../lib/api";
 import { type LayerData, emptyLayer, parseLayer } from "../lib/ink";
 import PageCanvas, { type FieldValue, type ToolState } from "./PageCanvas";
@@ -52,6 +53,8 @@ interface Props {
   tool: ToolState;
   fingerDraw: boolean;
   zoom: ZoomMode;
+  /** Set by a pinch on the surface; a number, in the same units as `zoom`. */
+  onZoomChange?: (zoom: number) => void;
   authorName?: string;
   fieldsEditable: boolean;
   /** Teacher view: hovering a student's mark reveals when it was made. */
@@ -69,7 +72,7 @@ interface Props {
 
 export default function NotebookSurface({
   notebookId, pages, fields, studentLayers, teacherLayers, masterLayers, fieldValues,
-  writeTarget, tool, fingerDraw, zoom, authorName, fieldsEditable, showMarkHistory,
+  writeTarget, tool, fingerDraw, zoom, onZoomChange, authorName, fieldsEditable, showMarkHistory,
   onLayerChange, onFieldChange, onVisiblePageChange, scrollRef, header,
   studentId, onResponseUploaded,
 }: Props) {
@@ -87,11 +90,14 @@ export default function NotebookSurface({
     return () => ro.disconnect();
   }, [containerRef]);
 
-  const scale = useMemo(() => {
+  const fitWidth = useMemo(() => {
     const widest = pages.reduce((m, p) => Math.max(m, p.width), 0) || 612;
-    const tallest = pages.reduce((m, p) => Math.max(m, p.height), 0) || 792;
     const usableW = Math.max(280, box.width - 48);
-    const fitWidth = Math.min(1.6, usableW / widest);
+    return Math.min(1.6, usableW / widest);
+  }, [pages, box]);
+
+  const scale = useMemo(() => {
+    const tallest = pages.reduce((m, p) => Math.max(m, p.height), 0) || 792;
     if (zoom === "width") return fitWidth;
     if (zoom === "page") {
       // Leave room for the page caption and the gap between pages.
@@ -99,7 +105,11 @@ export default function NotebookSurface({
       return Math.max(0.15, Math.min(fitWidth, usableH / tallest));
     }
     return fitWidth * zoom;
-  }, [pages, box, zoom]);
+  }, [pages, box, zoom, fitWidth]);
+
+  // A pinch works in the menu's units — a multiple of fit-width — so "Fit
+  // page" and "Fit width" are first read back as the number they amount to.
+  usePinchZoom(containerRef, scale / fitWidth, (z) => onZoomChange?.(z), { enabled: !!onZoomChange });
 
   const fieldsByPage = useMemo(() => {
     const map: Record<string, FieldRec[]> = {};
@@ -146,7 +156,10 @@ export default function NotebookSurface({
   return (
     <div ref={containerRef} className="h-full overflow-auto bg-oat" style={{ overscrollBehavior: "contain" }}>
       {header}
-      <div className="flex flex-col items-center gap-6 px-4 py-6">
+      {/* Start-aligned with auto margins, not centred: a page zoomed wider
+          than the screen has to scroll from its left edge, and a centred flex
+          item splits its overflow both ways with the left half unreachable. */}
+      <div className="flex flex-col items-start gap-6 px-4 py-6">
         {pages.map((page, i) => {
           const target = typeof writeTarget === "function" ? writeTarget(page.id) : writeTarget;
           return (
@@ -154,7 +167,7 @@ export default function NotebookSurface({
             key={page.id}
             ref={(node) => { pageRefs.current[page.id] = node; }}
             data-page-id={page.id}
-            className="relative"
+            className="relative mx-auto"
           >
             <div className="mb-1.5 flex items-center justify-between text-[16px] text-pine/70">
               <span>{page.label || `Page ${i + 1}`}</span>
