@@ -157,14 +157,23 @@ export async function requirePlan(user: AppUser, min: "pro" | "school", what: st
   return plan;
 }
 
-/** Refuse a new class notebook once a Free teacher is at the cap. Never refuses during the beta. */
+/**
+ * Refuse a new class notebook once a Free teacher is at the cap. Never refuses
+ * during the beta.
+ *
+ * Order matters in the message. Archiving genuinely does free a slot and a
+ * teacher is entitled to know it, but leading with it made the one moment
+ * we ask for the sale into an instruction for avoiding it. The offer comes
+ * first now; the free way out still follows, in the same breath.
+ */
 export async function requireNotebookRoom(user: AppUser): Promise<void> {
   if (BETA_FREE) return;
   const quota = await notebookQuota(user);
   if (quota.limit !== null && quota.used >= quota.limit) {
     throw new HttpError(
       402,
-      `Your Free plan is full at ${FREE_NOTEBOOK_LIMIT} class notebooks — archive one, or upgrade to Pro for unlimited notebooks.`,
+      `You've used all ${FREE_NOTEBOOK_LIMIT} class notebooks on the Free plan. `
+      + `Upgrade to Pro for unlimited notebooks, or archive one you've finished with.`,
     );
   }
 }

@@ -58,7 +58,7 @@ export default () =>
     <p class="lede">
       ${BETA_FREE
         ? "Every teacher, every class, every student — free for the whole beta, no card and no trial clock. The plans below are what comes after, published now so a school can plan a year ahead."
-        : "Start free. Go Pro when you want unlimited notebooks and the page library. Schools buy by the department or the building, on an invoice."}
+        : "Start free. Go Pro when you want unlimited notebooks, worksheet blanks found for you, and the page library. Schools buy by the department or the building, on an invoice."}
     </p>
   </div>
 </section>
@@ -84,6 +84,7 @@ export default () =>
         bullets: [
           "Everything in Free",
           "Unlimited class notebooks",
+          "Find the blanks in a worksheet and make them fillable",
           "The page library — save any page, reuse it anywhere",
           "Support straight from the people who build it",
         ],

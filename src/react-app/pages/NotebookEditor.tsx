@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, pageSource, type FieldRec, type PageRec } from "../lib/api";
+import { useSession } from "../lib/session";
 import { loadPdf, readPageSizes } from "../lib/pdf";
 import { convertToPdf, driveFileAsPdf, hasDrivePicker, needsConversion, pickDriveFile } from "../lib/google";
 import {
@@ -427,6 +428,13 @@ export default function NotebookEditor() {
   const [candidates, setCandidates] = useState<FieldCandidate[] | null>(null);
   const [dropped, setDropped] = useState<Set<string>>(new Set());
   const [finding, setFinding] = useState(false);
+  /**
+   * Finding blanks is the Pro half of the field tools. The server is the real
+   * gate; this is here so a Free teacher is told before the detector runs
+   * rather than after it has shown them eight things they can't keep.
+   */
+  const { plan } = useSession();
+  const findFieldsLocked = !!plan && !plan.beta && plan.tier === "free";
 
   /**
    * The notebook as a student will get it.
@@ -459,6 +467,13 @@ export default function NotebookEditor() {
 
   const findFields = async () => {
     if (!page || isPattern(page.pattern)) return;
+    if (findFieldsLocked) {
+      toast("Finding blanks is part of Pro", {
+        description: "You can still place fields by hand. Pro finds them for you, and adds unlimited notebooks and the page library.",
+        action: { label: "See plans", onClick: () => navigate("/settings") },
+      });
+      return;
+    }
     setFinding(true);
     try {
       const doc = await loadPdf(assetUrl(notebookId, page.asset_key));
@@ -1313,6 +1328,9 @@ export default function NotebookEditor() {
         >
           <Wand2 className="h-3.5 w-3.5" strokeWidth={2.5} />
           {finding ? "Looking…" : "Find fields"}
+          {findFieldsLocked && (
+            <span className="rounded-full bg-pine/10 px-1.5 text-[13px] font-bold text-pine/70">Pro</span>
+          )}
         </button>
 
 

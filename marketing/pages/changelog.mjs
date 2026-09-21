@@ -38,6 +38,13 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 21, 2026",
+    "What Pro will include.",
+    [
+      ["better", "<b>When the beta ends, having the blanks in a worksheet found for you will be part of Pro</b>, alongside unlimited notebooks and the page library. Placing fields by hand stays free for everyone, always. Nothing changes today — everything is still free while we're in beta, and you'll get a full semester's notice before that ends."],
+    ],
+  ],
+  [
     "September 18, 2026",
     "Pinch zooms the page, and worksheets fill themselves in.",
     [
