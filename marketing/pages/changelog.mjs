@@ -41,6 +41,7 @@ const RELEASES = [
     "September 21, 2026",
     "Spoken comments, shapes, and what Pro will include.",
     [
+      ["new", "<b>Saved phrases.</b> The sentences you write on every third paper are now one tap away. Write a comment, press <b>Save this phrase</b>, and it's offered inside every comment box from then on — in your own classes, next term, next year. The ones you reach for most rise to the top on their own."],
       ["new", "<b>Say it instead of typing it.</b> Open a comment while marking and there's now a <b>Say it instead</b> button: record a few seconds out loud and it's pinned to that spot on the page for the student to play back. Faster to give than typing, and a lot warmer to receive. You can still add written text alongside it."],
       ["new", "<b>Shapes.</b> A new tool in the annotation toolbar draws a line, an arrow, a box or a circle. Drag to place one, and use a line as an underline or a strikethrough. A shape behaves like anything else you draw: rub it out with the eraser, or pick it up to move, resize and turn it."],
       ["better", "<b>Finding the blanks in a worksheet stays free for everyone.</b> When the beta ends, Pro will be about making last year's work pay off again: unlimited notebooks and the page library. Nothing you need to teach this week goes behind it. You'll get a full semester's notice before anything changes."],

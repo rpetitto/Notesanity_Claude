@@ -1142,6 +1142,51 @@ function CommentPin({
   const [sending, setSending] = useState(false);
   const recorder = useRef<MediaRecorder | null>(null);
 
+  /**
+   * Phrases this teacher has written before.
+   *
+   * Fetched the first time a comment is actually opened rather than with the
+   * page, because most pages never open one. A refusal is not an error here:
+   * a student has no bank, and after the beta it's a Pro feature, so either
+   * way the row of phrases simply isn't there.
+   */
+  const [phrases, setPhrases] = useState<{ id: string; text: string }[] | null>(null);
+  useEffect(() => {
+    if (!open || !editable || phrases) return;
+    let live = true;
+    fetch("/api/my/comment-bank", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : { phrases: [] }))
+      .then((d) => { if (live) setPhrases(d.phrases ?? []); })
+      .catch(() => { if (live) setPhrases([]); });
+    return () => { live = false; };
+  }, [open, editable, phrases]);
+
+  const usePhrase = (ph: { id: string; text: string }) => {
+    const body = comment.t.trim();
+    onChange(body ? `${body} ${ph.text}` : ph.text);
+    // Reaching for one is what floats it to the top next time.
+    fetch(`/api/my/comment-bank/${ph.id}/used`, { method: "POST", credentials: "same-origin" }).catch(() => {});
+  };
+
+  const savePhrase = async () => {
+    const text = comment.t.trim();
+    if (!text) return;
+    try {
+      const res = await fetch("/api/my/comment-bank", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't save that phrase");
+      const { phrase } = await res.json();
+      setPhrases((p) => [phrase, ...(p ?? []).filter((x) => x.text !== text)]);
+      toast.success("Saved for next time");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1218,6 +1263,26 @@ function CommentPin({
                 placeholder="Add a comment…"
                 className="w-full resize-none rounded border border-pine/35 px-1.5 py-1 text-[16px] outline-none focus:border-pine"
               />
+              {!!phrases?.length && (
+                <div className="mt-1.5 max-h-24 overflow-y-auto border-t border-pine/15 pt-1">
+                  {phrases.slice(0, 8).map((ph) => (
+                    <button
+                      key={ph.id}
+                      onClick={() => usePhrase(ph)}
+                      title={ph.text}
+                      className="block w-full truncate rounded px-1 py-0.5 text-left text-[15px] text-pine/80 hover:bg-oat"
+                    >
+                      {ph.text}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!!comment.t.trim() && !phrases?.some((ph) => ph.text === comment.t.trim()) && (
+                <button onClick={savePhrase} className="mt-1 text-[15px] text-pine/60 hover:underline">
+                  Save this phrase
+                </button>
+              )}
+
               {comment.k ? (
                 <div className="mt-1.5 flex items-center gap-1.5">
                   <audio controls preload="none" className="h-8 w-full"

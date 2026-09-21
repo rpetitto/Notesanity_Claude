@@ -878,6 +878,27 @@ migrate("026_page_library", async () => {
  * its subscription's status, so a lapsed card doesn't quietly erase who the
  * school chose — it comes back the day the card does.
  */
+/**
+ * Feedback a teacher writes more than once.
+ *
+ * The same six sentences carry most of a marking pile, and retyping them is
+ * the second biggest time sink after the marking itself. Kept per teacher
+ * rather than per notebook, because the whole point is that it follows them
+ * from one class to the next and gets more useful every year.
+ */
+migrate("029_comment_bank", async () => {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS comment_bank (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      uses INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_comment_bank_owner ON comment_bank(owner_id)`).run();
+});
+
 migrate("028_billing", async () => {
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS subscriptions (
