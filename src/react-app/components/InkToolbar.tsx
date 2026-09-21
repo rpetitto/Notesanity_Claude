@@ -77,12 +77,13 @@ export default function InkToolbar({
 
   return (
     <div
-      // Wrapping is only allowed once the row genuinely fits. At `sm` it kicked in
-      // right where tablets live, turning one row of tools into two or three.
-      className="flex snap-x items-center gap-2 overflow-x-auto border-b border-pine/20 bg-white/95 px-3 py-2 backdrop-blur 2xl:flex-wrap 2xl:overflow-visible"
-      style={{ touchAction: "manipulation", scrollbarWidth: "thin" }}
+      // Never a sideways scroll: a row that doesn't fit wraps. The tool group is
+      // sized to fit a 390px phone in one piece (eight 44px targets, 2px apart),
+      // and the label-bearing controls shed their words before they'd wrap.
+      className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-pine/20 bg-white/95 px-3 py-2 backdrop-blur"
+      style={{ touchAction: "manipulation" }}
     >
-      <div data-tour="ink-tools" className="flex shrink-0 items-center gap-1 rounded-lg bg-oat p-1">
+      <div data-tour="ink-tools" className="flex shrink-0 items-center gap-0.5 rounded-lg bg-oat p-1">
         {TOOLS.map(({ kind, icon: Icon, label, hint }) => (
           <button
             key={kind}
@@ -237,7 +238,7 @@ export default function InkToolbar({
           )}
         >
           <FingerIcon className="h-3.5 w-3.5" />
-          {fingerDraw ? "Finger draws" : "Finger scrolls"}
+          <span className="hidden lg:inline">{fingerDraw ? "Finger draws" : "Finger scrolls"}</span>
         </button>
 
         <div className="flex items-center gap-1 text-pine/70">
@@ -257,7 +258,7 @@ export default function InkToolbar({
             const v = e.target.value;
             onZoomChange(v === "page" || v === "width" ? v : Number(v));
           }}
-          className="h-11 rounded-full border-2 border-pine/25 bg-white px-3 font-display text-[16px] text-pine"
+          className="hidden h-11 rounded-full border-2 border-pine/25 bg-white px-3 font-display text-[16px] text-pine sm:block"
           aria-label="Zoom"
         >
           {ZOOM_OPTIONS.map((o) => (

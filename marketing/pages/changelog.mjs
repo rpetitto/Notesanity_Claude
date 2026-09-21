@@ -39,8 +39,9 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "September 21, 2026",
-    "Google Classroom assignments, spoken comments, saved phrases, read aloud, shapes, and blanks found on scans.",
+    "A tidier editor, Google Classroom assignments, spoken comments, saved phrases, read aloud, shapes, and blanks found on scans.",
     [
+      ["better", "<b>The notebook editor's tools are now three tabs.</b> <b>Pages</b> adds paper and puts a block of text or a picture of yours on a page; <b>Answer boxes</b> is everything a student fills in, with <b>Find blanks</b> beside it; <b>Annotate</b> is your pen. One row of tools under them, each tool with its name on it, and nothing to scroll sideways for any more \u2014 on a phone the row wraps instead. Everything is where it was in spirit; it just isn't all on screen at once."],
       ["new", "<b>Post an assignment to Google Classroom.</b> If your class came from Classroom, creating an assignment now offers to post it there too. It appears in that course with a link that takes each student straight to the pages, with your due date on it. Grade the work here, return it, and the grades go back to your Classroom gradebook."],
       ["better", "<b>Classroom grades carry across where they can.</b> Points and complete/incomplete go back as numbers, which is all Classroom accepts \u2014 a letter grade stays in Notesanity, and the assignment posts ungraded there. A grade can only go back to an assignment Notesanity posted, because Google doesn't let one app change another's work."],
       ["new", "<b>Read a page out loud.</b> Every page now has a <b>Read aloud</b> button above it. It reads the worksheet in order, and says \"blank\" where there's a line to fill in, so a student who reads slowly can listen instead. Nothing to install and nothing to turn on."],

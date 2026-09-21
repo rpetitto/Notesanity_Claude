@@ -98,7 +98,7 @@ const BODY = () => `
       [
         "Can I reuse a page in another notebook?",
         `Yes — that's the page library. Hover a page in the page list and choose <b>Save to your page
-         library</b>, then add it to any other notebook from <b>Add pages</b> &rarr; <b>Page library</b>.
+         library</b>, then add it to any other notebook from the <b>Pages</b> tab &rarr; <b>Library</b>.
          Its answer boxes and your own markup come across; nobody's work does. The saved copy stands on
          its own, so changing or deleting the original notebook doesn't touch it.`,
       ],

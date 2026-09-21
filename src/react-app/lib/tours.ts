@@ -116,7 +116,9 @@ export const TOURS: Record<string, TourStep[]> = {
 
   "teacher.notebook": [
     {
-      target: "nb-fields",
+      // The row itself when the Answer boxes tab is up; otherwise its tab,
+      // which is where a notebook that opened on Pages will find it.
+      target: ["nb-fields", "nb-boxes"],
       title: "Ask for an answer",
       body:
         "Pick a box and drag it onto the page where you want it — typing, a checkbox, a " +
@@ -126,15 +128,15 @@ export const TOURS: Record<string, TourStep[]> = {
       target: "nb-annotate",
       title: "Write on the page yourself",
       body:
-        "Annotate gives you a pen for the notebook itself: a worked example, an arrow, a " +
-        "heading in your own handwriting.",
+        "The Annotate tab gives you a pen for the notebook itself: a worked example, an arrow, a " +
+        "heading in your own handwriting. It reaches students when you publish.",
     },
     {
       target: "nb-add-pages",
-      title: "More paper, any time",
+      title: "Pages, and your own text and pictures",
       body:
-        "Blank paper in the ruling you want, a PDF or document off your machine, or a file " +
-        "straight out of your Google Drive.",
+        "The Pages tab adds paper — blank in the ruling you want, a document off your machine, or a " +
+        "file out of Google Drive — and puts a block of text or a picture of yours on any page.",
     },
     {
       target: ["nb-rail", "nb-pages-button"],
