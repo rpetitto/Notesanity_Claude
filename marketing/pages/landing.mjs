@@ -98,15 +98,6 @@ const HERO_ART = `
 
 const HERO_CSS = `
 <style>
-/* ---- rotating headline ---- */
-.rot{display:inline-block;position:relative;color:var(--pine);white-space:nowrap}
-.rot::after{content:"";display:inline-block;width:3px;height:.92em;margin-left:.06em;vertical-align:-.1em;
-  background:var(--pine);animation:blink 1.05s steps(1,end) infinite}
-@keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
-/* Nothing moves for someone who asked for that, and the caret stops too — a
-   blinking bar is exactly the kind of motion the setting exists to stop. */
-@media(prefers-reduced-motion:reduce){.rot::after{animation:none;opacity:0}}
-
 /* ---- hero layout ---- */
 .hero{display:grid;gap:40px;align-items:center}
 .hero h1{font-size:clamp(30px,4.2vw,44px)}
@@ -270,20 +261,18 @@ export default () =>
     path: "/",
     title: "Notesanity",
     description:
-      "Interactive notebooks for classrooms. Teachers build notebooks from PDFs or blank paper, students write in them with a pencil or a keyboard, and teachers grade the work in place.",
+      "The worksheet you already made, handed out and handed back without printing. Build a notebook from a PDF or blank paper, send it to your class, and grade it on the page they wrote on.",
     body: `
 ${HERO_CSS}
 <section style="padding-top:56px">
   <div class="wrap hero">
     <div>
       <p class="eyebrow">For teachers and their classes</p>
-      <h1>The <span class="rot"
-            data-words="notebooks,workbooks,packets,journals,eBooks,handouts">notebooks</span><br>
-          your class already uses<br>with nothing to print, collect, or lose.</h1>
+      <h1>Hand it out, hand it in.<br>Nothing printed.</h1>
       <p class="lede">
-        Build one from a PDF, a Google Doc, or blank paper. Send it to your class.
-        Students write on it with a stylus or a keyboard, hand it in, and you grade it on the
-        same page they wrote on — no scanning, no printing, no folder of downloads.
+        Paperless that doesn't make more work. Build a notebook from the worksheet you
+        already have, send it to your class, and grade it on the page they wrote on.
+        Keep Classroom, keep your files, keep your gradebook.
       </p>
       <p style="margin-top:28px;display:flex;gap:12px;flex-wrap:wrap">
         <a class="btn btn-primary" href="/?signin=1">Start free</a>
@@ -291,8 +280,8 @@ ${HERO_CSS}
       </p>
       <p class="small quiet">
         ${BETA_FREE
-          ? `<span class="beta">Beta</span>&nbsp;Free for every school while we're in beta — see <a href="/pricing">pricing</a>.`
-          : `Free to start, Pro for one teacher, plans for a whole school — see <a href="/pricing">pricing</a>.`}
+          ? `<span class="beta">Beta</span>&nbsp;Free while we're in beta, with a full semester's notice before that changes — see <a href="/pricing">pricing</a>.`
+          : `Free to start, Pro when you outgrow it — see <a href="/pricing">pricing</a>.`}
       </p>
     </div>
     ${HERO_ART}
@@ -382,46 +371,5 @@ ${STEPS_CSS}
   </div>
 </section>
 
-<script>
-(function () {
-  var el = document.querySelector(".rot");
-  if (!el) return;
-  var words = (el.dataset.words || "").split(",").filter(Boolean);
-  if (words.length < 2) return;
-
-  // Someone who has asked for less motion keeps the word that is already there.
-  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-  // Screen readers get the headline once, as written, rather than a stream of
-  // half-typed words.
-  el.setAttribute("aria-hidden", "false");
-  el.setAttribute("aria-live", "off");
-
-  var TYPE = 78, ERASE = 38, HOLD = 1900, GAP = 380;
-  var i = 0, ch = words[0].length, erasing = true, paused = false;
-
-  // Typing into a background tab is wasted work, and comes back mid-word.
-  document.addEventListener("visibilitychange", function () {
-    paused = document.hidden;
-    if (!paused) setTimeout(tick, GAP);
-  });
-
-  function tick() {
-    if (paused) return;
-    var word = words[i];
-    if (erasing) {
-      ch--;
-      el.textContent = word.slice(0, ch);
-      if (ch === 0) { erasing = false; i = (i + 1) % words.length; setTimeout(tick, GAP); return; }
-      setTimeout(tick, ERASE);
-    } else {
-      ch++;
-      el.textContent = words[i].slice(0, ch);
-      if (ch === words[i].length) { erasing = true; setTimeout(tick, HOLD); return; }
-      setTimeout(tick, TYPE);
-    }
-  }
-  setTimeout(tick, HOLD);
-})();
-</script>`,
+`,
   });

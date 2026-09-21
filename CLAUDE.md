@@ -1,8 +1,12 @@
 # Notesanity
 
-Interactive notebooks for classrooms: teachers build notebooks from PDFs or blank
-paper, students write on them with a stylus or a keyboard, teachers mark the work
-in place.
+The worksheet you already made, handed out and handed back without printing.
+
+Teachers build notebooks from PDFs or blank paper, students write on them with a
+stylus or a keyboard, teachers grade the work in place. The message is written to
+one teacher, never a school: the promise is no more paper, the reason it is
+finally true is that the whole loop lives in one place, and the offer is that they
+keep Classroom, their files and their gradebook.
 
 Runs on Cloudflare — Workers, D1, R2 and Email Sending — in Robert's own account.
 It was migrated off the Fling platform in September 2026; nothing depends on that
