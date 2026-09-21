@@ -44,8 +44,8 @@ import {
 import { toast } from "sonner";
 import type { FieldRec } from "../lib/api";
 import {
-  type LayerData, type MarkHit, type MarkOp, type MarkRef, type Stroke, type TextBox, type ToolKind,
-  drawLayer, drawStroke, hitStroke, markAt, markBox, markRefAt, straightenHighlight, transformMark,
+  type LayerData, type MarkHit, type MarkOp, type MarkRef, type ShapeKind, type Stroke, type TextBox, type ToolKind,
+  drawLayer, drawStroke, hitStroke, markAt, markBox, markRefAt, shapePoints, straightenHighlight, transformMark,
 } from "../lib/ink";
 import MarkSelection from "./MarkSelection";
 import { renderPageToCanvas } from "../lib/pdf";
@@ -81,6 +81,8 @@ export interface ToolState {
   color: string;
   width: number;
   stamp: string;
+  /** Which shape the shape tool draws. Absent means a plain line. */
+  shape?: ShapeKind;
   fontSize: number;
   /**
    * How the eraser bites. "quick" takes the whole stroke the moment you touch
@@ -155,7 +157,7 @@ const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
  * reads it. A tap with one of these has to reach the page underneath the form
  * fields overlay rather than being swallowed by it.
  */
-const PLACEMENT_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "text", "comment"];
+const PLACEMENT_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "shape", "text", "comment"];
 
 /**
  * The subset that paints freehand. These also make the page's own objects —
@@ -165,7 +167,7 @@ const PLACEMENT_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "t
  * The others must NOT do that: a text box you just placed has to be typeable,
  * and a comment pin has to be openable, while its own tool is still selected.
  */
-const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser"];
+const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "shape"];
 
 export default function PageCanvas({
   pdfUrl, sourceIndex, pageWidth, pageHeight, pattern, patternColor, scale,
@@ -291,6 +293,9 @@ export default function PageCanvas({
    * the slop it draws a box of a chosen width. Same gesture split as the pen's
    * pending tap, for the same reason — a press alone doesn't say which.
    */
+  /** A shape being dragged out: the two corners, until the pointer is lifted. */
+  const shapeDraft = useRef<{ x0: number; y0: number; x1: number; y1: number; pointerId: number } | null>(null);
+
   const textPress = useRef<{
     x: number; y: number; clientX: number; clientY: number; pointerId: number;
     /** The rectangle so far, kept here as well as in state so the release reads what was drawn, not what was last rendered. */
@@ -432,10 +437,21 @@ export default function PageCanvas({
     activePointer.current = null;
     markDrag.current = null;
     textPress.current = null;
+    shapeDraft.current = null;
     setPending(null);
     setDraft(null);
     const ctx = liveRef.current?.getContext("2d");
     if (ctx) ctx.clearRect(0, 0, cssW, cssH);
+  };
+
+  /** The shape as it stands mid-drag, repainted whole each frame. */
+  const drawShapePreview = () => {
+    const d = shapeDraft.current;
+    const ctx = liveRef.current?.getContext("2d");
+    if (!d || !ctx) return;
+    ctx.clearRect(0, 0, cssW, cssH);
+    const p = shapePoints(tool.shape ?? "line", d.x0, d.y0, d.x1, d.y1);
+    if (p.length >= 6) drawStroke(ctx, { t: "p", c: tool.color, w: tool.width, p }, scale);
   };
 
   const drawLive = useCallback(() => {
@@ -517,6 +533,14 @@ export default function PageCanvas({
       return;
     }
 
+    if (tool.kind === "shape") {
+      e.preventDefault();
+      activePointer.current = e.pointerId;
+      surface.setPointerCapture(e.pointerId);
+      shapeDraft.current = { x0: x, y0: y, x1: x, y1: y, pointerId: e.pointerId };
+      return;
+    }
+
     if (tool.kind === "comment") {
       // Same reason as text: the pin opens straight into an editable note.
       e.preventDefault();
@@ -586,6 +610,16 @@ export default function PageCanvas({
       return;
     }
 
+    const sd = shapeDraft.current;
+    if (sd && sd.pointerId === e.pointerId) {
+      e.preventDefault();
+      const { x, y } = toPage(e, surface);
+      sd.x1 = x;
+      sd.y1 = y;
+      drawShapePreview();
+      return;
+    }
+
     // Movement past the slop turns a held tap into a stroke, starting from where
     // the press actually began so no ink is lost.
     if (pendingTap.current) {
@@ -629,6 +663,24 @@ export default function PageCanvas({
       setDraft(null);
       if (tp.rect) placeNote(tp.rect.x, tp.rect.y, "", Math.max(24, tp.rect.w));
       else placeNote(tp.x, tp.y, "");
+      return;
+    }
+
+    const shape = shapeDraft.current;
+    if (shape) {
+      shapeDraft.current = null;
+      const live = liveRef.current?.getContext("2d");
+      if (live) live.clearRect(0, 0, cssW, cssH);
+      // A tap with the shape tool is a slip, not a zero-sized rectangle.
+      if (onLayerChange && Math.hypot(shape.x1 - shape.x0, shape.y1 - shape.y0) > 2) {
+        onLayerChange({
+          ...activeLayer,
+          s: [...activeLayer.s, {
+            t: "p", c: tool.color, w: tool.width, ts: Date.now(),
+            p: shapePoints(tool.shape ?? "line", shape.x0, shape.y0, shape.x1, shape.y1),
+          }],
+        });
+      }
       return;
     }
 

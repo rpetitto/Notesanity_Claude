@@ -1,9 +1,10 @@
 import {
   Eraser, Hand, Highlighter, MessageSquarePlus, Pen, Smile, Trash2, Type, Redo2, Undo2,
+  Shapes, Minus, ArrowUpRight, Square, Circle,
   Hand as FingerIcon,
 } from "lucide-react";
 import type { ToolState } from "./PageCanvas";
-import { HIGHLIGHTER_COLORS, PEN_COLORS, STAMPS, TEACHER_COLORS, type ToolKind } from "../lib/ink";
+import { HIGHLIGHTER_COLORS, PEN_COLORS, STAMPS, TEACHER_COLORS, type ShapeKind, type ToolKind } from "../lib/ink";
 import type { ZoomMode } from "./NotebookSurface";
 import { cn } from "../lib/utils";
 import type { SaveStatus } from "../lib/autosave";
@@ -36,7 +37,16 @@ const BASE_TOOLS: { kind: ToolKind; icon: typeof Pen; label: string; hint?: stri
   { kind: "eraser", icon: Eraser, label: "Eraser" },
   { kind: "text", icon: Type, label: "Text", hint: "Text — tap to type, drag to draw a box" },
   { kind: "stamp", icon: Smile, label: "Stamp" },
+  { kind: "shape", icon: Shapes, label: "Shapes", hint: "Shapes — drag to draw a line, arrow, box or circle" },
   { kind: "select", icon: Hand, label: "Scroll only" },
+];
+
+/** Drag-to-draw shapes. A line doubles as an underline or a strikethrough. */
+const SHAPE_KINDS: { kind: ShapeKind; icon: typeof Pen; label: string }[] = [
+  { kind: "line", icon: Minus, label: "Line" },
+  { kind: "arrow", icon: ArrowUpRight, label: "Arrow" },
+  { kind: "rect", icon: Square, label: "Box" },
+  { kind: "ellipse", icon: Circle, label: "Circle" },
 ];
 
 const COMMENT_TOOL: (typeof BASE_TOOLS)[number] = { kind: "comment", icon: MessageSquarePlus, label: "Add comment" };
@@ -57,7 +67,7 @@ export default function InkToolbar({
   onClearPage,
 }: Props) {
   const TOOLS = allowComments
-    ? [...BASE_TOOLS.slice(0, 5), COMMENT_TOOL, BASE_TOOLS[5]]
+    ? [...BASE_TOOLS.slice(0, 6), COMMENT_TOOL, BASE_TOOLS[6]]
     : BASE_TOOLS;
   const colors = tool.kind === "highlighter"
     ? HIGHLIGHTER_COLORS
@@ -91,7 +101,7 @@ export default function InkToolbar({
         ))}
       </div>
 
-      {(tool.kind === "pen" || tool.kind === "highlighter" || tool.kind === "text") && (
+      {(tool.kind === "pen" || tool.kind === "highlighter" || tool.kind === "text" || tool.kind === "shape") && (
         <div className="flex shrink-0 items-center gap-1">
           {colors.map((c) => (
             <button
@@ -109,7 +119,7 @@ export default function InkToolbar({
         </div>
       )}
 
-      {(tool.kind === "pen" || tool.kind === "highlighter" || tool.kind === "eraser") && (
+      {(tool.kind === "pen" || tool.kind === "highlighter" || tool.kind === "eraser" || tool.kind === "shape") && (
         <div className="flex shrink-0 items-center gap-1">
           {widths.map((w) => (
             <button
@@ -176,6 +186,27 @@ export default function InkToolbar({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {tool.kind === "shape" && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {SHAPE_KINDS.map(({ kind, icon: Icon, label }) => (
+            <button
+              key={kind}
+              type="button"
+              title={label}
+              aria-label={label}
+              aria-pressed={(tool.shape ?? "line") === kind}
+              onClick={() => onToolChange({ ...tool, shape: kind })}
+              className={cn(
+                "rounded-md p-1.5 hover:bg-oat",
+                (tool.shape ?? "line") === kind && "bg-mint/20 ring-2 ring-mint",
+              )}
+            >
+              <Icon className="h-4 w-4" strokeWidth={2.5} />
+            </button>
+          ))}
         </div>
       )}
 

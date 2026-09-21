@@ -10,7 +10,10 @@
  * points and this payload is autosaved repeatedly.
  */
 
-export type ToolKind = "pen" | "highlighter" | "eraser" | "text" | "stamp" | "comment" | "select";
+export type ToolKind = "pen" | "highlighter" | "eraser" | "text" | "stamp" | "shape" | "comment" | "select";
+
+/** The four shapes worth having. Anything more and the picker costs more than it saves. */
+export type ShapeKind = "line" | "arrow" | "rect" | "ellipse";
 
 export interface Stroke {
   /** 'p' pen, 'h' highlighter */
@@ -158,6 +161,90 @@ export function serializeLayer(layer: LayerData): string {
 
 export const isEmptyLayer = (l: LayerData) =>
   l.s.length === 0 && l.x.length === 0 && l.e.length === 0 && l.c.length === 0;
+
+/**
+ * A drawn shape, as an ordinary stroke.
+ *
+ * Deliberately not a new kind of mark. A rectangle is a five-point path and an
+ * ellipse is a sampled one, so every piece of machinery that already exists —
+ * painting, the eraser, hit testing, the selection box, move, resize and
+ * rotate, the PDF export — works on a shape the day it is added, with nothing
+ * taught about it. The cost is that a resized ellipse is resampled points
+ * rather than a perfect curve, which at these sizes nobody can see.
+ */
+export function shapePoints(kind: ShapeKind, x0: number, y0: number, x1: number, y1: number): number[] {
+  // Shapes are drawn, not pressed, so every point carries the same nib weight.
+  const P = 0.6;
+
+  /**
+   * Corners have to be sampled, not just stated.
+   *
+   * `drawStroke` smooths a path with no pressure variation, which is right for
+   * a finger-drawn line and wrong for a rectangle: four corners become one
+   * rounded blob. Points every few units give the smoothing nothing to round,
+   * so the edges stay straight and the corners stay sharp.
+   */
+  const edge = (out: number[], ax: number, ay: number, bx: number, by: number, step: number) => {
+    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
+    for (let i = 1; i <= n; i++) out.push(ax + (bx - ax) * (i / n), ay + (by - ay) * (i / n), P);
+  };
+
+  const w = Math.abs(x1 - x0);
+  const h = Math.abs(y1 - y0);
+
+  if (kind === "line") {
+    const out = [x0, y0, P];
+    edge(out, x0, y0, x1, y1, Math.max(4, Math.hypot(w, h) / 40));
+    return out;
+  }
+
+  if (kind === "arrow") {
+    const angle = Math.atan2(y1 - y0, x1 - x0);
+    const len = Math.hypot(w, h);
+    // The head grows with the shaft but stops, so a long arrow isn't all head.
+    const head = Math.max(6, Math.min(18, len * 0.22));
+    const spread = 0.42;
+    const ax = x1 - head * Math.cos(angle - spread);
+    const ay = y1 - head * Math.sin(angle - spread);
+    const bx = x1 - head * Math.cos(angle + spread);
+    const by = y1 - head * Math.sin(angle + spread);
+    const step = Math.max(3, len / 40);
+    const out = [x0, y0, P];
+    edge(out, x0, y0, x1, y1, step);
+    edge(out, x1, y1, ax, ay, 3);
+    edge(out, ax, ay, x1, y1, 3);
+    edge(out, x1, y1, bx, by, 3);
+    return out;
+  }
+
+  if (kind === "rect") {
+    const left = Math.min(x0, x1);
+    const right = Math.max(x0, x1);
+    const top = Math.min(y0, y1);
+    const bottom = Math.max(y0, y1);
+    // Around 120 points all told, however big the box, so a full-page
+    // rectangle doesn't cost ten times the payload of a small one.
+    const step = Math.max(3, ((w + h) * 2) / 120);
+    const out = [left, top, P];
+    edge(out, left, top, right, top, step);
+    edge(out, right, top, right, bottom, step);
+    edge(out, right, bottom, left, bottom, step);
+    edge(out, left, bottom, left, top, step);
+    return out;
+  }
+
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const rx = w / 2;
+  const ry = h / 2;
+  const out: number[] = [];
+  const steps = 48;
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / steps) * Math.PI * 2;
+    out.push(cx + rx * Math.cos(t), cy + ry * Math.sin(t), P);
+  }
+  return out;
+}
 
 /** Squared distance from point to segment — used by the eraser's hit test. */
 function distToSegmentSq(px: number, py: number, ax: number, ay: number, bx: number, by: number) {

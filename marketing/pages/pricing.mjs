@@ -58,7 +58,7 @@ export default () =>
     <p class="lede">
       ${BETA_FREE
         ? "Every teacher, every class, every student — free for the whole beta, no card and no trial clock. The plans below are what comes after, published now so a school can plan a year ahead."
-        : "Keep Classroom, keep your files, keep your gradebook. Notesanity replaces the printing, not your stack. Start free, and go Pro when you want unlimited notebooks, worksheet blanks found for you, and the page library. Schools buy by the department or the building, on an invoice."}
+        : "Keep Classroom, keep your files, keep your gradebook. Notesanity replaces the printing, not your stack. Start free, and go Pro when you want last year's work to pay off again: unlimited notebooks and the page library. Schools buy by the department or the building, on an invoice."}
     </p>
   </div>
 </section>
@@ -73,6 +73,7 @@ export default () =>
           `${FREE_NOTEBOOK_LIMIT} class notebooks at a time`,
           "Unlimited students and classes",
           "PDF, Word, PowerPoint and Google Drive imports",
+          "Find the blanks in a worksheet and make them fillable",
           "Students' own personal notebooks",
           "Google sign-in, sign-in links and passwords",
         ],
@@ -84,7 +85,6 @@ export default () =>
         bullets: [
           "Everything in Free",
           "Unlimited class notebooks",
-          "Find the blanks in a worksheet and make them fillable",
           "The page library — save any page, reuse it anywhere",
           "Support straight from the people who build it",
         ],

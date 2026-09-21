@@ -785,10 +785,7 @@ app.post("/api/notebooks/:id/fields", handler(async (c) => {
  * the page would be a bug rather than a typo, and should not be stored.
  */
 app.post("/api/notebooks/:id/fields/bulk", handler(async (c) => {
-  const { nb, user } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
-  // Placing fields by hand stays free; having them found for you is the Pro
-  // part, and this is the only route that accepts a detector's output.
-  await requirePlan(user, "pro", "Finding form fields");
+  const { nb } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const body = await c.req.json<{
     pageId: string;
     fields: { type: string; x: number; y: number; w: number; h: number; label?: string }[];
