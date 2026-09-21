@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
 import { ButtonLink, Card, Chip } from "../components/ui";
@@ -57,6 +57,9 @@ export interface AssignmentCardData {
   returned?: number;
   graded?: number;
   total?: number;
+  /** Set once this assignment has been posted to a Google Classroom course. */
+  googleCourseworkId?: string | null;
+  googleCourseworkLink?: string | null;
 }
 
 interface AssignmentDetailRow {
@@ -297,6 +300,16 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
                   <span className={cn("text-[16px]", overdue ? "font-display text-[#a3341f]" : "text-pine/70")}>
                     Due {formatDue(a.dueAt)}
                   </span>
+                  {a.googleCourseworkLink && (
+                    <a
+                      href={a.googleCourseworkLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex h-8 items-center gap-1 rounded-full border-2 border-pine/25 px-2.5 text-[16px] text-pine/70 hover:bg-oat"
+                    >
+                      In Classroom <ExternalLink className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    </a>
+                  )}
                 </div>
               </div>
 

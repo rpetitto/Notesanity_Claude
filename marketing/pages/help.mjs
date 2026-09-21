@@ -158,6 +158,23 @@ const BODY = () => `
          asked which past assignments should apply to them.`,
       ],
       [
+        "Can I post an assignment to Google Classroom?",
+        `Yes, when the class came from Classroom \u2014 import it with <b>New class</b> and the
+         link is made for you. Creating an assignment then offers <b>Also post to Google
+         Classroom</b>: it appears in that course with your due date and a link that takes each
+         student straight to the pages. Google asks your permission the first time, and saving
+         a draft posts nothing.`,
+      ],
+      [
+        "Do grades go back to Google Classroom?",
+        `For an assignment you posted from here, yes: returning the work sends the grade to your
+         Classroom gradebook. Only an assignment Notesanity posted can take a grade \u2014 Google
+         doesn't let one app change another's \u2014 so one you made in Classroom by hand can't.
+         Points and complete/incomplete go across as numbers; a letter grade stays here, because
+         Classroom only accepts numbers. If a student never pressed <b>Turn in</b> in Classroom,
+         the grade waits in your Classroom gradebook until you return it there.`,
+      ],
+      [
         "How do I grade?",
         `Open the assignment. Your roster is on the left — pick a student, then a page — and you
          write on their page in your own layer, so your marks and their work never mix. Add a

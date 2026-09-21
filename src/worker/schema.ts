@@ -963,3 +963,29 @@ migrate("028_billing", async () => {
     )
   `).run();
 });
+
+/**
+ * An assignment can also be a Google Classroom assignment.
+ *
+ * Google only lets an app modify coursework that app itself created, so the id
+ * Classroom hands back at post time is the entire basis for ever sending a
+ * grade the other way. That makes it worth a column rather than something
+ * derived: coursework the teacher made by hand can never receive a grade from
+ * here, and a class that gets unlinked from its course doesn't invalidate work
+ * already posted.
+ */
+migrate("030_classroom_coursework", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(assignments)`).all<{ name: string }>();
+  const has = (name: string) => (cols.results ?? []).some((c) => c.name === name);
+  if (!has("google_coursework_id")) {
+    await db.prepare(`ALTER TABLE assignments ADD COLUMN google_coursework_id TEXT`).run();
+  }
+  // The Classroom link the teacher can follow, kept so "View in Classroom"
+  // doesn't have to guess a URL shape Google owns.
+  if (!has("google_coursework_link")) {
+    await db.prepare(`ALTER TABLE assignments ADD COLUMN google_coursework_link TEXT`).run();
+  }
+  if (!has("google_posted_at")) {
+    await db.prepare(`ALTER TABLE assignments ADD COLUMN google_posted_at TEXT`).run();
+  }
+});

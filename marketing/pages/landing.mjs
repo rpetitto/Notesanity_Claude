@@ -308,6 +308,10 @@ ${HERO_CSS}
       ${feature("Nothing gets lost", `
         Work is saved as it's written and mirrored locally first, so a dropped Wi-Fi
         connection doesn't cost a lesson. It syncs when the network comes back.`)}
+      ${feature("Keeps Google Classroom", `
+        Import a class and its roster in two taps. Post an assignment to that course and it
+        appears there with a link straight to the work; grade it here and the grade goes back
+        to your Classroom gradebook.`)}
       ${feature("Their own notebooks too", `
         Students can keep their own notebooks — for a class, or entirely private. You can read
         the ones in your class, and write on any page a student opens to you. Never more than

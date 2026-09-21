@@ -17,6 +17,20 @@ export const CLASSROOM_SCOPES = [
   "https://www.googleapis.com/auth/classroom.profile.emails",
 ].join(" ");
 
+/**
+ * Posting work and sending grades back.
+ *
+ * One extra scope does both: `coursework.students` covers creating coursework
+ * and patching student submissions. It is asked for separately from the
+ * read-only set above so that a teacher who only ever imports a roster is never
+ * prompted for write access to their courses — incremental consent, which is
+ * also why the two are different cache keys in `getToken`.
+ */
+export const COURSEWORK_SCOPES = [
+  CLASSROOM_SCOPES,
+  "https://www.googleapis.com/auth/classroom.coursework.students",
+].join(" ");
+
 // drive.file is enough: we only touch files this app itself creates.
 export const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file";
 
@@ -110,6 +124,8 @@ export interface ClassroomStudent {
   email: string;
   name: string;
   photoUrl?: string;
+  /** Classroom's own id for this person — what a submission is keyed by. */
+  userId?: string;
 }
 
 export async function listStudents(courseId: string): Promise<ClassroomStudent[]> {
@@ -126,6 +142,7 @@ export async function listStudents(courseId: string): Promise<ClassroomStudent[]
       if (email) {
         out.push({
           email,
+          userId: s.userId,
           name: s.profile?.name?.fullName ?? email,
           photoUrl: s.profile?.photoUrl ? `https:${s.profile.photoUrl}`.replace("https:https:", "https:") : undefined,
         });
@@ -134,6 +151,191 @@ export async function listStudents(courseId: string): Promise<ClassroomStudent[]
     pageToken = data.nextPageToken;
   } while (pageToken);
   return out;
+}
+
+/* ---------- posting work to Classroom, and sending the grade back ---------- */
+
+const CLASSROOM = "https://classroom.googleapis.com/v1";
+
+export interface CourseworkDraft {
+  title: string;
+  description?: string;
+  /** Where the link material points — the Notesanity assignment. */
+  link: string;
+  /** ISO timestamp, or null for no due date. */
+  dueAt?: string | null;
+  /** ISO timestamp in the future to schedule the post, or null to publish now. */
+  scheduledAt?: string | null;
+  /** Omit or 0 for coursework Classroom won't grade. */
+  maxPoints?: number | null;
+}
+
+export interface PostedCoursework {
+  id: string;
+  link: string;
+  /** False when Classroom holds it as a scheduled draft rather than publishing now. */
+  published: boolean;
+}
+
+/**
+ * Post an assignment to the Classroom course this class came from.
+ *
+ * The material is a plain link, not a Drive copy per student: the work happens
+ * in Notesanity, and `/assignments/:id` already routes by role, so the same URL
+ * takes a student to their workspace and the teacher to marking. A Drive
+ * attachment would fork the work into two places that then disagree.
+ */
+export async function createCoursework(courseId: string, draft: CourseworkDraft): Promise<PostedCoursework> {
+  const token = await getToken(COURSEWORK_SCOPES);
+  const body = courseworkBody(draft);
+
+  const created = await gapi<{ id: string; alternateLink?: string }>(
+    `${CLASSROOM}/courses/${courseId}/courseWork`,
+    token,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+  return {
+    id: created.id,
+    link: created.alternateLink ?? `https://classroom.google.com/c/${courseId}`,
+    published: body.state === "PUBLISHED",
+  };
+}
+
+/**
+ * The request body, split out because the date handling is the part worth
+ * being able to check without a Google account attached.
+ */
+export function courseworkBody(draft: CourseworkDraft): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    // Classroom truncates past 3,000 characters and rejects past its own limit;
+    // trimming here means a long notebook title fails visibly rather than at Google.
+    title: draft.title.slice(0, 300),
+    workType: "ASSIGNMENT",
+    state: "PUBLISHED",
+    materials: [{ link: { url: draft.link } }],
+  };
+  if (draft.description?.trim()) body.description = draft.description.trim().slice(0, 3000);
+  if (draft.maxPoints && draft.maxPoints > 0) body.maxPoints = draft.maxPoints;
+
+  // Classroom wants the date and the time of day separately, both in UTC —
+  // not the ISO timestamp everything else in this app passes around.
+  if (draft.dueAt) {
+    const d = new Date(draft.dueAt);
+    if (!Number.isNaN(d.getTime())) {
+      body.dueDate = { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+      body.dueTime = { hours: d.getUTCHours(), minutes: d.getUTCMinutes() };
+    }
+  }
+
+  // A release date becomes a scheduled draft, which is Classroom's own way of
+  // saying the same thing. Publishing now and hoping nobody looks early isn't.
+  const scheduled = draft.scheduledAt ? new Date(draft.scheduledAt) : null;
+  if (scheduled && !Number.isNaN(scheduled.getTime()) && scheduled.getTime() > Date.now()) {
+    body.state = "DRAFT";
+    body.scheduledTime = scheduled.toISOString();
+  }
+
+  return body;
+}
+
+export interface ClassroomGrade {
+  /** The Notesanity student's email — the only thing both systems agree on. */
+  email: string;
+  points: number;
+}
+
+export interface GradePushResult {
+  /** Grades Classroom accepted and returned to the student. */
+  returned: number;
+  /**
+   * Grades Classroom accepted but would not release, because the student never
+   * pressed Turn in there. The teacher sees them; the student doesn't until the
+   * teacher returns them in Classroom.
+   */
+  held: number;
+  /** Emails that aren't in the Classroom course at all. */
+  missing: string[];
+}
+
+/** Run `work` over `items` a few at a time — kind to Classroom's rate limits. */
+async function pool<T>(items: T[], width: number, work: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const runners = Array.from({ length: Math.min(width, items.length) }, async () => {
+    while (next < items.length) await work(items[next++]);
+  });
+  await Promise.all(runners);
+}
+
+/**
+ * Send grades to a Classroom assignment this app posted.
+ *
+ * Google only permits modifying coursework the same app created, so this works
+ * for assignments posted from here and for nothing else — which is why the
+ * coursework id is stored rather than asked for.
+ *
+ * The grade is written twice on purpose: `draftGrade` is what the teacher sees
+ * in the Classroom gradebook, `assignedGrade` is what the student sees once the
+ * submission is returned. Setting only one leaves half the picture.
+ */
+export async function pushGrades(
+  courseId: string,
+  courseWorkId: string,
+  grades: ClassroomGrade[],
+): Promise<GradePushResult> {
+  const token = await getToken(COURSEWORK_SCOPES);
+
+  const roster = await listStudents(courseId);
+  const idByEmail = new Map<string, string>();
+  for (const s of roster) if (s.userId) idByEmail.set(s.email.toLowerCase(), s.userId);
+
+  const submissions: { id: string; userId: string }[] = [];
+  let pageToken: string | undefined;
+  do {
+    const url = new URL(`${CLASSROOM}/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions`);
+    url.searchParams.set("pageSize", "200");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const data = await gapi<{ studentSubmissions?: any[]; nextPageToken?: string }>(url.toString(), token);
+    for (const sub of data.studentSubmissions ?? []) {
+      if (sub.id && sub.userId) submissions.push({ id: sub.id, userId: sub.userId });
+    }
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  const subByUser = new Map(submissions.map((s) => [s.userId, s.id]));
+
+  const result: GradePushResult = { returned: 0, held: 0, missing: [] };
+  const targets: { submissionId: string; points: number }[] = [];
+  for (const g of grades) {
+    const userId = idByEmail.get(g.email.toLowerCase());
+    const submissionId = userId ? subByUser.get(userId) : undefined;
+    if (!submissionId) result.missing.push(g.email);
+    else targets.push({ submissionId, points: g.points });
+  }
+
+  await pool(targets, 5, async ({ submissionId, points }) => {
+    const base = `${CLASSROOM}/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions/${submissionId}`;
+    await gapi(`${base}?updateMask=draftGrade,assignedGrade`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ draftGrade: points, assignedGrade: points }),
+    });
+    // Returning is what makes the grade visible, and Classroom refuses it for a
+    // submission the student never turned in there. That is an ordinary outcome
+    // when the work was handed in through Notesanity, so it is counted, not thrown.
+    const res = await fetch(`${base}:return`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (res.ok) result.returned++;
+    else if (res.status === 400 || res.status === 403) result.held++;
+    else {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Google API error ${res.status}: ${text.slice(0, 180)}`);
+    }
+  });
+
+  return result;
 }
 
 const CONVERTIBLE: Record<string, string> = {

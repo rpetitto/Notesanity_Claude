@@ -116,7 +116,12 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
         )
         .bind(a.id)
         .first<any>();
-      assignments.push({ ...base, submitted: counts?.submitted ?? 0, returned: counts?.returned ?? 0, total: counts?.total ?? 0 });
+      assignments.push({
+        ...base,
+        submitted: counts?.submitted ?? 0, returned: counts?.returned ?? 0, total: counts?.total ?? 0,
+        googleCourseworkId: a.google_coursework_id ?? null,
+        googleCourseworkLink: a.google_coursework_link ?? null,
+      });
     } else {
       const sub = await db
         .prepare(`SELECT status, grade_points, grade_letter, grade_complete, feedback, returned_at FROM submissions WHERE assignment_id = ? AND student_id = ?`)
@@ -398,7 +403,65 @@ app.get("/api/assignments/:id", handler(async (c) => {
       graded: !!sub?.graded_at,
     });
   }
-  return c.json({ assignment: base, isTeacher: true, rows });
+  // The course id lives on the class, but the post and the grade passback both
+  // happen from the assignment screen, so it is answered here rather than
+  // costing the client a second fetch of the whole class.
+  const cls = await db
+    .prepare(`SELECT google_course_id FROM classes WHERE id = ?`)
+    .bind(a.class_id)
+    .first<{ google_course_id: string | null }>();
+
+  return c.json({
+    assignment: {
+      ...base,
+      googleCourseId: cls?.google_course_id ?? null,
+      googleCourseworkId: a.google_coursework_id ?? null,
+      googleCourseworkLink: a.google_coursework_link ?? null,
+      googlePostedAt: a.google_posted_at ?? null,
+    },
+    isTeacher: true,
+    rows,
+  });
+}));
+
+/**
+ * Remember which Google Classroom assignment this became.
+ *
+ * The post itself happens in the teacher's browser with their own Classroom
+ * token — the Worker holds no Google credentials, the same arrangement the
+ * roster import uses. All that comes back here is the id, which is the only
+ * thing that makes a grade sendable later: Google refuses to modify coursework
+ * a different app created, so an id we didn't get from our own post is worthless.
+ */
+app.post("/api/assignments/:id/classroom", handler(async (c) => {
+  const { a, isTeacher } = await loadAssignment(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const b = await c.req.json<{ courseworkId?: string | null; link?: string | null }>();
+
+  // Clearing is how "it was deleted in Classroom" gets recorded, so an empty
+  // id is a valid request rather than a bad one.
+  const id = (b.courseworkId ?? "").trim();
+  if (!id) {
+    await db
+      .prepare(`UPDATE assignments SET google_coursework_id = NULL, google_coursework_link = NULL, google_posted_at = NULL, updated_at = ? WHERE id = ?`)
+      .bind(now(), a.id)
+      .run();
+    return c.json({ ok: true, linked: false });
+  }
+  if (id.length > 64 || !/^[A-Za-z0-9_-]+$/.test(id)) throw new HttpError(400, "That doesn't look like a Classroom assignment id");
+  const link = (b.link ?? "").trim();
+  if (link && !link.startsWith("https://classroom.google.com/")) {
+    throw new HttpError(400, "That isn't a Google Classroom link");
+  }
+
+  await db
+    .prepare(`UPDATE assignments SET google_coursework_id = ?, google_coursework_link = ?, google_posted_at = ?, updated_at = ? WHERE id = ?`)
+    .bind(id, link || null, now(), now(), a.id)
+    .run();
+  // Deliberately not logged to `activity`: that log is the record of what
+  // happened to a piece of student work, and this happened to the assignment.
+  // `google_posted_at` is the record of this.
+  return c.json({ ok: true, linked: true });
 }));
 
 app.post("/api/assignments/:id/submit", handler(async (c) => {
@@ -806,6 +869,8 @@ app.get("/api/my/teaching", handler(async (c) => {
       status: a.status,
       submitted: counts?.submitted ?? 0, returned: counts?.returned ?? 0,
       graded: counts?.graded ?? 0, total: counts?.total ?? 0,
+      googleCourseworkId: a.google_coursework_id ?? null,
+      googleCourseworkLink: a.google_coursework_link ?? null,
     });
   }
   return c.json({ assignments });

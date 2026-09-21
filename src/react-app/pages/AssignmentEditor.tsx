@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, ExternalLink, Trash2 } from "lucide-react";
 import { api, pageSource, type PageRec } from "../lib/api";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
 import { Button, Card, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import { cn, toIso, toLocalInput } from "../lib/utils";
+import { createCoursework, hasGoogleClientId, type PostedCoursework } from "../lib/google";
 
 type Grading = "none" | "complete" | "points" | "letter";
 
@@ -17,6 +18,21 @@ const GRADING_LABELS: Record<string, string> = {
   points: "Points",
   letter: "Letter grade",
 };
+
+/**
+ * What Google Classroom should grade this out of.
+ *
+ * Classroom grades are numbers and nothing else. Points carry across exactly;
+ * complete/incomplete becomes the one-point assignment teachers already use for
+ * it there; a letter grade has no honest numeric form, so that coursework is
+ * posted ungraded and the letter stays in Notesanity rather than being invented
+ * as a percentage.
+ */
+function classroomMaxPoints(grading: Grading, pointsMax: number): number | null {
+  if (grading === "points") return Math.max(1, Math.round(pointsMax || 0));
+  if (grading === "complete") return 1;
+  return null;
+}
 
 /** What deleting (or heavily editing) an assignment would actually disturb. */
 interface AssignmentImpact {
@@ -129,6 +145,7 @@ export default function AssignmentEditor() {
   const [dueAt, setDueAt] = useState("");
   const [grading, setGrading] = useState<Grading>("points");
   const [pointsMax, setPointsMax] = useState(100);
+  const [postToClassroom, setPostToClassroom] = useState(true);
 
   useEffect(() => {
     const a = existing.data?.assignment;
@@ -147,6 +164,16 @@ export default function AssignmentEditor() {
     () => (classQuery.data?.notebooks ?? []).filter((n: any) => n.status === "published" || n.id === notebookId),
     [classQuery.data, notebookId],
   );
+
+  /**
+   * Posting to Classroom is offered only for a class that came from a Classroom
+   * course, and only once: the coursework id is what a grade is later sent
+   * against, and a second post would leave two assignments competing for it.
+   */
+  const googleCourseId: string | null = classQuery.data?.class?.google_course_id ?? null;
+  const postedLink: string | null = existing.data?.assignment?.googleCourseworkLink ?? null;
+  const alreadyPosted = !!existing.data?.assignment?.googleCourseworkId;
+  const canPostToClassroom = hasGoogleClientId && !!googleCourseId && !alreadyPosted;
 
   const notebookQuery = useQuery({
     queryKey: ["notebook", notebookId],
@@ -167,20 +194,49 @@ export default function AssignmentEditor() {
   const visiblePages = pages.slice(pagePage * PAGE_SIZE, pagePage * PAGE_SIZE + PAGE_SIZE);
 
   const save = useMutation({
-    mutationFn: (status: "draft" | "active") => {
+    mutationFn: async (status: "draft" | "active") => {
       const body = {
         notebookId, title, instructions, pageIds,
         releaseAt: toIso(releaseAt), dueAt: toIso(dueAt),
         grading, pointsMax, status,
       };
-      return editing
-        ? api.patch(`/api/assignments/${assignmentId}`, body)
-        : api.post<{ assignment: { id: string } }>(`/api/classes/${classId}/assignments`, body);
+      const res = editing
+        ? await api.patch(`/api/assignments/${assignmentId}`, body)
+        : await api.post<{ assignment: { id: string } }>(`/api/classes/${classId}/assignments`, body);
+      const id = editing ? assignmentId! : (res as { assignment: { id: string } }).assignment.id;
+
+      // A draft is deliberately not posted: the link would be one students
+      // can't open yet, which is worse than not having posted at all.
+      if (!(canPostToClassroom && postToClassroom && status === "active" && googleCourseId)) {
+        return { id, classroom: null as PostedCoursework | null, classroomError: null as string | null };
+      }
+
+      // Google refusing is not the assignment failing — it already exists, and
+      // saying otherwise would send the teacher back to recreate it.
+      try {
+        const posted = await createCoursework(googleCourseId, {
+          title,
+          description: instructions,
+          link: `${window.location.origin}/assignments/${id}`,
+          dueAt: toIso(dueAt),
+          scheduledAt: toIso(releaseAt),
+          maxPoints: classroomMaxPoints(grading, pointsMax),
+        });
+        await api.post(`/api/assignments/${id}/classroom`, { courseworkId: posted.id, link: posted.link });
+        return { id, classroom: posted, classroomError: null };
+      } catch (e) {
+        return { id, classroom: null, classroomError: (e as Error).message };
+      }
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["assignments", classId] });
       qc.invalidateQueries({ queryKey: ["class", classId] });
       toast.success(editing ? "Assignment updated" : "Assignment created");
+      if (res.classroomError) {
+        toast.error(`Saved here, but Google Classroom refused it: ${res.classroomError}`);
+      } else if (res.classroom) {
+        toast.success(res.classroom.published ? "Posted to Google Classroom" : "Scheduled in Google Classroom");
+      }
       navigate(`/classes/${classId}`);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -387,6 +443,53 @@ export default function AssignmentEditor() {
               </div>
             )}
           </div>
+
+          {(canPostToClassroom || alreadyPosted) && (
+            <div className="rounded-[12px] border-[3px] border-pine/20 bg-oat p-3">
+              {alreadyPosted ? (
+                <div className="flex items-start gap-2 text-[16px] text-pine">
+                  <Check className="mt-1 h-4 w-4 shrink-0 text-mint" strokeWidth={2.5} />
+                  <span>
+                    This is posted in Google Classroom.{" "}
+                    {postedLink && (
+                      <a
+                        href={postedLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 whitespace-nowrap font-display text-pine underline"
+                      >
+                        Open it <ExternalLink className="h-3.5 w-3.5" strokeWidth={2.5} />
+                      </a>
+                    )}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <label className="flex items-start gap-3 text-[16px] text-pine">
+                    <input
+                      type="checkbox"
+                      checked={postToClassroom}
+                      onChange={(e) => setPostToClassroom(e.target.checked)}
+                      className="mt-1 h-4 w-4 shrink-0 accent-mint"
+                    />
+                    <span>
+                      <span className="block font-display">Also post to Google Classroom</span>
+                      <span className="block text-pine/70">
+                        Creates an assignment in the course this class came from, linking back here.
+                        Google asks your permission the first time.
+                      </span>
+                    </span>
+                  </label>
+                  {postToClassroom && (
+                    <p className="mt-2 pl-7 text-[16px] text-pine/70">
+                      Posted when you assign to the class — saving a draft doesn't post anything.
+                      {grading === "letter" && " Classroom only accepts number grades, so this one posts ungraded there."}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-2 pt-2">
             <Button variant="primary" disabled={!canSave || save.isPending} onClick={() => save.mutate("active")}>

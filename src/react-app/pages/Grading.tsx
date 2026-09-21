@@ -30,6 +30,7 @@ import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
 import { cn, formatDue, relativeTime } from "../lib/utils";
+import { pushGrades, type ClassroomGrade, type GradePushResult } from "../lib/google";
 
 /** Header controls share one height so a row of them lines up. */
 const BUTTON_ROW =
@@ -462,12 +463,73 @@ export default function Grading() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /**
+   * The same grades, in the only shape Classroom understands.
+   *
+   * Points go across as they are and complete/incomplete as the one-point
+   * assignment it was posted as. A letter grade has no numeric form worth
+   * inventing, so those assignments simply don't push — the letter stays here,
+   * which is what the teacher was told when they posted it.
+   */
+  const classroomGradesFor = (target: GradeRow[]): ClassroomGrade[] => {
+    if (assignment?.grading === "points") {
+      return target
+        .filter((r) => r.grade.points !== null)
+        .map((r) => ({ email: r.student.email, points: Number(r.grade.points) }));
+    }
+    if (assignment?.grading === "complete") {
+      return target
+        .filter((r) => r.grade.complete !== null)
+        .map((r) => ({ email: r.student.email, points: r.grade.complete ? 1 : 0 }));
+    }
+    return [];
+  };
+
   const returnWork = useMutation({
-    mutationFn: (body: { studentId?: string; all?: boolean }) =>
-      api.post(`/api/assignments/${assignmentId}/return`, body),
-    onSuccess: (_d, vars) => {
+    mutationFn: async (body: { studentId?: string; all?: boolean }) => {
+      await api.post(`/api/assignments/${assignmentId}/return`, body);
+
+      const courseId: string | undefined = assignment?.googleCourseId;
+      const courseworkId: string | undefined = assignment?.googleCourseworkId;
+      const none = { classroom: null as GradePushResult | null, classroomError: null as string | null };
+      if (!courseId || !courseworkId) return none;
+
+      const target = rows.filter((r) => r.graded && (body.all || r.student.id === body.studentId));
+      const grades = classroomGradesFor(target);
+      if (grades.length === 0) return none;
+
+      // Returning here is the act that matters and it already succeeded;
+      // Classroom is the mirror. A failure to mirror is reported, not thrown,
+      // or the teacher would think the grades hadn't gone out at all.
+      try {
+        return { classroom: await pushGrades(courseId, courseworkId, grades), classroomError: null };
+      } catch (e) {
+        return { classroom: null, classroomError: (e as Error).message };
+      }
+    },
+    onSuccess: (res, vars) => {
       qc.invalidateQueries({ queryKey: ["assignment", assignmentId] });
       toast.success(vars.all ? "Grades returned to the class" : "Returned to student");
+      if (res.classroomError) {
+        toast.error("Google Classroom didn't take the grades", { description: res.classroomError });
+      } else if (res.classroom) {
+        const { returned, held, missing } = res.classroom;
+        if (returned > 0) {
+          toast.success(`${returned} grade${returned === 1 ? "" : "s"} sent to Google Classroom`);
+        }
+        if (held > 0) {
+          toast.message(`${held} grade${held === 1 ? " is" : "s are"} waiting in Classroom`, {
+            description:
+              "Classroom won't release a grade for work that wasn't turned in there. " +
+              "It's in your Classroom gradebook — return it from Classroom to show the student.",
+          });
+        }
+        if (missing.length > 0) {
+          toast.message(`${missing.length} student${missing.length === 1 ? " isn't" : "s aren't"} in the Classroom course`, {
+            description: missing.slice(0, 5).join(", ") + (missing.length > 5 ? "…" : ""),
+          });
+        }
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   });
