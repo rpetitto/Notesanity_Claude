@@ -468,7 +468,7 @@ export default function NotebookEditor() {
       setCandidates(found);
       if (!found.length) {
         toast("Nothing to fill in found on this page", {
-          description: "Blanks are found from the document's own text. A scanned page is a picture, so there is nothing to read.",
+          description: "It looks for lines to write on, empty table cells and rows of underscores. If the page has none of those, draw the boxes where you want them.",
         });
       }
     } catch (e) {
