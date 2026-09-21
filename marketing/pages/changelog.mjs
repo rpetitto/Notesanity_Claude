@@ -39,8 +39,10 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "September 21, 2026",
-    "Spoken comments, shapes, and what Pro will include.",
+    "Spoken comments, saved phrases, read aloud, shapes, and blanks found on scans.",
     [
+      ["new", "<b>Read a page out loud.</b> Every page now has a <b>Read aloud</b> button above it. It reads the worksheet in order, and says \"blank\" where there's a line to fill in, so a student who reads slowly can listen instead. Nothing to install and nothing to turn on."],
+      ["better", "<b>Find fields now works on a scanned worksheet.</b> It used to read the document's own text, so a worksheet you photographed or scanned had nothing to find. It now looks at the page itself and picks out the ruled lines, which is what the blanks actually are on a scan."],
       ["new", "<b>Saved phrases.</b> The sentences you write on every third paper are now one tap away. Write a comment, press <b>Save this phrase</b>, and it's offered inside every comment box from then on — in your own classes, next term, next year. The ones you reach for most rise to the top on their own."],
       ["new", "<b>Say it instead of typing it.</b> Open a comment while marking and there's now a <b>Say it instead</b> button: record a few seconds out loud and it's pinned to that spot on the page for the student to play back. Faster to give than typing, and a lot warmer to receive. You can still add written text alongside it."],
       ["new", "<b>Shapes.</b> A new tool in the annotation toolbar draws a line, an arrow, a box or a circle. Drag to place one, and use a line as an underline or a strikethrough. A shape behaves like anything else you draw: rub it out with the eraser, or pick it up to move, resize and turn it."],

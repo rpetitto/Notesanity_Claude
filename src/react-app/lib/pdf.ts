@@ -81,3 +81,37 @@ export async function renderPageToCanvas(
     if (err?.name !== "RenderingCanceledException") throw err;
   }
 }
+
+/**
+ * The words on a page, in reading order, for speech.
+ *
+ * The same text layer `formFields` reads to find blanks. Items are joined into
+ * sentences rather than returned as fragments, because a screen reader given
+ * "Name:" and "_____" and "Date:" as separate utterances pauses in all the
+ * wrong places. A scanned page is a picture and returns nothing, which the
+ * caller has to say out loud rather than sit silent.
+ */
+export async function readPageText(url: string, sourceIndex: number): Promise<string> {
+  const doc = await loadPdf(url);
+  const page = await doc.getPage(sourceIndex + 1);
+  const content = await page.getTextContent();
+  const parts: string[] = [];
+  let lastY: number | null = null;
+
+  for (const item of content.items) {
+    if (!("str" in item) || !item.str.trim()) continue;
+    const y = (item.transform as number[])[5];
+    // A jump down the page is a new line, and a new line is a pause.
+    if (lastY !== null && Math.abs(y - lastY) > 4) parts.push("\n");
+    parts.push(item.str);
+    lastY = y;
+  }
+
+  return parts
+    .join(" ")
+    // A run of underscores is a blank to fill, not a word. Say so once.
+    .replace(/_{3,}/g, " blank ")
+    .replace(/\s*\n\s*/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim();
+}

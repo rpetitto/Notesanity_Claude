@@ -218,6 +218,80 @@ async function fromDrawing(page: PDFPageProxy, transform: number[] | Float32Arra
   return found;
 }
 
+/**
+ * Blanks on a page that is only a picture.
+ *
+ * A scanned worksheet has no text layer and no drawing operations, so the
+ * first two passes come back empty. But the blanks are still there: they are
+ * long, thin, dark runs of pixels. Finding those directly is both simpler and
+ * more reliable than optical character recognition, which is built to read
+ * words and makes a poor job of a row of underscores.
+ *
+ * Only runs when the cheap passes find nothing, so a normal PDF never pays for
+ * a second render.
+ */
+async function fromPixels(page: PDFPageProxy, vp: { width: number; height: number }) {
+  const found: FieldCandidate[] = [];
+  if (typeof document === "undefined") return found;
+
+  // Enough resolution to resolve a hairline, not so much that a phone stalls.
+  const scale = Math.max(0.8, Math.min(2, 1100 / vp.width));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.floor(vp.width * scale);
+  canvas.height = Math.floor(vp.height * scale);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return found;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: page.getViewport({ scale }) }).promise;
+
+  const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const dark = (i: number) => data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < 140;
+  const minLen = MIN_RULE_W * scale;
+
+  // One pass down the image collecting horizontal runs of dark pixels, and
+  // stacking runs that sit directly on top of each other into one line, so a
+  // three-pixel-thick rule is one candidate rather than three.
+  type Run = { x0: number; x1: number; top: number; bottom: number };
+  let open: Run[] = [];
+  const done: Run[] = [];
+
+  for (let y = 0; y < height; y++) {
+    const rowRuns: Run[] = [];
+    let start = -1;
+    for (let x = 0; x <= width; x++) {
+      const isDark = x < width && dark((y * width + x) * 4);
+      if (isDark && start < 0) start = x;
+      else if (!isDark && start >= 0) {
+        if (x - start >= minLen) rowRuns.push({ x0: start, x1: x, top: y, bottom: y });
+        start = -1;
+      }
+    }
+    const next: Run[] = [];
+    for (const r of rowRuns) {
+      // Same line as one directly above? Then it is that line, one row taller.
+      const prev = open.find((o) => o.bottom === y - 1
+        && Math.min(o.x1, r.x1) - Math.max(o.x0, r.x0) > 0.7 * Math.min(o.x1 - o.x0, r.x1 - r.x0));
+      if (prev) { prev.bottom = y; prev.x0 = Math.min(prev.x0, r.x0); prev.x1 = Math.max(prev.x1, r.x1); next.push(prev); }
+      else next.push(r);
+    }
+    for (const o of open) if (!next.includes(o)) done.push(o);
+    open = next;
+  }
+  done.push(...open);
+
+  for (const r of done) {
+    const thickness = (r.bottom - r.top + 1) / scale;
+    // Thicker than a rule is a filled bar, a table shade or a photograph.
+    if (thickness > MAX_RULE_H + 1.5) continue;
+    found.push({
+      id: uid(), type: "text", source: "rule",
+      x: r.x0 / scale, y: r.top / scale, w: (r.x1 - r.x0) / scale, h: thickness,
+    });
+  }
+  return found;
+}
+
 /** Fraction of `a` that lies under `b`. */
 function overlap(a: Rect, b: Rect): number {
   const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
@@ -247,10 +321,16 @@ export async function detectFieldsOnPage(
     fromDrawing(page, transform).catch(() => [] as FieldCandidate[]),
   ]);
 
+  // Nothing in the document itself: this is a photograph of a worksheet, so
+  // look at the pixels instead.
+  const raster = text.length || drawn.length
+    ? []
+    : await fromPixels(page, vp).catch(() => [] as FieldCandidate[]);
+
   // Underscore runs and vector rules both describe a line to write on, so give
   // them the same shape here rather than in two places: a box whose bottom
   // edge rests on the line.
-  const sized = [...text, ...drawn].map((c) => {
+  const sized = [...text, ...drawn, ...raster].map((c) => {
     if (c.type !== "text") return c;
     // Underscores sit just under their baseline; a drawn rule is the line
     // itself. Either way the box rests its bottom edge on the line, and is

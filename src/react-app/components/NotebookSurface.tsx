@@ -6,6 +6,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePinchZoom } from "../lib/usePinchZoom";
+import { readPageText } from "../lib/pdf";
+import { assetUrl } from "../lib/api";
+import { isPattern } from "../lib/patterns";
+import { Volume2, Square as StopIcon } from "lucide-react";
+import { toast } from "sonner";
 import { pageSource, type FieldRec, type LayerRec, type PageRec } from "../lib/api";
 import { type LayerData, emptyLayer, parseLayer } from "../lib/ink";
 import PageCanvas, { type FieldValue, type ToolState } from "./PageCanvas";
@@ -70,6 +75,61 @@ interface Props {
   studentId?: string;
   /** Called after a student uploads or removes an `image`/`audio` response. */
   onResponseUploaded?: (fieldId: string) => void;
+}
+
+/**
+ * Reads the page out.
+ *
+ * Browsers ship a speech synthesiser, so this costs nothing but the text,
+ * which pdf.js already has. It helps a student who reads slowly and a teacher
+ * checking a worksheet with their hands full, and it is the one accessibility
+ * feature this architecture can honestly offer: the page is a rendered
+ * document, so its own typeface can't be swapped, but its words can be spoken.
+ */
+function ReadAloud({ notebookId, page }: { notebookId: string; page: PageRec }) {
+  const [speaking, setSpeaking] = useState(false);
+
+  // Leaving the page mid-sentence should not leave a voice running.
+  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch { /* unsupported */ } }, []);
+
+  if (typeof window === "undefined" || !window.speechSynthesis || isPattern(page.pattern)) return null;
+
+  const stop = () => { window.speechSynthesis.cancel(); setSpeaking(false); };
+
+  const start = async () => {
+    try {
+      const text = await readPageText(assetUrl(notebookId, page.asset_key), page.source_index);
+      if (!text) {
+        toast("There's nothing on this page to read", {
+          description: "The words are part of the picture here, so there's no text to speak.",
+        });
+        return;
+      }
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 0.95;
+      utter.onend = () => setSpeaking(false);
+      utter.onerror = () => setSpeaking(false);
+      setSpeaking(true);
+      window.speechSynthesis.speak(utter);
+    } catch (e) {
+      setSpeaking(false);
+      toast.error((e as Error).message);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => (speaking ? stop() : void start())}
+      title={speaking ? "Stop reading" : "Read this page out loud"}
+      aria-label={speaking ? "Stop reading this page" : "Read this page out loud"}
+      className="flex h-8 items-center gap-1.5 rounded-full px-2 text-pine/60 hover:bg-pine/8 hover:text-pine"
+    >
+      {speaking ? <StopIcon className="h-3.5 w-3.5" strokeWidth={2.5} /> : <Volume2 className="h-3.5 w-3.5" strokeWidth={2.5} />}
+      <span className="text-[15px]">{speaking ? "Stop" : "Read aloud"}</span>
+    </button>
+  );
 }
 
 export default function NotebookSurface({
@@ -171,8 +231,9 @@ export default function NotebookSurface({
             data-page-id={page.id}
             className="relative mx-auto"
           >
-            <div className="mb-1.5 flex items-center justify-between text-[16px] text-pine/70">
-              <span>{page.label || `Page ${i + 1}`}</span>
+            <div className="mb-1.5 flex items-center justify-between gap-2 text-[16px] text-pine/70">
+              <span className="truncate">{page.label || `Page ${i + 1}`}</span>
+              <ReadAloud notebookId={notebookId} page={page} />
             </div>
             <LazyPage width={page.width * scale} height={page.height * scale}>
               <PageCanvas
