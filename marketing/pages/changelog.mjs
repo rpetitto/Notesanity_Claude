@@ -39,8 +39,9 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "September 21, 2026",
-    "Shapes to draw with, and what Pro will include.",
+    "Spoken comments, shapes, and what Pro will include.",
     [
+      ["new", "<b>Say it instead of typing it.</b> Open a comment while marking and there's now a <b>Say it instead</b> button: record a few seconds out loud and it's pinned to that spot on the page for the student to play back. Faster to give than typing, and a lot warmer to receive. You can still add written text alongside it."],
       ["new", "<b>Shapes.</b> A new tool in the annotation toolbar draws a line, an arrow, a box or a circle. Drag to place one, and use a line as an underline or a strikethrough. A shape behaves like anything else you draw: rub it out with the eraser, or pick it up to move, resize and turn it."],
       ["better", "<b>Finding the blanks in a worksheet stays free for everyone.</b> When the beta ends, Pro will be about making last year's work pay off again: unlimited notebooks and the page library. Nothing you need to teach this week goes behind it. You'll get a full semester's notice before anything changes."],
     ],

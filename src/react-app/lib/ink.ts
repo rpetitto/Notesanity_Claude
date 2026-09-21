@@ -79,6 +79,14 @@ export interface Comment {
   y: number;
   /** comment body */
   t: string;
+  /**
+   * R2 key of a spoken comment, when there is one.
+   *
+   * Nothing else had to change for this: comments serialize by spread, so a
+   * new field round-trips on its own, and the text body stays where it is so
+   * a voice note can carry a written line alongside it.
+   */
+  k?: string;
   /** author display name, so returned work shows who said it */
   a?: string;
   ts?: number;

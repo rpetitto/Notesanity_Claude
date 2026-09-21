@@ -8,6 +8,8 @@ import { requireNotebookRoom, requirePlan } from "../lib/plans";
 import { MAX_TEMPLATE_PAGES, TEMPLATES, templateFor } from "../lib/templates";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/** A spoken comment is a sentence or two, not a lecture. */
+const MAX_COMMENT_AUDIO_BYTES = 8 * 1024 * 1024;
 
 /** Everything a teacher can place on a page. */
 export const FIELD_TYPES = [
@@ -854,6 +856,41 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
 const MAX_FIELD_MEDIA_BYTES = 6 * 1024 * 1024;
 
 /** Attach a teacher-supplied image — a prompt illustration or a `figure` block. */
+/**
+ * A spoken comment on a page.
+ *
+ * Saying it is faster than typing it and lands warmer, which is the whole
+ * reason to have this. The recording lives under the notebook's own prefix so
+ * deleting the notebook sweeps it with everything else, and the key is handed
+ * back for the annotation layer to carry — no row of its own to keep in step.
+ */
+app.post("/api/notebooks/:id/comment-audio", handler(async (c) => {
+  const { nb } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
+  const form = await c.req.parseBody();
+  const file = form["file"] as File | undefined;
+  if (!file) throw new HttpError(400, "No recording uploaded");
+  if (!/^audio\//.test(file.type)) throw new HttpError(400, "That needs to be an audio recording");
+  if (file.size > MAX_COMMENT_AUDIO_BYTES) throw new HttpError(413, "Recordings are limited to 8MB");
+  const key = `notebooks/${nb.id}/comments/${uid()}`;
+  await storage.put(key, await file.arrayBuffer(), { contentType: file.type });
+  return c.json({ key });
+}));
+
+/** Any member may listen: a spoken comment is no use if the student can't hear it. */
+app.get("/api/notebooks/:id/comment-audio", handler(async (c) => {
+  const { nb } = await notebookAccess(c, param(c, "id"));
+  const key = c.req.query("key") || "";
+  if (!key.startsWith(`notebooks/${nb.id}/comments/`)) throw new HttpError(400, "Invalid recording key");
+  const obj = await storage.get(key);
+  if (!obj) throw new HttpError(404, "Recording not found");
+  return new Response(await obj.arrayBuffer(), {
+    headers: {
+      "Content-Type": obj.contentType || "audio/webm",
+      "Cache-Control": "private, max-age=31536000, immutable",
+    },
+  });
+}));
+
 app.post("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const fieldId = param(c, "fieldId");

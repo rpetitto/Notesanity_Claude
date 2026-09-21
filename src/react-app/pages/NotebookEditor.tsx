@@ -1408,6 +1408,7 @@ export default function NotebookEditor() {
                   <PageCanvas
                     key={page.id}
                     {...pageSource(notebookId, page)}
+                    notebookId={notebookId}
                     scale={scale}
                     fields={[]}
                     fieldValues={{}}
@@ -1424,6 +1425,7 @@ export default function NotebookEditor() {
                   <>
                     <PageCanvas
                       {...pageSource(notebookId, page)}
+                      notebookId={notebookId}
                       scale={scale}
                       fields={[]}
                       fieldValues={{}}

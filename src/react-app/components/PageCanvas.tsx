@@ -835,6 +835,12 @@ export default function PageCanvas({
     onLayerChange({ ...activeLayer, x: activeLayer.x.filter((t) => t.id !== id) });
     setEditingText(null);
   };
+  /** Attach or drop a recording on one comment. */
+  const setCommentAudio = (id: string, k?: string) => {
+    if (!onLayerChange) return;
+    onLayerChange({ ...activeLayer, c: activeLayer.c.map((x) => (x.id === id ? { ...x, k } : x)) });
+  };
+
   const updateComment = (id: string, t: string) => {
     if (!onLayerChange) return;
     onLayerChange({ ...activeLayer, c: activeLayer.c.map((k) => (k.id === id ? { ...k, t } : k)) });
@@ -1102,7 +1108,9 @@ export default function PageCanvas({
             open={openComment === k.id}
             pointerEvents={objectPointerEvents}
             onOpen={() => setOpenComment(openComment === k.id ? null : k.id)}
+            notebookId={notebookId}
             onChange={(v) => updateComment(k.id, v)}
+            onAudio={(key) => setCommentAudio(k.id, key)}
             onDelete={() => removeComment(k.id)}
             onClose={() => { if (!k.t.trim() && own) removeComment(k.id); else setOpenComment(null); }}
           />
@@ -1113,20 +1121,67 @@ export default function PageCanvas({
 }
 
 function CommentPin({
-  index, comment, scale, teacher, editable, open, pointerEvents, onOpen, onChange, onDelete, onClose,
+  index, comment, scale, teacher, editable, open, pointerEvents, notebookId,
+  onOpen, onChange, onAudio, onDelete, onClose,
 }: {
   index: number;
-  comment: { id: string; x: number; y: number; t: string; a?: string };
+  comment: { id: string; x: number; y: number; t: string; a?: string; k?: string };
   scale: number;
   teacher: boolean;
   editable: boolean;
   open: boolean;
   pointerEvents: "auto" | "none";
+  notebookId: string;
   onOpen: () => void;
   onChange: (v: string) => void;
+  onAudio: (key?: string) => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const [recording, setRecording] = useState(false);
+  const [sending, setSending] = useState(false);
+  const recorder = useRef<MediaRecorder | null>(null);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Chrome records webm/opus, Safari mp4. Ask for what this browser has
+      // rather than assuming, or the recorder throws on start.
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+        .find((t) => MediaRecorder.isTypeSupported?.(t));
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const chunks: BlobPart[] = [];
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        if (!blob.size) return;
+        setSending(true);
+        try {
+          const form = new FormData();
+          form.append("file", new File([blob], "comment", { type: blob.type }));
+          const res = await fetch(`/api/notebooks/${notebookId}/comment-audio`, {
+            method: "POST", body: form, credentials: "same-origin",
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't save that recording");
+          onAudio((await res.json()).key);
+        } catch (err) {
+          toast.error((err as Error).message);
+        } finally {
+          setSending(false);
+        }
+      };
+      recorder.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch {
+      toast.error("Couldn't reach the microphone. Check this site's permission in your browser.");
+    }
+  };
+
+  const stopRecording = () => recorder.current?.stop();
+
   return (
     <div
       className="absolute"
@@ -1135,7 +1190,7 @@ function CommentPin({
       <button
         type="button"
         onClick={onOpen}
-        title={comment.t || "Comment"}
+        title={comment.k ? `Voice comment${comment.t ? `: ${comment.t}` : ""}` : comment.t || "Comment"}
         className={cn(
           "flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-pine font-display text-[16px] text-pine shadow-md",
           teacher ? "bg-mint" : "bg-white",
@@ -1163,13 +1218,49 @@ function CommentPin({
                 placeholder="Add a comment…"
                 className="w-full resize-none rounded border border-pine/35 px-1.5 py-1 text-[16px] outline-none focus:border-pine"
               />
+              {comment.k ? (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <audio controls preload="none" className="h-8 w-full"
+                    src={`/api/notebooks/${notebookId}/comment-audio?key=${encodeURIComponent(comment.k)}`} />
+                  <button
+                    onClick={() => onAudio(undefined)}
+                    title="Remove the recording"
+                    className="shrink-0 rounded p-1 text-[#a3341f] hover:bg-oat"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={recording ? stopRecording : startRecording}
+                  disabled={sending}
+                  className={cn(
+                    "mt-1.5 flex w-full items-center justify-center gap-1.5 rounded border-2 py-1 text-[16px] font-bold transition-colors",
+                    recording
+                      ? "border-[#a3341f] bg-[#a3341f]/8 text-[#a3341f]"
+                      : "border-pine/30 text-pine hover:bg-oat disabled:opacity-50",
+                  )}
+                >
+                  {recording
+                    ? <><Square className="h-3 w-3" /> Stop</>
+                    : sending
+                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+                      : <><Mic className="h-3.5 w-3.5" /> Say it instead</>}
+                </button>
+              )}
               <div className="mt-1 flex justify-between">
                 <button onClick={onDelete} className="text-[16px] text-[#a3341f] hover:underline">Delete</button>
                 <button onClick={onClose} className="text-[16px] text-pine hover:underline">Done</button>
               </div>
             </>
           ) : (
-            <p className="whitespace-pre-wrap break-words text-[16px] text-pine">{comment.t}</p>
+            <>
+              {comment.k && (
+                <audio controls preload="none" className="mb-1.5 h-8 w-full"
+                  src={`/api/notebooks/${notebookId}/comment-audio?key=${encodeURIComponent(comment.k)}`} />
+              )}
+              {comment.t && <p className="whitespace-pre-wrap break-words text-[16px] text-pine">{comment.t}</p>}
+            </>
           )}
         </div>
       )}
