@@ -8,7 +8,7 @@
  * migrated before anything queries it, and answer scheduled invocations.
  */
 
-import { app, runInScope, runMigrations, runScheduled, type Bindings } from "./platform";
+import { app, runInScope, runMigrations, runScheduled, type Bindings, type RequestScope } from "./platform";
 import "./index";
 
 /**
@@ -70,9 +70,15 @@ export default {
         : asset(env, request, "/landing");
     }
 
-    return runInScope({ env, ctx, db: databaseFor(env, request) }, async () => {
+    const scope: RequestScope = { env, ctx, db: databaseFor(env, request) };
+    return runInScope(scope, async () => {
       await runMigrations();
-      return app.fetch(request, env, ctx);
+      const response = await app.fetch(request, env, ctx);
+      if (!scope.trips || response.status === 101) return response;
+      // How many times this request went to the database — see platform/db.ts.
+      const out = new Response(response.body, response);
+      out.headers.append("Server-Timing", `db;desc="${scope.trips} round trips"`);
+      return out;
     });
   },
 

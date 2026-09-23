@@ -1,6 +1,6 @@
 import { app, db, storage } from "../platform";
-import { handler, now, uid, requireUser, requireClassMember, HttpError, param} from "../lib/session";
-import { logActivity, pageLock } from "../lib/activity";
+import { handler, now, uid, requireUser, HttpError, param} from "../lib/session";
+import { coalesceStatement, insertActivity, lockFrom, logActivity, pageLock, pageLockStatement, type LogInput } from "../lib/activity";
 import {
   MAX_LAYER_BYTES, type LayerShape,
   inkKey, parseShape, readInk, readInkMany, writeInk,
@@ -11,25 +11,46 @@ const ARCHIVED_REASON =
 const OTHERS_NOTEBOOK_REASON =
   "This is the student's own notebook — you can read it, not write in it";
 
-/** Is this notebook's class on the archive shelf? Personal notebooks have none. */
-async function classIsArchived(classId: string | null | undefined): Promise<boolean> {
-  if (!classId) return false;
-  const row = await db
-    .prepare(`SELECT archived FROM classes WHERE id = ?`)
-    .bind(classId)
-    .first<{ archived: number }>();
-  return !!row?.archived;
-}
-
 /**
  * Resolve the notebook instance being worked on and confirm the caller may touch it.
  *
  * Students may only ever reach their own instance. Teachers of the class may read
  * any student's instance and write only to the 'teacher' (grading) layer.
+ *
+ * Every autosave starts here, so it asks the database once: the notebook, its
+ * class, the caller's place in that class and the caller's own instance, in a
+ * single joined query. It was five queries in a row, run before every stroke
+ * was saved.
  */
 async function resolveInstance(c: any, notebookId: string, studentIdParam?: string) {
-  const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
-  if (!nb) throw new HttpError(404, "Notebook not found");
+  const user = await requireUser(c);
+  const row = await db
+    .prepare(
+      `SELECT n.*, cl.id AS cl_id, cl.owner_id AS cl_owner, cl.archived AS cl_archived,
+              (SELECT role FROM enrollments WHERE class_id = n.class_id AND user_id = ? AND status = 'active') AS my_role,
+              i.id AS i_id
+         FROM notebooks n
+         LEFT JOIN classes cl ON cl.id = n.class_id
+         LEFT JOIN instances i ON i.notebook_id = n.id
+                              AND i.student_id = CASE WHEN n.kind = 'student' THEN n.owner_id ELSE ? END
+        WHERE n.id = ?`,
+    )
+    .bind(user.id, user.id, notebookId)
+    .first<any>();
+  if (!row) throw new HttpError(404, "Notebook not found");
+  const { cl_id, cl_owner, cl_archived, my_role, i_id, ...nb } = row;
+
+  // The same answers requireClassMember gives, from the row already in hand.
+  const teachesOrThrow = () => {
+    if (!cl_id) throw new HttpError(404, "Class not found");
+    if (cl_owner === user.id) return true;
+    if (!my_role) throw new HttpError(403, "You're not in this class");
+    return my_role === "teacher";
+  };
+  // An archived class is a shelf, not a desk; a notebook with no class has none.
+  const archived = !!cl_archived;
+  const own = (studentId: string) =>
+    i_id ? { id: i_id, notebook_id: nb.id, class_id: nb.class_id, student_id: studentId } : null;
 
   // A student's own notebook in a class is nobody else's to write in. The
   // owner works in it exactly as they would a personal notebook; a teacher of
@@ -43,16 +64,15 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   // everything else — the answers, the responses, the notebook itself — is
   // still not theirs.
   if (nb.kind === "student") {
-    const { user: u, isTeacher: teachesClass } = await requireClassMember(c, nb.class_id);
-    const owns = nb.owner_id === u.id;
+    const teachesClass = teachesOrThrow();
+    const owns = nb.owner_id === user.id;
     if (!owns && !teachesClass) throw new HttpError(404, "Notebook not found");
     if (studentIdParam && studentIdParam !== nb.owner_id) {
       throw new HttpError(403, "That notebook belongs to one student");
     }
-    const instance = await ensureInstance(nb, nb.owner_id, false);
-    const archived = await classIsArchived(nb.class_id);
+    const instance = own(nb.owner_id) ?? await ensureInstance(nb, nb.owner_id, false);
     return {
-      nb, user: u, isTeacher: false, instance, studentId: nb.owner_id,
+      nb, user, isTeacher: false, instance, studentId: nb.owner_id,
       readOnly: !owns || archived,
       canAnnotate: !owns && teachesClass && !archived,
       // Both can be true; the archive is the one that explains more, because
@@ -64,13 +84,12 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   // In a personal notebook the owner is the one writing, not a teacher looking
   // in — so they resolve to their own instance and can't ask for anyone else's.
   // (There is no one else's: a personal notebook is never shared.)
-  const { user, isTeacher } = nb.kind === "personal"
-    ? await (async () => {
-        const u = await requireUser(c);
-        if (nb.owner_id !== u.id) throw new HttpError(404, "Notebook not found");
-        return { user: u, isTeacher: false };
-      })()
-    : await requireClassMember(c, nb.class_id);
+  let isTeacher = false;
+  if (nb.kind === "personal") {
+    if (nb.owner_id !== user.id) throw new HttpError(404, "Notebook not found");
+  } else {
+    isTeacher = teachesOrThrow();
+  }
 
   // Same rule as the notebook routes: a class notebook a teacher hasn't
   // published yet isn't a thing a student can open, by link or by guess.
@@ -82,15 +101,15 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
     throw new HttpError(403, "You can only open your own notebook");
   }
 
-  const instance = await ensureInstance(nb, studentId, nb.kind !== "personal");
+  const instance = (studentId === user.id ? own(studentId) : null)
+    ?? await ensureInstance(nb, studentId, nb.kind !== "personal");
   // An archived class is a shelf, not a desk. Everything in it stays readable —
   // that is the point of keeping it rather than deleting it — and nothing in it
   // is writable, so last term's work can't be quietly edited after the fact.
-  const archivedClass = await classIsArchived(nb.class_id);
   return {
     nb, user, isTeacher, instance, studentId,
-    readOnly: archivedClass, canAnnotate: false,
-    readOnlyReason: archivedClass ? ARCHIVED_REASON : "",
+    readOnly: archived, canAnnotate: false,
+    readOnlyReason: archived ? ARCHIVED_REASON : "",
   };
 }
 
@@ -101,30 +120,31 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
  * between publishes. `checkEnrolment` is false where ownership has already
  * settled the permission question — a personal or student-owned notebook has
  * no class membership to test.
+ *
+ * The first open often arrives as two requests at once (the page and its
+ * prefetch), so the insert yields to one that got there first instead of
+ * failing on the unique (notebook, student) pair.
  */
 async function ensureInstance(nb: any, studentId: string, checkEnrolment: boolean) {
-  let instance = await db
+  const find = () => db
     .prepare(`SELECT * FROM instances WHERE notebook_id = ? AND student_id = ?`)
     .bind(nb.id, studentId)
     .first<any>();
+  const instance = await find();
+  if (instance) return instance;
 
-  if (!instance) {
-    if (checkEnrolment) {
-      const enrolled = await db
-        .prepare(`SELECT id FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`)
-        .bind(nb.class_id, studentId)
-        .first();
-      if (!enrolled) throw new HttpError(404, "That student isn't in this class");
-    }
-    const id = uid();
-    await db
-      .prepare(`INSERT INTO instances (id, notebook_id, class_id, student_id, created_at) VALUES (?, ?, ?, ?, ?)`)
-      .bind(id, nb.id, nb.class_id, studentId, now())
-      .run();
-    instance = { id, notebook_id: nb.id, class_id: nb.class_id, student_id: studentId };
+  if (checkEnrolment) {
+    const enrolled = await db
+      .prepare(`SELECT id FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`)
+      .bind(nb.class_id, studentId)
+      .first();
+    if (!enrolled) throw new HttpError(404, "That student isn't in this class");
   }
-
-  return instance;
+  await db
+    .prepare(`INSERT OR IGNORE INTO instances (id, notebook_id, class_id, student_id, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .bind(uid(), nb.id, nb.class_id, studentId, now())
+    .run();
+  return await find();
 }
 
 /**
@@ -150,26 +170,32 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
   const pageFilter = wanted.length ? ` AND id IN (${wanted.map(() => "?").join(",")})` : "";
   const layerFilter = wanted.length ? ` AND page_id IN (${wanted.map(() => "?").join(",")})` : "";
 
-  const pages = await db
-    .prepare(
+  // Everything the page needs from the database, in one round trip; the ink
+  // itself follows from R2 once we know which layers hold any.
+  const [pages, fields, layerRows, values, masterAnnotations, studentRes] = await db.batch([
+    db.prepare(
       `SELECT id, seq, asset_key, source_index, width, height, label, group_name, pattern, pattern_color,
               teacher_annotate
          FROM pages WHERE notebook_id = ? AND archived = 0${pageFilter} ORDER BY seq`,
-    )
-    .bind(nb.id, ...wanted)
-    .all();
-  const fields = await db
-    .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, content, media_key IS NOT NULL AS has_media
+    ).bind(nb.id, ...wanted),
+    db.prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, content, media_key IS NOT NULL AS has_media
          FROM fields WHERE notebook_id = ? AND archived = 0${layerFilter}`)
-    .bind(nb.id, ...wanted)
-    .all();
-  const layerRows = await db
-    .prepare(
+      .bind(nb.id, ...wanted),
+    db.prepare(
       `SELECT id, page_id, kind, data, rev, byte_length FROM layers
         WHERE instance_id = ?${layerFilter}`,
-    )
-    .bind(instance.id, ...wanted)
-    .all<{ id: string; page_id: string; kind: string; data: string; rev: number; byte_length: number }>();
+    ).bind(instance.id, ...wanted),
+    db.prepare(`SELECT field_id, value, asset_key, content_type FROM field_values WHERE instance_id = ?`)
+      .bind(instance.id),
+    // Published teacher annotations on the master pages — the same for everyone,
+    // and narrowed by `?pages=` for the same reason the layers are.
+    db.prepare(
+      `SELECT page_id, published_data FROM page_annotations
+        WHERE notebook_id = ? AND published_data <> ''${layerFilter}`,
+    ).bind(nb.id, ...wanted),
+    db.prepare(`SELECT id, name, email, picture FROM users WHERE id = ?`).bind(studentId),
+  ]) as [D1Result, D1Result, D1Result<{ id: string; page_id: string; kind: string; data: string; rev: number; byte_length: number }>, D1Result, D1Result<any>, D1Result];
+  const student = studentRes.results?.[0] ?? null;
 
   // Only layers that hold something are worth a fetch — a row exists for every
   // page ever touched, including ones erased back to blank.
@@ -194,24 +220,6 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
       };
     }),
   };
-  const values = await db
-    .prepare(`SELECT field_id, value, asset_key, content_type FROM field_values WHERE instance_id = ?`)
-    .bind(instance.id)
-    .all();
-  // Published teacher annotations on the master pages — the same for everyone,
-  // and narrowed by `?pages=` for the same reason the layers are.
-  const masterAnnotations = await db
-    .prepare(
-      `SELECT page_id, published_data FROM page_annotations
-        WHERE notebook_id = ? AND published_data <> ''${layerFilter}`,
-    )
-    .bind(nb.id, ...wanted)
-    .all<any>();
-
-  const student = await db
-    .prepare(`SELECT id, name, email, picture FROM users WHERE id = ?`)
-    .bind(studentId)
-    .first();
 
   return c.json({
     notebook: { id: nb.id, title: nb.title, classId: nb.class_id, kind: nb.kind ?? "class" },
@@ -302,9 +310,15 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
 
   // Handed-in work stays frozen, including after it is returned, until a teacher
   // reopens it. That closes the window where a page could be changed after
-  // marking and passed off as the original.
+  // marking and passed off as the original. Asked in the same round trip as
+  // the layer's current row.
+  const [layerRes, lockRes] = await db.batch([
+    db.prepare(`SELECT id, rev, data FROM layers WHERE instance_id = ? AND page_id = ? AND kind = ?`)
+      .bind(instance.id, pageId, kind),
+    ...(kind === "student" ? [pageLockStatement(instance.student_id, instance.notebook_id, pageId)] : []),
+  ]);
   if (kind === "student") {
-    const lock = await pageLock(instance.student_id, instance.notebook_id, pageId);
+    const lock = lockFrom(lockRes?.results?.[0]);
     if (lock) {
       throw new HttpError(
         423,
@@ -316,11 +330,14 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   }
 
   const key = inkKey(instance.notebook_id, instance.id, pageId, kind);
-
-  const existing = await db
-    .prepare(`SELECT id, rev, data FROM layers WHERE instance_id = ? AND page_id = ? AND kind = ?`)
-    .bind(instance.id, pageId, kind)
-    .first<{ id: string; rev: number; data: string }>();
+  const existing = layerRes.results?.[0] as { id: string; rev: number; data: string } | undefined;
+  const activity: LogInput = {
+    actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
+    action: kind === "teacher" ? "annotate" : "edit",
+    detail: kind === "teacher" ? "Marked up this page" : "Wrote on this page",
+    notebookId: instance.notebook_id, instanceId: instance.id, pageId,
+    studentId: instance.student_id,
+  };
 
   if (existing) {
     if (body.rev !== undefined && body.rev < existing.rev) {
@@ -367,18 +384,16 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     // the client never saw.
     const size = await writeInk(key, next, rev);
     if (size > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
-    await db
-      .prepare(`UPDATE layers SET data = '', byte_length = ?, rev = ?, updated_at = ? WHERE id = ?`)
-      .bind(size, rev, now(), existing.id)
-      .run();
-
-    await logActivity({
-      actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
-      action: kind === "teacher" ? "annotate" : "edit",
-      detail: kind === "teacher" ? "Marked up this page" : "Wrote on this page",
-      notebookId: instance.notebook_id, instanceId: instance.id, pageId,
-      studentId: instance.student_id,
-    });
+    // `AND rev = ?`: two saves that both started from this revision can't
+    // both claim the next one. The one that loses is told so, and its client
+    // answers a conflict the way it always has, by fetching and resending.
+    const [updated, folded] = await db.batch([
+      db.prepare(`UPDATE layers SET data = '', byte_length = ?, rev = ?, updated_at = ? WHERE id = ? AND rev = ?`)
+        .bind(size, rev, now(), existing.id, existing.rev),
+      coalesceStatement(activity)!,
+    ]);
+    if (!updated.meta?.changes) return c.json({ conflict: true, rev }, 409);
+    if (!folded.meta?.changes) await insertActivity(activity);
     return c.json({ ok: true, rev });
   }
 
@@ -392,24 +407,23 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   const size = await writeInk(key, fresh, 1);
   if (size > MAX_LAYER_BYTES) throw new HttpError(413, "That page has too much ink to save");
   const layerId = uid();
-  await db
+  // OR IGNORE: a first save from two tabs at once — the second finds the row
+  // the first made, and is told it's behind.
+  const inserted = await db
     .prepare(
-      `INSERT INTO layers (id, instance_id, page_id, kind, data, byte_length, rev, updated_at)
+      `INSERT OR IGNORE INTO layers (id, instance_id, page_id, kind, data, byte_length, rev, updated_at)
        VALUES (?, ?, ?, ?, '', ?, 1, ?)`,
     )
     .bind(layerId, instance.id, pageId, kind, size, now())
     .run();
-  await logActivity({
-    actorId: user.id, actorRole: isTeacher ? "teacher" : "student",
-    action: kind === "teacher" ? "annotate" : "edit",
-    detail: kind === "teacher" ? "Marked up this page" : "Wrote on this page",
-    notebookId: instance.notebook_id, instanceId: instance.id, pageId,
-    studentId: instance.student_id,
-  });
+  if (!inserted.meta?.changes) return c.json({ conflict: true, rev: 1 }, 409);
+  await logActivity(activity);
   return c.json({ ok: true, rev: 1 });
 }));
 
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+/** More boxes than any page has; a save claiming more is not a real one. */
+const MAX_VALUES_PER_SAVE = 500;
 
 // Checked against the *field's* type, not just "is this any media file" — an
 // audio clip dropped into an image box would render as a broken picture.
@@ -531,42 +545,56 @@ app.put("/api/notebooks/:id/values", handler(async (c) => {
   if (isTeacher && instance.student_id !== user.id) {
     throw new HttpError(403, "Teachers can't type into a student's answers");
   }
-  const { values } = await c.req.json<{ values: { fieldId: string; value: string }[] }>();
+  const body = await c.req.json<{ values: { fieldId: string; value: string }[] }>();
+  // The last value sent for a box wins, as it did when each was written in turn.
+  const latest = new Map<string, string>();
+  for (const v of body.values ?? []) {
+    if (typeof v?.fieldId === "string" && typeof v.value === "string" && v.value.length <= 8192) latest.set(v.fieldId, v.value);
+  }
+  if (latest.size === 0) return c.json({ ok: true });
+  if (latest.size > MAX_VALUES_PER_SAVE) throw new HttpError(413, "That's too many answers in one save");
+
+  // Which of these boxes are really in this notebook, and which of its pages
+  // are handed in — one round trip for both. A box from anywhere else is
+  // ignored rather than stored against this student.
+  const ids = [...latest.keys()];
+  const chunks: string[][] = [];
+  for (let k = 0; k < ids.length; k += 90) chunks.push(ids.slice(k, k + 90));
+  const results = await db.batch([
+    db.prepare(
+      `SELECT a.page_ids, a.title FROM submissions s JOIN assignments a ON a.id = s.assignment_id
+        WHERE s.student_id = ? AND a.notebook_id = ? AND s.locked = 1
+        ORDER BY s.submitted_at DESC`,
+    ).bind(instance.student_id, instance.notebook_id),
+    ...chunks.map((chunk) =>
+      db.prepare(`SELECT id, page_id FROM fields WHERE notebook_id = ? AND id IN (${chunk.map(() => "?").join(",")})`)
+        .bind(instance.notebook_id, ...chunk)),
+  ]);
+  const locks = (results[0].results ?? []) as { page_ids: string; title: string }[];
+  const fields = results.slice(1).flatMap((r) => (r.results ?? []) as { id: string; page_id: string }[]);
 
   // Answers live on a page too, so they freeze with it.
-  for (const v of values ?? []) {
-    const field = await db
-      .prepare(`SELECT page_id FROM fields WHERE id = ?`)
-      .bind(v.fieldId)
-      .first<{ page_id: string }>();
-    if (!field) continue;
-    const lock = await pageLock(instance.student_id, instance.notebook_id, field.page_id);
+  for (const f of fields) {
+    const lock = locks.find((l) => (l.page_ids || "").includes(`"${f.page_id}"`));
     if (lock) throw new HttpError(423, `This page is locked — you handed it in for "${lock.title}".`);
   }
-  for (const v of values ?? []) {
-    if (typeof v.value !== "string" || v.value.length > 8192) continue;
-    const existing = await db
-      .prepare(`SELECT id FROM field_values WHERE instance_id = ? AND field_id = ?`)
-      .bind(instance.id, v.fieldId)
-      .first<{ id: string }>();
-    if (existing) {
-      await db
-        .prepare(`UPDATE field_values SET value = ?, updated_at = ? WHERE id = ?`)
-        .bind(v.value, now(), existing.id)
-        .run();
-    } else {
-      await db
-        .prepare(`INSERT INTO field_values (id, instance_id, field_id, value, updated_at) VALUES (?, ?, ?, ?, ?)`)
-        .bind(uid(), instance.id, v.fieldId, v.value, now())
-        .run();
-    }
-  }
-  if ((values ?? []).length) {
-    await logActivity({
-      actorId: user.id, actorRole: isTeacher ? "teacher" : "student", action: "answer",
-      detail: "Typed an answer", notebookId: instance.notebook_id,
-      instanceId: instance.id, studentId: instance.student_id,
-    });
-  }
+  if (fields.length === 0) return c.json({ ok: true });
+
+  const activity: LogInput = {
+    actorId: user.id, actorRole: isTeacher ? "teacher" : "student", action: "answer",
+    detail: "Typed an answer", notebookId: instance.notebook_id,
+    instanceId: instance.id, studentId: instance.student_id,
+  };
+  // One batch: every answer as an upsert on the (instance, box) pair it is
+  // unique on, and the activity entry folded into the last one.
+  const written = await db.batch([
+    ...fields.map((f) =>
+      db.prepare(
+        `INSERT INTO field_values (id, instance_id, field_id, value, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(instance_id, field_id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).bind(uid(), instance.id, f.id, latest.get(f.id)!, now())),
+    coalesceStatement(activity)!,
+  ]);
+  if (!written[written.length - 1].meta?.changes) await insertActivity(activity);
   return c.json({ ok: true });
 }));

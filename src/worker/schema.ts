@@ -1015,3 +1015,48 @@ migrate("031_templates", async () => {
   }
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_notebooks_template ON notebooks(template_id)`).run();
 });
+
+/**
+ * Indexes for the lookups that grow with a school rather than with a teacher.
+ *
+ * Deleting a page clears its layers and answers by page and by field, the
+ * editor lists a notebook's assignments by notebook, and joining a class finds
+ * it by its code. None of those had an
+ * index, so each was a scan of a table with a row per student per page — fine
+ * for one class, a stall for everyone else sharing the database once there are
+ * thousands of students. Creating an index is idempotent, so this migration is
+ * safe even if two cold starts race to run it.
+ */
+migrate("032_scale_indexes", async () => {
+  await db.batch([
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_layers_page ON layers(page_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_field_values_field ON field_values(field_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_assignments_notebook ON assignments(notebook_id)`),
+    // Every join looks a class up by its code, and every new class checks one is free.
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_classes_join_code ON classes(join_code)`),
+  ]);
+
+  /*
+   * One copy of a template per class, and one mirror of a template page or box
+   * per copy. The routes check before they write, but two requests can both
+   * pass a check before either writes — a double-click on Push, two tabs
+   * sending updates — and only the database can settle that. These also serve
+   * the "what is this copy missing" lookups.
+   *
+   * A unique index can't be built over rows that already break it. Production
+   * had none when this was written; if some appear before it runs, the index
+   * is skipped and said so, rather than failing every request's startup.
+   */
+  const unique = [
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_notebooks_template_class ON notebooks(template_id, class_id) WHERE template_id IS NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_pages_template_mirror ON pages(notebook_id, template_page_id) WHERE template_page_id IS NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_fields_template_mirror ON fields(notebook_id, template_field_id) WHERE template_field_id IS NOT NULL`,
+  ];
+  for (const sql of unique) {
+    try {
+      await db.prepare(sql).run();
+    } catch (e) {
+      console.error(`032_scale_indexes: skipped "${sql.slice(0, 80)}…": ${(e as Error).message}`);
+    }
+  }
+});

@@ -60,40 +60,38 @@ export default function PushToClassesModal({ templates, onClose, onDone }: {
 
   const run = async () => {
     setBusy(true);
-    const made: string[] = [];
-    const failed: string[] = [];
-    // One after another rather than all at once: each push checks the plan's
-    // notebook allowance, and a burst would race past it.
-    for (const job of jobs) {
-      try {
-        const res = await api.post<{ notebook: { id: string } }>(`/api/templates/${job.templateId}/push`, { classId: job.classId });
-        made.push(res.notebook.id);
-      } catch (e) {
-        failed.push((e as Error).message);
+    try {
+      // One request for the whole set: the server checks permission and the
+      // plan's allowance once, and skips any pair that already has a copy.
+      const res = await api.post<{ made: { notebookId: string }[]; skipped: unknown[] }>("/api/templates/push", {
+        templateIds: templates.map((t) => t.id),
+        classIds: [...chosen],
+      });
+      qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
+      qc.invalidateQueries({ queryKey: ["classes"] });
+      const made = res.made.map((m) => m.notebookId);
+      if (made.length) {
+        const where = chosen.size === 1
+          ? teachable.find((c) => chosen.has(c.id))?.name ?? "the class"
+          : plural(chosen.size, "class", "classes");
+        toast.success(
+          made.length === 1
+            ? `Now in ${where} as a draft — publish it there when it's ready.`
+            : `${plural(made.length, "notebook")} now in ${where} as drafts — publish them there when they're ready.`,
+          made.length === 1 ? { action: { label: "Open", onClick: () => navigate(`/notebooks/${made[0]}/edit`) } } : undefined,
+        );
+        onDone?.();
+      } else {
+        toast.success("Those classes already have everything you picked.");
       }
+      onClose();
+    } catch (e) {
+      // Nothing is made when the push is refused (the plan's limit, a class you
+      // no longer teach), so the dialog stays open to change the choice.
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
-    qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
-    qc.invalidateQueries({ queryKey: ["classes"] });
-
-    if (made.length) {
-      const where = chosen.size === 1
-        ? teachable.find((c) => chosen.has(c.id))?.name ?? "the class"
-        : plural(chosen.size, "class", "classes");
-      toast.success(
-        made.length === 1
-          ? `Now in ${where} as a draft — publish it there when it's ready.`
-          : `${plural(made.length, "notebook")} now in ${where} as drafts — publish them there when they're ready.`,
-        made.length === 1 ? { action: { label: "Open", onClick: () => navigate(`/notebooks/${made[0]}/edit`) } } : undefined,
-      );
-      onDone?.();
-    }
-    if (failed.length) {
-      // The same refusal (usually the plan's limit) repeats per push; say it once.
-      const reasons = [...new Set(failed)];
-      toast.error(`${plural(failed.length, "push", "pushes")} didn't go through: ${reasons.join(" ")}`);
-    }
-    if (!failed.length) onClose();
   };
 
   const title = templates.length === 1 ? `Push “${templates[0].title}”` : `Push ${plural(templates.length, "template")}`;

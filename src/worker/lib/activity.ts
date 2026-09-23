@@ -41,28 +41,32 @@ export interface LogInput {
   studentId?: string | null;
 }
 
-export async function logActivity(input: LogInput): Promise<void> {
-  try {
-    // Fold a run of edits by the same person on the same page into one entry.
-    if (input.action === "edit" || input.action === "answer" || input.action === "annotate") {
-      const cutoff = new Date(Date.now() - COALESCE_MINUTES * 60_000).toISOString();
-      const recent = await db
-        .prepare(
-          `SELECT id FROM activity
-            WHERE actor_id = ? AND action = ? AND created_at > ?
-              AND IFNULL(instance_id,'') = IFNULL(?,'') AND IFNULL(page_id,'') = IFNULL(?,'')
-            ORDER BY created_at DESC LIMIT 1`,
-        )
-        .bind(input.actorId, input.action, cutoff, input.instanceId ?? null, input.pageId ?? null)
-        .first<{ id: string }>();
-      if (recent) {
-        await db.prepare(`UPDATE activity SET created_at = ?, detail = ? WHERE id = ?`)
-          .bind(now(), input.detail ?? "", recent.id)
-          .run();
-        return;
-      }
-    }
+const COALESCED: ActivityAction[] = ["edit", "answer", "annotate"];
 
+/**
+ * The statement that folds this entry into the same person's last one on the
+ * same page, or null for actions that always get their own row. One UPDATE
+ * that finds its own target, so the common case — the tenth autosave in a
+ * minute — is a single round trip, and callers that already write can send it
+ * in the same batch. `meta.changes` says whether it found one.
+ */
+export function coalesceStatement(input: LogInput): D1PreparedStatement | null {
+  if (!COALESCED.includes(input.action)) return null;
+  const cutoff = new Date(Date.now() - COALESCE_MINUTES * 60_000).toISOString();
+  return db
+    .prepare(
+      `UPDATE activity SET created_at = ?, detail = ?
+        WHERE id = (SELECT id FROM activity
+                     WHERE actor_id = ? AND action = ? AND created_at > ?
+                       AND IFNULL(instance_id,'') = IFNULL(?,'') AND IFNULL(page_id,'') = IFNULL(?,'')
+                     ORDER BY created_at DESC LIMIT 1)`,
+    )
+    .bind(now(), input.detail ?? "", input.actorId, input.action, cutoff, input.instanceId ?? null, input.pageId ?? null);
+}
+
+/** A new row for this entry. */
+export async function insertActivity(input: LogInput): Promise<void> {
+  try {
     await db
       .prepare(
         `INSERT INTO activity
@@ -81,15 +85,21 @@ export async function logActivity(input: LogInput): Promise<void> {
   }
 }
 
-/**
- * Is this page frozen for the student, and why?
- *
- * A page is locked while it belongs to a submission that has been handed in and
- * not deliberately reopened. Returning graded work does not unlock it: that
- * window is exactly where a page could be edited after marking.
- */
-export async function pageLock(studentId: string, notebookId: string, pageId: string) {
-  const row = await db
+export async function logActivity(input: LogInput): Promise<void> {
+  try {
+    // Fold a run of edits by the same person on the same page into one entry.
+    const fold = coalesceStatement(input);
+    if (fold && ((await fold.run()).meta?.changes ?? 0) > 0) return;
+  } catch (err) {
+    console.error("activity log failed", err);
+    return;
+  }
+  await insertActivity(input);
+}
+
+/** The statement behind `pageLock`, for callers that batch it with their own reads. */
+export function pageLockStatement(studentId: string, notebookId: string, pageId: string): D1PreparedStatement {
+  return db
     .prepare(
       `SELECT s.id, s.status, s.submitted_at, s.returned_at, s.locked, a.id AS assignment_id, a.title
          FROM submissions s
@@ -98,8 +108,11 @@ export async function pageLock(studentId: string, notebookId: string, pageId: st
           AND s.locked = 1
         ORDER BY s.submitted_at DESC LIMIT 1`,
     )
-    .bind(studentId, notebookId, `%"${pageId}"%`)
-    .first<any>();
+    .bind(studentId, notebookId, `%"${pageId}"%`);
+}
+
+/** Read `pageLockStatement`'s row as a lock, or null when the page is open. */
+export function lockFrom(row: any) {
   if (!row) return null;
   return {
     assignmentId: row.assignment_id,
@@ -107,4 +120,8 @@ export async function pageLock(studentId: string, notebookId: string, pageId: st
     returned: !!row.returned_at,
     submittedAt: row.submitted_at,
   };
+}
+
+export async function pageLock(studentId: string, notebookId: string, pageId: string) {
+  return lockFrom(await pageLockStatement(studentId, notebookId, pageId).first<any>());
 }

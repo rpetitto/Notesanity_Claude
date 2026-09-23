@@ -131,11 +131,15 @@ export const effectiveTier = (plan: UserPlan): Tier => (BETA_FREE ? (tierAtLeast
  */
 export async function notebookQuota(user: Pick<AppUser, "id" | "org_id">, plan?: UserPlan): Promise<Quota> {
   const p = plan ?? (await planForUser(user));
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n FROM notebooks WHERE owner_id = ? AND kind = 'class' AND archived = 0`)
-    .bind(user.id)
-    .first<{ n: number }>();
-  const used = row?.n ?? 0;
+  const row = await notebooksUsedStatement(user.id).first<{ n: number }>();
+  return quotaFrom(p, row?.n ?? 0);
+}
+
+/** The count behind the Free cap, for a caller that batches it with its own reads. */
+export const notebooksUsedStatement = (userId: string) =>
+  db.prepare(`SELECT COUNT(*) AS n FROM notebooks WHERE owner_id = ? AND kind = 'class' AND archived = 0`).bind(userId);
+
+export function quotaFrom(p: UserPlan, used: number): Quota {
   const limit = p.tier === "free" ? PLANS.free.notebookLimit : null;
   return {
     used, limit,
@@ -166,10 +170,10 @@ export async function requirePlan(user: AppUser, min: "pro" | "school", what: st
  * we ask for the sale into an instruction for avoiding it. The offer comes
  * first now; the free way out still follows, in the same breath.
  */
-export async function requireNotebookRoom(user: AppUser): Promise<void> {
+export async function requireNotebookRoom(user: AppUser, count = 1): Promise<void> {
   if (BETA_FREE) return;
   const quota = await notebookQuota(user);
-  if (quota.limit !== null && quota.used >= quota.limit) {
+  if (quota.limit !== null && quota.used + count > quota.limit) {
     throw new HttpError(
       402,
       `You've used all ${FREE_NOTEBOOK_LIMIT} class notebooks on the Free plan. `

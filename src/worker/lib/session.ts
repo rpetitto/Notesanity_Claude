@@ -1,14 +1,24 @@
-import { auth, db } from "../platform";
+import { auth, currentScope, db } from "../platform";
 import type { Context } from "hono";
 
 export const uid = () => crypto.randomUUID();
 
 /**
+ * The same shape of id as `uid()`, made by the database — for one statement
+ * that inserts a row per student (`INSERT … SELECT`), where there is no chance
+ * to call `uid()` per row. A random v4 UUID, so nothing reading ids can tell
+ * the two apart.
+ */
+export const SQL_UUID = `(lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+  substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) ||
+  substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))))`;
+
+/**
  * Injected by routes/auth.ts at import time. Keeping it as a hook rather than a
  * direct import avoids a cycle: auth.ts already depends on this module.
  */
-let localSessionResolver: ((c: Context) => Promise<string | null>) | null = null;
-export function setLocalSessionResolver(fn: (c: Context) => Promise<string | null>) {
+let localSessionResolver: ((c: Context) => Promise<AppUser | null>) | null = null;
+export function setLocalSessionResolver(fn: (c: Context) => Promise<AppUser | null>) {
   localSessionResolver = fn;
 }
 const resolveLocalSession = (c: Context) => (localSessionResolver ? localSessionResolver(c) : Promise.resolve(null));
@@ -22,6 +32,7 @@ export interface AppUser {
   picture: string | null;
   role: "teacher" | "student" | "pending";
   is_admin: number;
+  last_seen_at?: string | null;
   /** Platform owner — sees and edits across every school. */
   is_superadmin?: number;
   /**
@@ -178,7 +189,33 @@ export async function activeImpersonation(c: Context): Promise<ImpersonationInfo
  * of the org's configured domains, which is what keeps the app scoped to a
  * single school without any manual provisioning step.
  */
-export async function currentUser(c: Context): Promise<AppUser | null> {
+export function currentUser(c: Context): Promise<AppUser | null> {
+  // Asked for more than once in some requests (a route and the helpers it
+  // calls); resolved once. Keyed on the request's context, so it can't leak
+  // from one request to another.
+  let user = resolved.get(c);
+  if (!user) {
+    user = resolveUser(c);
+    resolved.set(c, user);
+  }
+  return user;
+}
+const resolved = new WeakMap<Context, Promise<AppUser | null>>();
+
+/**
+ * Note that someone was here — at most every few minutes, and after the
+ * response rather than before it. Writing it on every request was a write per
+ * request, and every write waits its turn for the one database.
+ */
+const SEEN_EVERY_MS = 5 * 60_000;
+function touchLastSeen(user: AppUser) {
+  const last = user.last_seen_at ? new Date(user.last_seen_at).getTime() : 0;
+  if (Date.now() - last < SEEN_EVERY_MS) return;
+  const write = db.prepare(`UPDATE users SET last_seen_at = ? WHERE id = ?`).bind(now(), user.id).run();
+  currentScope().ctx.waitUntil(write.catch(() => {}));
+}
+
+async function resolveUser(c: Context): Promise<AppUser | null> {
   // Impersonation overrides everything else — while it's active, the request
   // is the target user (read-only; see handler()'s write guard) regardless
   // of whose real cookie is also sitting in the browser.
@@ -190,13 +227,10 @@ export async function currentUser(c: Context): Promise<AppUser | null> {
 
   // A local session (email/password or magic link) is authoritative on its own;
   // Google sign-in remains available alongside it.
-  const localId = await resolveLocalSession(c);
-  if (localId) {
-    const row = await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(localId).first<AppUser>();
-    if (row) {
-      await db.prepare(`UPDATE users SET last_seen_at = ? WHERE id = ?`).bind(now(), row.id).run();
-      return row;
-    }
+  const local = await resolveLocalSession(c);
+  if (local) {
+    touchLastSeen(local);
+    return local;
   }
 
   const account = await auth.user(c);

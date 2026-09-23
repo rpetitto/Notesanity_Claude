@@ -2,7 +2,7 @@ import { app, db } from "../platform";
 import { billingConfigured } from "../platform/billing";
 import { BETA_FREE, PLANS } from "../../shared/plans.mjs";
 import { currentUser, handler, now, requireUser, HttpError, activeImpersonation } from "../lib/session";
-import { planForUser, notebookQuota, departmentFor, requirePlan } from "../lib/plans";
+import { planForUser, notebooksUsedStatement, quotaFrom, departmentFor, requirePlan } from "../lib/plans";
 
 /** Who am I? Returns null (200) when signed out so the client can show the landing page. */
 app.get("/api/me", handler(async (c) => {
@@ -12,24 +12,25 @@ app.get("/api/me", handler(async (c) => {
   // What they really have, and what that means today. The Settings card shows
   // the real tier; `beta` is what tells it every gate is currently open.
   const plan = await planForUser(user);
-  const quota = await notebookQuota(user, plan);
-  const customer = await db
-    .prepare(`SELECT 1 FROM billing_customers WHERE user_id = ?`)
-    .bind(user.id)
-    .first();
+  // Every app load asks for this, so the reads that don't depend on each other
+  // go together in one round trip. Tours ride along with the session rather
+  // than being fetched separately: a guide that arrives a moment after the
+  // screen does pops up over something the person had already started reading.
+  const [usedRes, customerRes, orgRes, toursRes] = await db.batch([
+    notebooksUsedStatement(user.id),
+    db.prepare(`SELECT 1 AS yes FROM billing_customers WHERE user_id = ?`).bind(user.id),
+    db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id),
+    db.prepare(`SELECT tour FROM user_tours WHERE user_id = ?`).bind(user.id),
+  ]);
+  const quota = quotaFrom(plan, (usedRes.results?.[0] as { n: number } | undefined)?.n ?? 0);
+  const customer = customerRes.results?.[0] ?? null;
+  const org = (orgRes.results?.[0] ?? null) as any;
+  const tours = { results: (toursRes.results ?? []) as { tour: string }[] };
   const department = user.is_admin ? await departmentFor(user.org_id) : null;
   const seatsUsed = department
     ? (await db.prepare(`SELECT COUNT(*) AS n FROM plan_seats WHERE subscription_id = ?`)
         .bind(department.id).first<{ n: number }>())?.n ?? 0
     : 0;
-  const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id).first<any>();
-  // Tours ride along with the session rather than being fetched separately. A
-  // guide that arrives a moment after the screen does is a guide that pops up
-  // over something the person had already started reading.
-  const tours = await db
-    .prepare(`SELECT tour FROM user_tours WHERE user_id = ?`)
-    .bind(user.id)
-    .all<{ tour: string }>();
 
   // The banner a superadmin sees while viewing as this account — never shown
   // to the account itself, since currentUser() only sets impersonated_by

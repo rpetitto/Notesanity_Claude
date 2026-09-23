@@ -19,7 +19,7 @@
 import { app, db, storage } from "../platform";
 import { handler, now, uid, requireTeacher, requireClassTeacher, HttpError, param } from "../lib/session";
 import { requireNotebookRoom } from "../lib/plans";
-import { MAX_UPLOAD_BYTES, PAGE_PATTERNS, fillFromTemplate, syncPageCount, deleteNotebookCascade } from "./notebooks";
+import { MAX_UPLOAD_BYTES, PAGE_PATTERNS, fillFromTemplate, deleteNotebookCascade } from "./notebooks";
 
 const MAX_TEMPLATE_START_PAGES = 200;
 
@@ -64,33 +64,34 @@ app.get("/api/my/teaching-notebooks", handler(async (c) => {
     .all<any>();
   const notebooks = rows.results ?? [];
 
-  // Each template's copies, and what each copy is still missing.
-  for (const t of notebooks.filter((n) => n.kind === "template")) {
-    const copies = notebooks.filter((n) => n.template_id === t.id);
-    t.copies = [];
-    for (const copy of copies) {
-      const pages = await db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM pages tp
-            WHERE tp.notebook_id = ? AND tp.archived = 0
-              AND tp.id NOT IN (SELECT template_page_id FROM pages WHERE notebook_id = ? AND template_page_id IS NOT NULL)`,
-        )
-        .bind(t.id, copy.id)
-        .first<{ n: number }>();
-      const fields = await db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM fields tf
-             JOIN pages tp ON tp.id = tf.page_id
-            WHERE tf.notebook_id = ? AND tf.archived = 0 AND tp.archived = 0
-              AND tf.id NOT IN (SELECT template_field_id FROM fields WHERE notebook_id = ? AND template_field_id IS NOT NULL)`,
-        )
-        .bind(t.id, copy.id)
-        .first<{ n: number }>();
-      t.copies.push({
-        notebookId: copy.id, classId: copy.class_id, className: copy.class_name, status: copy.status,
-        archived: !!copy.archived, pendingPages: pages?.n ?? 0, pendingFields: fields?.n ?? 0,
-      });
-    }
+  // Each template's copies, and what each copy is still missing — counted for
+  // every copy in one statement rather than two queries per copy.
+  const templates = notebooks.filter((n) => n.kind === "template");
+  const copies = notebooks.filter((n) => n.template_id && templates.some((t) => t.id === n.template_id));
+  const pending = new Map<string, { pages: number; fields: number }>();
+  if (copies.length) {
+    const rows = await db
+      .prepare(
+        `SELECT cp.id,
+                (SELECT COUNT(*) FROM pages tp
+                  WHERE tp.notebook_id = cp.template_id AND tp.archived = 0
+                    AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.notebook_id = cp.id AND p.template_page_id = tp.id)) AS pages,
+                (SELECT COUNT(*) FROM fields tf JOIN pages tp ON tp.id = tf.page_id
+                  WHERE tf.notebook_id = cp.template_id AND tf.archived = 0 AND tp.archived = 0
+                    AND NOT EXISTS (SELECT 1 FROM fields f WHERE f.notebook_id = cp.id AND f.template_field_id = tf.id)) AS fields
+           FROM notebooks cp
+          WHERE cp.template_id IN (SELECT id FROM notebooks WHERE kind = 'template' AND owner_id = ?)`,
+      )
+      .bind(user.id)
+      .all<{ id: string; pages: number; fields: number }>();
+    for (const r of rows.results ?? []) pending.set(r.id, { pages: r.pages, fields: r.fields });
+  }
+  for (const t of templates) {
+    t.copies = copies.filter((n) => n.template_id === t.id).map((copy) => ({
+      notebookId: copy.id, classId: copy.class_id, className: copy.class_name, status: copy.status,
+      archived: !!copy.archived,
+      pendingPages: pending.get(copy.id)?.pages ?? 0, pendingFields: pending.get(copy.id)?.fields ?? 0,
+    }));
   }
   return c.json({ notebooks });
 }));
@@ -143,92 +144,186 @@ app.post("/api/my/templates/upload", handler(async (c) => {
 }));
 
 /**
+ * Run storage copies a few at a time. A Worker has a small number of
+ * connections open at once; starting a copy per recording in a big template
+ * all together would queue behind that limit anyway, less politely.
+ */
+function limiter(max: number) {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= max) await new Promise<void>((resolve) => waiting.push(resolve));
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+type Limit = ReturnType<typeof limiter>;
+
+/** D1 takes a batch as one round trip; this keeps each one a sensible size. */
+const BATCH = 80;
+async function runBatched(statements: D1PreparedStatement[]) {
+  for (let i = 0; i < statements.length; i += BATCH) await db.batch(statements.slice(i, i + BATCH));
+}
+
+/**
+ * Everything of a template's that a copy needs, read once however many copies
+ * it goes into: its live pages in order, their live answer boxes by page, and
+ * the teacher's ink by page.
+ */
+async function templateContents(templateId: string) {
+  const [pages, fields, ink] = await db.batch([
+    db.prepare(`SELECT * FROM pages WHERE notebook_id = ? AND archived = 0 ORDER BY seq`).bind(templateId),
+    db.prepare(
+      `SELECT f.* FROM fields f JOIN pages p ON p.id = f.page_id
+        WHERE f.notebook_id = ? AND f.archived = 0 AND p.archived = 0`,
+    ).bind(templateId),
+    db.prepare(`SELECT page_id, draft_data, published_data FROM page_annotations WHERE notebook_id = ?`).bind(templateId),
+  ]);
+  const fieldsByPage = new Map<string, any[]>();
+  for (const f of (fields.results ?? []) as any[]) {
+    const list = fieldsByPage.get(f.page_id) ?? [];
+    list.push(f);
+    fieldsByPage.set(f.page_id, list);
+  }
+  const inkByPage = new Map<string, string>();
+  for (const a of (ink.results ?? []) as any[]) {
+    const data = a.draft_data || a.published_data || "";
+    if (data) inkByPage.set(a.page_id, data);
+  }
+  return { pages: (pages.results ?? []) as any[], fields: (fields.results ?? []) as any[], fieldsByPage, inkByPage };
+}
+type TemplateContents = Awaited<ReturnType<typeof templateContents>>;
+
+/** A field row for a copy, with its own copy of any recording or picture it carries. */
+async function fieldInsert(copyId: string, pageId: string, f: any, limit: Limit): Promise<D1PreparedStatement> {
+  let mediaKey: string | null = null;
+  if (f.media_key) {
+    mediaKey = `notebooks/${copyId}/fields/${uid()}`;
+    await limit(() => storage.copy(f.media_key, mediaKey!));
+  }
+  return db
+    .prepare(
+      `INSERT OR IGNORE INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
+                                     content, media_key, archived, template_field_id, created_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?
+        WHERE EXISTS (SELECT 1 FROM pages WHERE id = ?)`,
+    )
+    .bind(
+      uid(), copyId, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
+      f.prompt ?? "", f.content ?? "", mediaKey, f.id, now(), pageId,
+    );
+}
+
+/**
  * Copy a run of template pages into a class copy, with their boxes and the
  * teacher's ink, each remembering what it mirrors. `seqFor` decides where each
  * lands — a fresh push numbers them as the template does; a sync slots each
  * one between the copies of its template neighbours.
+ *
+ * Reads come from `contents`, fetched once per template; writes go out in
+ * batches. Each insert skips a mirror that already exists (the unique indexes
+ * from migration 032), and a box or ink only lands on a page that did, so two
+ * syncs racing each other leave one copy of everything rather than two. A page used to cost five round trips of its own, which for a
+ * forty-page template pushed into six classes was over a thousand, each
+ * holding the database that every other teacher and student shares.
  */
 async function copyPages(
-  template: any,
+  contents: TemplateContents,
   copyId: string,
   pages: any[],
-  seqFor: (templatePage: any) => Promise<number> | number,
-): Promise<{ pages: number; fields: number }> {
+  seqFor: (templatePage: any) => number,
+): Promise<{ pages: number; fields: number; pageIds: Map<string, string> }> {
   // One copy of each source document per destination, however many pages share it.
+  const limit = limiter(6);
   const copiedAssets = new Map<string, string>();
-  const assetFor = async (src: string) => {
-    if (!src) return "";
-    let dst = copiedAssets.get(src);
-    if (!dst) {
-      dst = `notebooks/${copyId}/tpl-${flatten(src)}`;
-      await storage.copy(src, dst);
+  await Promise.all(
+    [...new Set(pages.map((tp) => tp.asset_key).filter(Boolean))].map(async (src: string) => {
+      const dst = `notebooks/${copyId}/tpl-${flatten(src)}`;
+      await limit(() => storage.copy(src, dst));
       copiedAssets.set(src, dst);
-    }
-    return dst;
-  };
+    }),
+  );
 
-  let fieldsCopied = 0;
+  const statements: D1PreparedStatement[] = [];
+  const pageIds = new Map<string, string>();
+  const fieldJobs: Promise<D1PreparedStatement>[] = [];
   for (const tp of pages) {
     const pageId = uid();
-    await db
-      .prepare(
-        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, label,
-                            group_name, archived, pattern, pattern_color, teacher_annotate, template_page_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        pageId, copyId, await seqFor(tp), await assetFor(tp.asset_key), tp.source_index, tp.width, tp.height,
-        tp.label ?? "", tp.group_name ?? "", tp.pattern ?? "", tp.pattern_color ?? "", tp.teacher_annotate ?? 0,
-        tp.id, now(),
-      )
-      .run();
-
-    const fields = await db
-      .prepare(`SELECT * FROM fields WHERE notebook_id = ? AND page_id = ? AND archived = 0`)
-      .bind(template.id, tp.id)
-      .all<any>();
-    for (const f of fields.results ?? []) {
-      fieldsCopied += await copyField(copyId, pageId, f);
-    }
+    pageIds.set(tp.id, pageId);
+    statements.push(
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, label,
+                              group_name, archived, pattern, pattern_color, teacher_annotate, template_page_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          pageId, copyId, seqFor(tp), copiedAssets.get(tp.asset_key) ?? "", tp.source_index, tp.width, tp.height,
+          tp.label ?? "", tp.group_name ?? "", tp.pattern ?? "", tp.pattern_color ?? "", tp.teacher_annotate ?? 0,
+          tp.id, now(),
+        ),
+    );
+    for (const f of contents.fieldsByPage.get(tp.id) ?? []) fieldJobs.push(fieldInsert(copyId, pageId, f, limit));
 
     // The teacher's ink on the template page arrives as a draft, to be sent to
     // students when the class copy is published, like any other ink.
-    const ann = await db
-      .prepare(`SELECT draft_data, published_data FROM page_annotations WHERE notebook_id = ? AND page_id = ?`)
-      .bind(template.id, tp.id)
-      .first<any>();
-    const ink = ann?.draft_data || ann?.published_data || "";
+    const ink = contents.inkByPage.get(tp.id);
     if (ink) {
-      await db
-        .prepare(
-          `INSERT INTO page_annotations (page_id, notebook_id, draft_data, published_data, rev, updated_at)
-           VALUES (?, ?, ?, '', 1, ?)`,
-        )
-        .bind(pageId, copyId, ink, now())
-        .run();
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO page_annotations (page_id, notebook_id, draft_data, published_data, rev, updated_at)
+             SELECT ?, ?, ?, '', 1, ? WHERE EXISTS (SELECT 1 FROM pages WHERE id = ?)`,
+          )
+          .bind(pageId, copyId, ink, now(), pageId),
+      );
     }
   }
-  return { pages: pages.length, fields: fieldsCopied };
+  const fieldStatements = await Promise.all(fieldJobs);
+  await runBatched([...statements, ...fieldStatements]);
+  return { pages: pages.length, fields: fieldStatements.length, pageIds };
 }
 
-async function copyField(copyId: string, pageId: string, f: any): Promise<number> {
-  let mediaKey: string | null = null;
-  if (f.media_key) {
-    mediaKey = `notebooks/${copyId}/fields/${uid()}`;
-    await storage.copy(f.media_key, mediaKey);
+/**
+ * Make one class copy of a template: the notebook row, then its pages. The
+ * unique index on (template_id, class_id) is what stops two pushes that arrive
+ * together from making two copies — the existence check alone can't, since
+ * both can pass it before either writes.
+ */
+async function pushOne(template: any, contents: TemplateContents, classId: string, ownerId: string) {
+  const copyId = uid();
+  let coverKey: string | null = null;
+  if (template.cover_key) {
+    coverKey = `notebooks/${copyId}/cover-${uid()}`;
+    await storage.copy(template.cover_key, coverKey);
   }
-  await db
-    .prepare(
-      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
-                           content, media_key, archived, template_field_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-    )
-    .bind(
-      uid(), copyId, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
-      f.prompt ?? "", f.content ?? "", mediaKey, f.id, now(),
-    )
-    .run();
-  return 1;
+  try {
+    await db
+      .prepare(
+        `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind,
+                                accent_color, cover_key, template_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, '', ?, 'draft', 'class', ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        copyId, classId, ownerId, template.title, template.source_name ?? "", contents.pages.length,
+        template.accent_color ?? "#2E7D6B", coverKey, template.id, now(), now(),
+      )
+      .run();
+  } catch (e) {
+    if (/UNIQUE/i.test((e as Error).message)) {
+      throw new HttpError(409, "This template is already in that class — send updates to it instead.");
+    }
+    throw e;
+  }
+  // A fresh copy numbers its pages 1..n, as the template shows them.
+  const order = new Map(contents.pages.map((tp, i) => [tp.id, i + 1]));
+  const copied = await copyPages(contents, copyId, contents.pages, (tp) => order.get(tp.id)!);
+  return { id: copyId, pages: copied.pages, fields: copied.fields };
 }
 
 /** Put a template into a class, as a draft notebook that remembers its origin. */
@@ -246,34 +341,78 @@ app.post("/api/templates/:id/push", handler(async (c) => {
     .first<{ id: string }>();
   if (existing) throw new HttpError(409, "This template is already in that class — send updates to it instead.");
 
-  const copyId = uid();
-  let coverKey: string | null = null;
-  if (template.cover_key) {
-    coverKey = `notebooks/${copyId}/cover-${uid()}`;
-    await storage.copy(template.cover_key, coverKey);
-  }
-  await db
-    .prepare(
-      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind,
-                              accent_color, cover_key, template_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, '', 0, 'draft', 'class', ?, ?, ?, ?, ?)`,
-    )
-    .bind(copyId, classId, user.id, template.title, template.source_name ?? "", template.accent_color ?? "#2E7D6B", coverKey, template.id, now(), now())
-    .run();
+  const copy = await pushOne(template, await templateContents(template.id), classId, user.id);
+  return c.json({ notebook: { id: copy.id }, pages: copy.pages, fields: copy.fields });
+}));
 
-  const pages = await db
-    .prepare(`SELECT * FROM pages WHERE notebook_id = ? AND archived = 0 ORDER BY seq`)
-    .bind(template.id)
-    .all<any>();
-  const copied = await copyPages(template, copyId, pages.results ?? [], (tp) => tp.seq);
-  await syncPageCount(copyId);
-  return c.json({ notebook: { id: copyId }, ...copied });
+const MAX_PUSH_PAIRS = 60;
+
+/**
+ * Push several templates into several classes in one request — the "Push to
+ * classes…" dialog. Pairs that already have a copy are skipped rather than
+ * refused, permission is checked once for the whole set of classes, and the
+ * plan's allowance is checked once for the whole set of new notebooks, so a
+ * push either fits or is refused before anything is made.
+ */
+app.post("/api/templates/push", handler(async (c) => {
+  const user = await requireTeacher(c);
+  const body = await c.req.json<{ templateIds?: string[]; classIds?: string[] }>();
+  const templateIds = [...new Set(body.templateIds ?? [])];
+  const classIds = [...new Set(body.classIds ?? [])];
+  if (!templateIds.length) throw new HttpError(400, "Which templates?");
+  if (!classIds.length) throw new HttpError(400, "Which classes?");
+  if (templateIds.length * classIds.length > MAX_PUSH_PAIRS) {
+    throw new HttpError(400, `That's more than ${MAX_PUSH_PAIRS} notebooks at once — push in smaller groups.`);
+  }
+
+  const tq = templateIds.map(() => "?").join(",");
+  const cq = classIds.map(() => "?").join(",");
+  const [templatesRes, classesRes, existingRes] = await db.batch([
+    db.prepare(`SELECT * FROM notebooks WHERE id IN (${tq}) AND kind = 'template' AND owner_id = ?`).bind(...templateIds, user.id),
+    db.prepare(
+      `SELECT c.id FROM classes c
+         LEFT JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.role = 'teacher' AND e.status = 'active'
+        WHERE c.id IN (${cq}) AND (c.owner_id = ? OR e.id IS NOT NULL)`,
+    ).bind(user.id, ...classIds, user.id),
+    db.prepare(`SELECT template_id, class_id FROM notebooks WHERE template_id IN (${tq}) AND class_id IN (${cq})`)
+      .bind(...templateIds, ...classIds),
+  ]);
+  const templates = (templatesRes.results ?? []) as any[];
+  if (templates.length !== templateIds.length) throw new HttpError(404, "Template not found");
+  if ((classesRes.results ?? []).length !== classIds.length) throw new HttpError(403, "You don't teach one of those classes");
+
+  const have = new Set(((existingRes.results ?? []) as any[]).map((r) => `${r.template_id}:${r.class_id}`));
+  const todo = templates.flatMap((t) => classIds.filter((cid) => !have.has(`${t.id}:${cid}`)).map((cid) => ({ t, cid })));
+  if (todo.length) await requireNotebookRoom(user, todo.length);
+
+  const made: { templateId: string; classId: string; notebookId: string }[] = [];
+  const skipped: { templateId: string; classId: string }[] = [];
+  const contents = new Map<string, TemplateContents>();
+  for (const { t, cid } of todo) {
+    if (!contents.has(t.id)) contents.set(t.id, await templateContents(t.id));
+    try {
+      const copy = await pushOne(t, contents.get(t.id)!, cid, user.id);
+      made.push({ templateId: t.id, classId: cid, notebookId: copy.id });
+    } catch (e) {
+      // Someone else's push got there between our check and our write.
+      if (e instanceof HttpError && e.status === 409) skipped.push({ templateId: t.id, classId: cid });
+      else throw e;
+    }
+  }
+  for (const key of have) {
+    const [templateId, classId] = key.split(":");
+    skipped.push({ templateId, classId });
+  }
+  return c.json({ made, skipped });
 }));
 
 /**
  * Add-only sync: anything in the template with no mirror in a copy is copied
  * across; everything else is left as the class has it. Copies that belong to
  * someone else (a co-teacher pushed it) are theirs to update.
+ *
+ * The template is read once for every copy, and each copy costs two reads and
+ * its batched writes — not a query per page per copy.
  */
 app.post("/api/templates/:id/sync", handler(async (c) => {
   const user = await requireTeacher(c);
@@ -283,21 +422,22 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
     .bind(template.id, user.id)
     .all<any>();
 
-  const templatePages = (await db
-    .prepare(`SELECT * FROM pages WHERE notebook_id = ? AND archived = 0 ORDER BY seq`)
-    .bind(template.id)
-    .all<any>()).results ?? [];
+  const contents = await templateContents(template.id);
+  const templatePages = contents.pages;
 
   let classes = 0;
   let pagesAdded = 0;
   let fieldsAdded = 0;
   for (const copy of copies.results ?? []) {
-    const copyPagesRows = (await db
-      .prepare(`SELECT id, seq, template_page_id FROM pages WHERE notebook_id = ? ORDER BY seq`)
-      .bind(copy.id)
-      .all<{ id: string; seq: number; template_page_id: string | null }>()).results ?? [];
+    const [pagesRes, fieldsRes] = await db.batch([
+      db.prepare(`SELECT id, seq, template_page_id FROM pages WHERE notebook_id = ? ORDER BY seq`).bind(copy.id),
+      db.prepare(`SELECT template_field_id FROM fields WHERE notebook_id = ? AND template_field_id IS NOT NULL`).bind(copy.id),
+    ]);
     const mirror = new Map<string, { id: string; seq: number }>();
-    for (const cp of copyPagesRows) if (cp.template_page_id) mirror.set(cp.template_page_id, { id: cp.id, seq: cp.seq });
+    for (const cp of (pagesRes.results ?? []) as { id: string; seq: number; template_page_id: string | null }[]) {
+      if (cp.template_page_id) mirror.set(cp.template_page_id, { id: cp.id, seq: cp.seq });
+    }
+    const mirroredFields = new Set(((fieldsRes.results ?? []) as { template_field_id: string }[]).map((r) => r.template_field_id));
 
     // New pages, each slotted between the copies of its template neighbours,
     // so the order the template has is the order the class gets.
@@ -316,39 +456,31 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
       mirror.set(tp.id, { id: "", seq });
       return seq;
     };
-    const copied = await copyPages(template, copy.id, missing, seqFor);
+    const copied = await copyPages(contents, copy.id, missing, seqFor);
     pagesAdded += copied.pages;
     fieldsAdded += copied.fields;
 
-    // New boxes on pages the class already has.
-    const mirroredFields = new Set(
-      ((await db
-        .prepare(`SELECT template_field_id FROM fields WHERE notebook_id = ? AND template_field_id IS NOT NULL`)
-        .bind(copy.id)
-        .all<{ template_field_id: string }>()).results ?? []).map((r) => r.template_field_id),
-    );
-    // Re-read the mirror now that the new pages exist, so a box on a page
-    // added a moment ago isn't copied a second time.
-    const freshMirror = new Map<string, string>();
-    for (const cp of (await db
-      .prepare(`SELECT id, template_page_id FROM pages WHERE notebook_id = ? AND template_page_id IS NOT NULL`)
-      .bind(copy.id)
-      .all<{ id: string; template_page_id: string }>()).results ?? []) {
-      freshMirror.set(cp.template_page_id, cp.id);
-    }
-    const templateFields = (await db
-      .prepare(`SELECT f.* FROM fields f JOIN pages p ON p.id = f.page_id WHERE f.notebook_id = ? AND f.archived = 0 AND p.archived = 0`)
-      .bind(template.id)
-      .all<any>()).results ?? [];
-    for (const tf of templateFields) {
-      if (mirroredFields.has(tf.id)) continue;
-      const pageId = freshMirror.get(tf.page_id);
+    // New boxes on pages the class already had. Boxes on the pages just added
+    // came across with them, so those pages are left out here.
+    const boxes: Promise<D1PreparedStatement>[] = [];
+    const limit = limiter(6);
+    for (const tf of contents.fields) {
+      if (mirroredFields.has(tf.id) || copied.pageIds.has(tf.page_id)) continue;
+      const pageId = mirror.get(tf.page_id)?.id;
       if (!pageId) continue;
-      fieldsAdded += await copyField(copy.id, pageId, tf);
+      boxes.push(fieldInsert(copy.id, pageId, tf, limit));
     }
+    const boxStatements = await Promise.all(boxes);
+    fieldsAdded += boxStatements.length;
 
-    await syncPageCount(copy.id);
-    await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), copy.id).run();
+    await runBatched([
+      ...boxStatements,
+      db.prepare(
+        `UPDATE notebooks SET updated_at = ?,
+                page_count = (SELECT COUNT(*) FROM pages WHERE notebook_id = ? AND archived = 0)
+          WHERE id = ?`,
+      ).bind(now(), copy.id, copy.id),
+    ]);
     classes++;
   }
   return c.json({ classes, pagesAdded, fieldsAdded });

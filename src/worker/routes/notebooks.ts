@@ -1,6 +1,6 @@
 import { app, db, storage } from "../platform";
 import {
-  handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+  handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { sanitizeRichText } from "../lib/richtext";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import type { LibraryField } from "../lib/page-library";
@@ -214,13 +214,15 @@ export async function seqWindow(notebookId: string, insertAfterPageId: string | 
 
 /** Keep `notebooks.page_count` in step after pages are added or removed. */
 export async function syncPageCount(notebookId: string) {
-  const count = await db
-    .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 0`)
-    .bind(notebookId)
-    .first<{ n: number }>();
+  // One statement rather than a read then a write: one round trip, and no
+  // window for another edit to land between the count and the update.
   await db
-    .prepare(`UPDATE notebooks SET page_count = ?, updated_at = ? WHERE id = ?`)
-    .bind(count?.n ?? 0, now(), notebookId)
+    .prepare(
+      `UPDATE notebooks SET updated_at = ?,
+              page_count = (SELECT COUNT(*) FROM pages WHERE notebook_id = ? AND archived = 0)
+        WHERE id = ?`,
+    )
+    .bind(now(), notebookId, notebookId)
     .run();
 }
 
@@ -241,20 +243,19 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
 
   const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, body.pages?.length ?? 1);
 
+  // A hundred-page PDF is a hundred rows; they go in batches, not one by one.
   const created: string[] = [];
-  let i = 1;
-  for (const p of body.pages ?? []) {
+  const inserts = (body.pages ?? []).map((p, k) => {
     const id = uid();
-    await db
+    created.push(id);
+    return db
       .prepare(
         `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, group_name, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(id, nb.id, start + step * i, assetKey, p.sourceIndex, p.width, p.height, groupName, now())
-      .run();
-    created.push(id);
-    i++;
-  }
+      .bind(id, nb.id, start + step * (k + 1), assetKey, p.sourceIndex, p.width, p.height, groupName, now());
+  });
+  for (const part of chunked(inserts, 80)) await db.batch(part);
   await syncPageCount(nb.id);
   return c.json({ created });
 }));
@@ -308,17 +309,18 @@ app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
   const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, count);
 
   const created: string[] = [];
+  const inserts: D1PreparedStatement[] = [];
   for (let i = 1; i <= count; i++) {
     const id = uid();
-    await db
-      .prepare(
+    inserts.push(
+      db.prepare(
         `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, pattern, pattern_color, group_name, created_at)
          VALUES (?, ?, ?, '', -1, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(id, nb.id, start + step * i, width, height, pattern, color, groupName, now())
-      .run();
+      ).bind(id, nb.id, start + step * i, width, height, pattern, color, groupName, now()),
+    );
     created.push(id);
   }
+  await db.batch(inserts);
   await syncPageCount(nb.id);
   return c.json({ created });
 }));
@@ -556,34 +558,26 @@ app.post("/api/notebooks/:id/pages/bulk", handler(async (c) => {
     return c.json({ ok: true, updated: pageIds.length, ...result });
   }
 
-  for (const pid of pageIds) {
-    const owned = await db
-      .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
-      .bind(pid, nb.id)
-      .first();
-    if (!owned) continue;
-    if (action === "group") {
-      await db.prepare(`UPDATE pages SET group_name = ? WHERE id = ?`).bind(groupName ?? "", pid).run();
-    } else if (action === "ungroup") {
-      await db.prepare(`UPDATE pages SET group_name = '' WHERE id = ?`).bind(pid).run();
-    } else if (action === "archive" || action === "restore") {
-      await db.prepare(`UPDATE pages SET archived = ? WHERE id = ?`).bind(action === "archive" ? 1 : 0, pid).run();
-    } else if (action === "open-to-teacher" || action === "close-to-teacher") {
-      await db
-        .prepare(`UPDATE pages SET teacher_annotate = ? WHERE id = ?`)
-        .bind(action === "open-to-teacher" ? 1 : 0, pid)
-        .run();
-    }
-  }
-
-  const count = await db
-    .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 0`)
-    .bind(nb.id)
-    .first<{ n: number }>();
-  await db
-    .prepare(`UPDATE notebooks SET page_count = ?, updated_at = ? WHERE id = ?`)
-    .bind(count?.n ?? 0, now(), nb.id)
-    .run();
+  // One UPDATE per chunk of pages, scoped to this notebook in its WHERE clause
+  // — a page id from anywhere else matches nothing — then the count, all in
+  // one batch. It was a check and an update per page.
+  const [column, value] =
+    action === "group" ? ["group_name", groupName ?? ""]
+    : action === "ungroup" ? ["group_name", ""]
+    : action === "archive" || action === "restore" ? ["archived", action === "archive" ? 1 : 0]
+    : action === "open-to-teacher" || action === "close-to-teacher" ? ["teacher_annotate", action === "open-to-teacher" ? 1 : 0]
+    : [null, null];
+  if (!column) throw new HttpError(400, "Unknown action");
+  await db.batch([
+    ...chunked(pageIds).map((ids) =>
+      db.prepare(`UPDATE pages SET ${column} = ? WHERE notebook_id = ? AND id IN (${holes(ids)})`)
+        .bind(value, nb.id, ...ids)),
+    db.prepare(
+      `UPDATE notebooks SET updated_at = ?,
+              page_count = (SELECT COUNT(*) FROM pages WHERE notebook_id = ? AND archived = 0)
+        WHERE id = ?`,
+    ).bind(now(), nb.id, nb.id),
+  ]);
   return c.json({ ok: true, updated: pageIds.length });
 }));
 
@@ -597,69 +591,80 @@ app.post("/api/notebooks/:id/pages/bulk", handler(async (c) => {
  * response reports what it touched for an honest confirmation message.
  */
 async function deletePages(notebookId: string, pageIds: string[]) {
-  let removedFromAssignments = 0;
-  for (const pid of pageIds) {
-    const owned = await db
-      .prepare(`SELECT id FROM pages WHERE id = ? AND notebook_id = ?`)
-      .bind(pid, notebookId)
-      .first();
-    if (!owned) continue;
-
-    // Student answers hang off fields, so they go before the fields themselves.
-    await db
-      .prepare(`DELETE FROM field_values WHERE field_id IN (SELECT id FROM fields WHERE page_id = ?)`)
-      .bind(pid)
-      .run();
-    await db.prepare(`DELETE FROM fields WHERE page_id = ?`).bind(pid).run();
-
-    /*
-     * Ink lives in R2 and the row is the only record of its key, so the objects
-     * go first. If that fails the rows survive and the delete can be retried;
-     * the other order would strand the objects with no way left to name them.
-     */
-    const doomed = await db
-      .prepare(
+  const chunks = chunked(pageIds);
+  // Which of these pages are really this notebook's, and the ink on them —
+  // one round trip however many pages were picked.
+  const reads = await db.batch([
+    ...chunks.map((ids) =>
+      db.prepare(`SELECT id FROM pages WHERE notebook_id = ? AND id IN (${holes(ids)})`).bind(notebookId, ...ids)),
+    ...chunks.map((ids) =>
+      db.prepare(
         `SELECT i.notebook_id, l.instance_id, l.page_id, l.kind FROM layers l
-           JOIN instances i ON i.id = l.instance_id WHERE l.page_id = ?`,
-      )
-      .bind(pid)
-      .all<{ notebook_id: string; instance_id: string; page_id: string; kind: string }>();
-    await deleteInk(
-      (doomed.results ?? []).map((r) => inkKey(r.notebook_id, r.instance_id, r.page_id, r.kind)),
-    );
-    await db
-      .prepare(`DELETE FROM layer_chunks WHERE layer_id IN (SELECT id FROM layers WHERE page_id = ?)`)
-      .bind(pid)
-      .run();
-    await db.prepare(`DELETE FROM layers WHERE page_id = ?`).bind(pid).run();
-    await db.prepare(`DELETE FROM pages WHERE id = ?`).bind(pid).run();
+           JOIN instances i ON i.id = l.instance_id
+           JOIN pages p ON p.id = l.page_id AND p.notebook_id = ?
+          WHERE l.page_id IN (${holes(ids)})`,
+      ).bind(notebookId, ...ids)),
+    db.prepare(`SELECT id, page_ids FROM assignments WHERE notebook_id = ?`).bind(notebookId),
+  ]);
+  const owned = reads.slice(0, chunks.length).flatMap((r) => ((r.results ?? []) as { id: string }[]).map((p) => p.id));
+  const doomed = reads.slice(chunks.length, chunks.length * 2)
+    .flatMap((r) => (r.results ?? []) as { notebook_id: string; instance_id: string; page_id: string; kind: string }[]);
+  const assignments = (reads[reads.length - 1].results ?? []) as { id: string; page_ids: string }[];
+  if (owned.length === 0) return { removedFromAssignments: 0 };
 
-    // Drop the page from any assignment scope that referenced it.
-    const affected = await db
-      .prepare(`SELECT id, page_ids FROM assignments WHERE notebook_id = ? AND page_ids LIKE ?`)
-      .bind(notebookId, `%"${pid}"%`)
-      .all<{ id: string; page_ids: string }>();
-    for (const a of affected.results ?? []) {
-      const remaining = (JSON.parse(a.page_ids || "[]") as string[]).filter((x) => x !== pid);
-      await db
-        .prepare(`UPDATE assignments SET page_ids = ?, updated_at = ? WHERE id = ?`)
-        .bind(JSON.stringify(remaining), now(), a.id)
-        .run();
-      removedFromAssignments++;
-    }
+  /*
+   * Ink lives in R2 and the row is the only record of its key, so the objects
+   * go first. If that fails the rows survive and the delete can be retried;
+   * the other order would strand the objects with no way left to name them.
+   */
+  await deleteInk(doomed.map((r) => inkKey(r.notebook_id, r.instance_id, r.page_id, r.kind)));
+
+  // Every row that hangs off these pages, then the pages, in one batch.
+  // Student answers hang off fields, so they go before the fields themselves.
+  const statements: D1PreparedStatement[] = [];
+  for (const ids of chunked(owned)) {
+    const list = holes(ids);
+    statements.push(
+      db.prepare(`DELETE FROM field_values WHERE field_id IN (SELECT id FROM fields WHERE page_id IN (${list}))`).bind(...ids),
+      db.prepare(`DELETE FROM fields WHERE page_id IN (${list})`).bind(...ids),
+      db.prepare(`DELETE FROM layer_chunks WHERE layer_id IN (SELECT id FROM layers WHERE page_id IN (${list}))`).bind(...ids),
+      db.prepare(`DELETE FROM layers WHERE page_id IN (${list})`).bind(...ids),
+      db.prepare(`DELETE FROM pages WHERE id IN (${list})`).bind(...ids),
+    );
   }
 
-  const count = await db
-    .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 0`)
-    .bind(notebookId)
-    .first<{ n: number }>();
-  await db
-    .prepare(`UPDATE notebooks SET page_count = ?, updated_at = ? WHERE id = ?`)
-    .bind(count?.n ?? 0, now(), notebookId)
-    .run();
+  // Drop the pages from any assignment scope that referenced them.
+  const gone = new Set(owned);
+  let removedFromAssignments = 0;
+  for (const a of assignments) {
+    const before = JSON.parse(a.page_ids || "[]") as string[];
+    const remaining = before.filter((x) => !gone.has(x));
+    if (remaining.length === before.length) continue;
+    statements.push(
+      db.prepare(`UPDATE assignments SET page_ids = ?, updated_at = ? WHERE id = ?`)
+        .bind(JSON.stringify(remaining), now(), a.id),
+    );
+    removedFromAssignments++;
+  }
 
+  statements.push(
+    db.prepare(
+      `UPDATE notebooks SET updated_at = ?,
+              page_count = (SELECT COUNT(*) FROM pages WHERE notebook_id = ? AND archived = 0)
+        WHERE id = ?`,
+    ).bind(now(), notebookId, notebookId),
+  );
+  for (let k = 0; k < statements.length; k += 80) await db.batch(statements.slice(k, k + 80));
   return { removedFromAssignments };
 }
+
+/** D1 binds at most 100 values per statement; page lists are sent in pieces well under that. */
+function chunked<T>(items: T[], size = 90): T[][] {
+  const out: T[][] = [];
+  for (let k = 0; k < items.length; k += size) out.push(items.slice(k, k + size));
+  return out;
+}
+const holes = (ids: unknown[]) => ids.map(() => "?").join(",");
 
 app.delete("/api/notebooks/:id/pages/:pageId", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
@@ -704,10 +709,14 @@ app.get("/api/notebooks/:id/assignments", handler(async (c) => {
   const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
   const rows = await db
     .prepare(
-      `SELECT id, title, page_ids, due_at, release_at, grading, points_max, status, created_at
-         FROM assignments
-        WHERE notebook_id = ? ${isTeacher ? "" : "AND status = 'active'"}
-        ORDER BY COALESCE(due_at, created_at) DESC`,
+      `SELECT a.id, a.title, a.page_ids, a.due_at, a.release_at, a.grading, a.points_max, a.status, a.created_at
+              ${isTeacher ? `,
+              (SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_submitted,
+              (SELECT SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_returned,
+              (SELECT COUNT(*) FROM submissions WHERE assignment_id = a.id) AS s_total` : ""}
+         FROM assignments a
+        WHERE a.notebook_id = ? ${isTeacher ? "" : "AND a.status = 'active'"}
+        ORDER BY COALESCE(a.due_at, a.created_at) DESC`,
     )
     .bind(nb.id)
     .all<any>();
@@ -715,17 +724,7 @@ app.get("/api/notebooks/:id/assignments", handler(async (c) => {
   const assignments = [];
   for (const a of rows.results ?? []) {
     const pageIds: string[] = JSON.parse(a.page_ids || "[]");
-    const counts = isTeacher
-      ? await db
-          .prepare(
-            `SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS submitted,
-                    SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS returned,
-                    COUNT(*) AS total
-               FROM submissions WHERE assignment_id = ?`,
-          )
-          .bind(a.id)
-          .first<any>()
-      : null;
+    const counts = isTeacher ? { submitted: a.s_submitted, returned: a.s_returned, total: a.s_total } : null;
     assignments.push({
       id: a.id, title: a.title, pageIds, pageCount: pageIds.length,
       dueAt: a.due_at, releaseAt: a.release_at, grading: a.grading,
@@ -1130,55 +1129,40 @@ app.post("/api/notebooks/:id/discard-drafts", handler(async (c) => {
 app.post("/api/notebooks/:id/publish", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
 
-  const since = nb.last_published_at;
-  const summary = since
-    ? {
-        pagesAdded: (await db
-          .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND created_at > ?`)
-          .bind(nb.id, since).first<{ n: number }>())?.n ?? 0,
-        pagesArchived: (await db
-          .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 1`)
-          .bind(nb.id).first<{ n: number }>())?.n ?? 0,
-        fieldsChanged: (await db
-          .prepare(`SELECT COUNT(*) AS n FROM fields WHERE notebook_id = ? AND updated_at > ?`)
-          .bind(nb.id, since).first<{ n: number }>())?.n ?? 0,
-      }
+  const since = nb.last_published_at ?? "";
+  const stamp = now();
+  /*
+   * One batch. The counts are read before anything changes; drafts are
+   * promoted; every active student without a copy gets one in a single
+   * INSERT … SELECT (OR IGNORE settles a student who opened it a moment ago);
+   * and the notebook is marked published. It was a query and an insert per
+   * student — sixty round trips for a class of thirty.
+   */
+  const [counts, , provisionedRes] = await db.batch([
+    db.prepare(
+      `SELECT (SELECT COUNT(*) FROM pages WHERE notebook_id = ?1 AND created_at > ?2) AS pages_added,
+              (SELECT COUNT(*) FROM pages WHERE notebook_id = ?1 AND archived = 1) AS pages_archived,
+              (SELECT COUNT(*) FROM fields WHERE notebook_id = ?1 AND updated_at > ?2) AS fields_changed,
+              (SELECT COUNT(*) FROM page_annotations WHERE notebook_id = ?1 AND draft_data <> published_data) AS annotations`,
+    ).bind(nb.id, since),
+    // Promote annotation drafts so they reach students with this update.
+    db.prepare(`UPDATE page_annotations SET published_data = draft_data, published_at = ? WHERE notebook_id = ?`)
+      .bind(stamp, nb.id),
+    db.prepare(
+      `INSERT OR IGNORE INTO instances (id, notebook_id, class_id, student_id, created_at)
+       SELECT ${SQL_UUID}, ?, ?, e.user_id, ?
+         FROM enrollments e
+        WHERE e.class_id = ? AND e.role = 'student' AND e.status = 'active'`,
+    ).bind(nb.id, nb.class_id, stamp, nb.class_id),
+    db.prepare(`UPDATE notebooks SET status = 'published', last_published_at = ?, updated_at = ? WHERE id = ?`)
+      .bind(stamp, stamp, nb.id),
+  ]);
+  const n = (counts.results?.[0] ?? {}) as { pages_added: number; pages_archived: number; fields_changed: number; annotations: number };
+  const summary = nb.last_published_at
+    ? { pagesAdded: n.pages_added ?? 0, pagesArchived: n.pages_archived ?? 0, fieldsChanged: n.fields_changed ?? 0 }
     : null;
-
-  // Promote annotation drafts so they reach students with this update.
-  const pendingAnnotations = await db
-    .prepare(`SELECT COUNT(*) AS n FROM page_annotations WHERE notebook_id = ? AND draft_data <> published_data`)
-    .bind(nb.id)
-    .first<{ n: number }>();
-  await db
-    .prepare(`UPDATE page_annotations SET published_data = draft_data, published_at = ? WHERE notebook_id = ?`)
-    .bind(now(), nb.id)
-    .run();
-
-  const students = await db
-    .prepare(`SELECT user_id FROM enrollments WHERE class_id = ? AND role = 'student' AND status = 'active'`)
-    .bind(nb.class_id)
-    .all<{ user_id: string }>();
-
-  let provisioned = 0;
-  for (const s of students.results ?? []) {
-    const exists = await db
-      .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
-      .bind(nb.id, s.user_id)
-      .first();
-    if (!exists) {
-      await db
-        .prepare(`INSERT INTO instances (id, notebook_id, class_id, student_id, created_at) VALUES (?, ?, ?, ?, ?)`)
-        .bind(uid(), nb.id, nb.class_id, s.user_id, now())
-        .run();
-      provisioned++;
-    }
-  }
-
-  await db
-    .prepare(`UPDATE notebooks SET status = 'published', last_published_at = ?, updated_at = ? WHERE id = ?`)
-    .bind(now(), now(), nb.id)
-    .run();
+  const provisioned = provisionedRes.meta?.changes ?? 0;
+  const pendingAnnotations = { n: n.annotations ?? 0 };
 
   return c.json({ ok: true, provisioned, summary, annotationsPublished: pendingAnnotations?.n ?? 0 });
 }));
@@ -1205,16 +1189,20 @@ app.get("/api/my/notebooks", handler(async (c) => {
 
 /** Create the pages a template describes, in one go. */
 export async function fillFromTemplate(notebookId: string, pages: number, pattern: string, color: string) {
-  for (let i = 1; i <= pages; i++) {
-    await db
-      .prepare(
-        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, pattern, pattern_color, created_at)
-         VALUES (?, ?, ?, '', -1, 612, 792, ?, ?, ?)`,
-      )
-      .bind(uid(), notebookId, i, pattern, color, now())
-      .run();
-  }
-  await syncPageCount(notebookId);
+  // One statement for every page, numbered by a counting CTE, then the count —
+  // a single batch where a two-hundred-page template was two hundred inserts.
+  await db.batch([
+    db.prepare(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+       INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, pattern, pattern_color, created_at)
+       SELECT ${SQL_UUID}, ?, i, '', -1, 612, 792, ?, ?, ? FROM n`,
+    ).bind(pages, notebookId, pattern, color, now()),
+    db.prepare(
+      `UPDATE notebooks SET updated_at = ?,
+              page_count = (SELECT COUNT(*) FROM pages WHERE notebook_id = ? AND archived = 0)
+        WHERE id = ?`,
+    ).bind(now(), notebookId, notebookId),
+  ]);
 }
 
 /** The catalog, so the client never hard-codes a second copy of it. */

@@ -25,6 +25,8 @@ export interface RequestScope {
   ctx: ExecutionContext;
   /** The database this request works against — the shard, once sharded. */
   db: D1Database;
+  /** Database round trips so far; reported on the response as Server-Timing. */
+  trips?: number;
 }
 
 const store = new AsyncLocalStorage<RequestScope>();

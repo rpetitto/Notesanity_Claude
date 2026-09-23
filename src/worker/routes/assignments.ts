@@ -1,6 +1,6 @@
 import { app, db } from "../platform";
 import {
-  handler, now, uid, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+  handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { logActivity } from "../lib/activity";
 import { HAS_INK_BYTES } from "../lib/ink";
 
@@ -86,14 +86,22 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
   const { user, isTeacher } = await requireClassMember(c, classId);
   const rows = await db
     .prepare(
+      // The roster's progress (for a teacher) or the caller's own row (for a
+      // student) comes back with each assignment, not as a query per row.
       `SELECT a.*, n.title AS notebook_title, n.accent_color AS notebook_color,
-              n.cover_key IS NOT NULL AS notebook_has_cover
+              n.cover_key IS NOT NULL AS notebook_has_cover,
+              ${isTeacher ? `(SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_submitted,
+              (SELECT SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_returned,
+              (SELECT SUM(CASE WHEN graded_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_graded,
+              (SELECT COUNT(*) FROM submissions WHERE assignment_id = a.id) AS s_total` : `ms.status AS my_status, ms.grade_points AS my_points, ms.grade_letter AS my_letter,
+              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at`}
          FROM assignments a
          JOIN notebooks n ON n.id = a.notebook_id
+         ${isTeacher ? "" : "LEFT JOIN submissions ms ON ms.assignment_id = a.id AND ms.student_id = ?"}
         WHERE a.class_id = ? ${isTeacher ? "" : "AND a.status = 'active' AND n.status = 'published' AND (a.release_at IS NULL OR a.release_at <= datetime('now'))"}
         ORDER BY COALESCE(a.due_at, a.created_at) DESC`,
     )
-    .bind(classId)
+    .bind(...(isTeacher ? [classId] : [user.id, classId]))
     .all<any>();
 
   const assignments = [];
@@ -106,32 +114,18 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
       grading: a.grading, pointsMax: a.points_max, status: a.status,
     };
     if (isTeacher) {
-      const counts = await db
-        .prepare(
-          `SELECT
-             SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS submitted,
-             SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS returned,
-             COUNT(*) AS total
-           FROM submissions WHERE assignment_id = ?`,
-        )
-        .bind(a.id)
-        .first<any>();
       assignments.push({
         ...base,
-        submitted: counts?.submitted ?? 0, returned: counts?.returned ?? 0, total: counts?.total ?? 0,
+        submitted: a.s_submitted ?? 0, returned: a.s_returned ?? 0, total: a.s_total ?? 0,
         googleCourseworkId: a.google_coursework_id ?? null,
         googleCourseworkLink: a.google_coursework_link ?? null,
       });
     } else {
-      const sub = await db
-        .prepare(`SELECT status, grade_points, grade_letter, grade_complete, feedback, returned_at FROM submissions WHERE assignment_id = ? AND student_id = ?`)
-        .bind(a.id, user.id)
-        .first<any>();
       assignments.push({
         ...base,
-        myStatus: sub?.status ?? "not_started",
-        grade: sub?.returned_at
-          ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete, feedback: sub.feedback }
+        myStatus: a.my_status ?? "not_started",
+        grade: a.my_returned_at
+          ? { points: a.my_points, letter: a.my_letter, complete: a.my_complete, feedback: a.my_feedback }
           : null,
       });
     }
@@ -196,24 +190,23 @@ async function requirePublishedNotebook(notebookId: string) {
   }
 }
 
-/** Create a submission row for every active student, so the dashboard is complete from the start. */
+/**
+ * Create a submission row for every active student, so the dashboard is
+ * complete from the start. One statement for the whole roster; OR IGNORE
+ * leaves the rows students already have — including their work's status —
+ * exactly as they are, and settles two of these running at once.
+ */
 async function ensureSubmissions(assignmentId: string, classId: string) {
-  const students = await db
-    .prepare(`SELECT user_id FROM enrollments WHERE class_id = ? AND role = 'student' AND status = 'active'`)
-    .bind(classId)
-    .all<{ user_id: string }>();
-  for (const s of students.results ?? []) {
-    const exists = await db
-      .prepare(`SELECT id FROM submissions WHERE assignment_id = ? AND student_id = ?`)
-      .bind(assignmentId, s.user_id)
-      .first();
-    if (!exists) {
-      await db
-        .prepare(`INSERT INTO submissions (id, assignment_id, student_id, status, created_at, updated_at) VALUES (?, ?, ?, 'not_started', ?, ?)`)
-        .bind(uid(), assignmentId, s.user_id, now(), now())
-        .run();
-    }
-  }
+  const stamp = now();
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO submissions (id, assignment_id, student_id, status, created_at, updated_at)
+       SELECT ${SQL_UUID}, ?, e.user_id, 'not_started', ?, ?
+         FROM enrollments e
+        WHERE e.class_id = ? AND e.role = 'student' AND e.status = 'active'`,
+    )
+    .bind(assignmentId, stamp, stamp, classId)
+    .run();
 }
 
 app.patch("/api/assignments/:id", handler(async (c) => {
@@ -836,7 +829,11 @@ app.get("/api/my/teaching", handler(async (c) => {
     .prepare(
       `SELECT a.*, c.name AS class_name, c.accent_color, c.emoji AS class_emoji,
               n.title AS notebook_title, n.accent_color AS notebook_color,
-              n.cover_key IS NOT NULL AS notebook_has_cover
+              n.cover_key IS NOT NULL AS notebook_has_cover,
+              (SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_submitted,
+              (SELECT SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_returned,
+              (SELECT SUM(CASE WHEN graded_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_graded,
+              (SELECT COUNT(*) FROM submissions WHERE assignment_id = a.id) AS s_total
          FROM assignments a
          JOIN classes c ON c.id = a.class_id
          JOIN notebooks n ON n.id = a.notebook_id
@@ -849,16 +846,7 @@ app.get("/api/my/teaching", handler(async (c) => {
 
   const assignments = [];
   for (const a of rows.results ?? []) {
-    const counts = await db
-      .prepare(
-        `SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS submitted,
-                SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS returned,
-                SUM(CASE WHEN graded_at IS NOT NULL THEN 1 ELSE 0 END) AS graded,
-                COUNT(*) AS total
-           FROM submissions WHERE assignment_id = ?`,
-      )
-      .bind(a.id)
-      .first<any>();
+    const counts = { submitted: a.s_submitted, returned: a.s_returned, graded: a.s_graded, total: a.s_total };
     assignments.push({
       id: a.id, title: a.title, classId: a.class_id, className: a.class_name,
       accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
@@ -882,11 +870,14 @@ app.get("/api/my/assignments", handler(async (c) => {
   const rows = await db
     .prepare(
       `SELECT a.*, c.name AS class_name, c.accent_color, c.emoji AS class_emoji,
-              n.title AS notebook_title, n.accent_color AS notebook_color
+              n.title AS notebook_title, n.accent_color AS notebook_color,
+              ms.status AS my_status, ms.grade_points AS my_points, ms.grade_letter AS my_letter,
+              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at
          FROM assignments a
          JOIN classes c ON c.id = a.class_id
          JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active' AND e.role = 'student'
          JOIN notebooks n ON n.id = a.notebook_id
+         LEFT JOIN submissions ms ON ms.assignment_id = a.id AND ms.student_id = e.user_id
         WHERE a.status = 'active' AND n.status = 'published'
           AND (a.release_at IS NULL OR a.release_at <= datetime('now')) AND c.archived = 0
         ORDER BY COALESCE(a.due_at, a.created_at)`,
@@ -896,10 +887,10 @@ app.get("/api/my/assignments", handler(async (c) => {
 
   const out = [];
   for (const a of rows.results ?? []) {
-    const sub = await db
-      .prepare(`SELECT status, returned_at, grade_points, grade_letter, grade_complete FROM submissions WHERE assignment_id = ? AND student_id = ?`)
-      .bind(a.id, user.id)
-      .first<any>();
+    const sub = a.my_status == null && a.my_returned_at == null ? null : {
+      status: a.my_status, returned_at: a.my_returned_at,
+      grade_points: a.my_points, grade_letter: a.my_letter, grade_complete: a.my_complete,
+    };
     const pageIds: string[] = JSON.parse(a.page_ids || "[]");
     out.push({
       id: a.id, title: a.title, classId: a.class_id, className: a.class_name,

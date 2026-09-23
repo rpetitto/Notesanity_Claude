@@ -62,7 +62,10 @@ export async function runMigrations(): Promise<{ applied: string[] }> {
   const applied: string[] = [];
   for (const m of pending) {
     await m.handler();
-    await db.prepare(`INSERT INTO _migrations (name) VALUES (?)`).bind(m.name).run();
+    // OR IGNORE: after a deploy, several cold starts can find the same migration
+    // pending at once. Each runs it (every migration from here on must be safe
+    // to run twice), and whichever records it second must not fail its request.
+    await db.prepare(`INSERT OR IGNORE INTO _migrations (name) VALUES (?)`).bind(m.name).run();
     applied.push(m.name);
   }
 

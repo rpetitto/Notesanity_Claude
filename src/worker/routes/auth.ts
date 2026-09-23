@@ -119,7 +119,30 @@ export async function localSessionUserId(c: Context): Promise<string | null> {
   return row.user_id;
 }
 
-setLocalSessionResolver(localSessionUserId);
+/**
+ * The user behind a local session cookie, in one query: the session and its
+ * user joined, rather than one lookup for the session and another for the
+ * person. Every signed-in request starts here, so it is the cheapest place in
+ * the app to save a round trip.
+ */
+async function localSessionUser(c: Context) {
+  const raw = c.req.header("Cookie") ?? "";
+  const match = raw.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+  if (!match) return null;
+  const row = await db
+    .prepare(`SELECT u.*, s.expires_at AS session_expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`)
+    .bind(match[1])
+    .first<any>();
+  if (!row) return null;
+  if (new Date(row.session_expires_at).getTime() < Date.now()) {
+    await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(match[1]).run();
+    return null;
+  }
+  delete row.session_expires_at;
+  return row;
+}
+
+setLocalSessionResolver(localSessionUser);
 
 const normalize = (e: string) => (e ?? "").trim().toLowerCase();
 const domainOf = (e: string) => e.split("@")[1] ?? "";

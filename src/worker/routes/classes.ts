@@ -1,6 +1,6 @@
 import { app, db, storage } from "../platform";
 import {
-  handler, now, uid, requireUser, requireTeacher, requireClassTeacher, requireClassMember, findUserInOrg, HttpError, param,} from "../lib/session";
+  handler, now, uid, SQL_UUID, requireUser, requireTeacher, requireClassTeacher, requireClassMember, findUserInOrg, HttpError, param,} from "../lib/session";
 import { queueMail } from "../lib/mailqueue";
 import { HAS_INK_BYTES } from "../lib/ink";
 import { deleteNotebookCascade } from "./notebooks";
@@ -34,34 +34,31 @@ async function uniqueJoinCode(): Promise<string> {
  * flag the enrollment so the teacher gets the assignment-backfill prompt.
  */
 async function provisionForStudent(classId: string, studentId: string) {
-  // Only the teacher's own notebooks are pushed out. A student-made notebook
-  // lives in the class but is not part of it: nobody else gets a copy.
-  const notebooks = await db
-    .prepare(`SELECT id FROM notebooks WHERE class_id = ? AND status = 'published' AND kind = 'class' AND archived = 0`)
-    .bind(classId)
-    .all<{ id: string }>();
-  for (const nb of notebooks.results ?? []) {
-    const exists = await db
-      .prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`)
-      .bind(nb.id, studentId)
-      .first();
-    if (!exists) {
-      await db
-        .prepare(`INSERT INTO instances (id, notebook_id, class_id, student_id, created_at) VALUES (?, ?, ?, ?, ?)`)
-        .bind(uid(), nb.id, classId, studentId, now())
-        .run();
-    }
-  }
-  const anyAssignments = await db
-    .prepare(`SELECT id FROM assignments WHERE class_id = ? AND status = 'active' LIMIT 1`)
-    .bind(classId)
-    .first();
-  if (anyAssignments) {
-    await db
-      .prepare(`UPDATE enrollments SET backfill_pending = 1 WHERE class_id = ? AND user_id = ?`)
-      .bind(classId, studentId)
-      .run();
-  }
+  await db.batch(provisionStatements(classId, studentId));
+}
+
+/**
+ * The statements behind `provisionForStudent`, for a caller that sends them
+ * with its own writes. Only the teacher's own notebooks are pushed out. A
+ * student-made notebook lives in the class but is not part of it: nobody else
+ * gets a copy. Two statements whatever the number of notebooks — the first
+ * morning of a term is every student in the school joining at once.
+ */
+function provisionStatements(classId: string, studentId: string): D1PreparedStatement[] {
+  const stamp = now();
+  return [
+    db.prepare(
+      `INSERT OR IGNORE INTO instances (id, notebook_id, class_id, student_id, created_at)
+       SELECT ${SQL_UUID}, n.id, ?, ?, ?
+         FROM notebooks n
+        WHERE n.class_id = ? AND n.status = 'published' AND n.kind = 'class' AND n.archived = 0`,
+    ).bind(classId, studentId, stamp, classId),
+    db.prepare(
+      `UPDATE enrollments SET backfill_pending = 1
+        WHERE class_id = ? AND user_id = ?
+          AND EXISTS (SELECT 1 FROM assignments WHERE class_id = ? AND status = 'active')`,
+    ).bind(classId, studentId, classId),
+  ];
 }
 
 /** Classes I teach or am enrolled in, with student counts. */
@@ -389,21 +386,15 @@ app.post("/api/classes/join", handler(async (c) => {
   if (cls.org_id !== user.org_id) throw new HttpError(403, "That class belongs to another school");
   if (cls.owner_id === user.id) throw new HttpError(400, "You already teach this class");
 
-  const existing = await db
-    .prepare(`SELECT id, status FROM enrollments WHERE class_id = ? AND user_id = ?`)
-    .bind(cls.id, user.id)
-    .first<any>();
-  if (existing) {
-    if (existing.status !== "active") {
-      await db.prepare(`UPDATE enrollments SET status = 'active' WHERE id = ?`).bind(existing.id).run();
-    }
-  } else {
-    await db
-      .prepare(`INSERT INTO enrollments (id, class_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'student', 'active', ?)`)
-      .bind(uid(), cls.id, user.id, now())
-      .run();
-  }
-  await provisionForStudent(cls.id, user.id);
+  // Join (or rejoin) and get every published notebook, in one batch. An
+  // existing enrollment keeps its role and is only made active again.
+  await db.batch([
+    db.prepare(
+      `INSERT INTO enrollments (id, class_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'student', 'active', ?)
+       ON CONFLICT(class_id, user_id) DO UPDATE SET status = 'active'`,
+    ).bind(uid(), cls.id, user.id, now()),
+    ...provisionStatements(cls.id, user.id),
+  ]);
   return c.json({ class: { id: cls.id, name: cls.name } });
 }));
 
