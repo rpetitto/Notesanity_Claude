@@ -270,9 +270,10 @@ ${HERO_CSS}
       <p class="eyebrow">For teachers and their classes</p>
       <h1>Hand it out, hand it in.<br>Nothing printed.</h1>
       <p class="lede">
-        Paperless that doesn't make more work. Build a notebook from the worksheet you
-        already have, send it to your class, and grade it on the page they wrote on.
-        Keep Classroom, keep your files, keep your gradebook.
+        Paperless that doesn't make more work. Turn the handout you already have into a
+        digital notebook, hand every student their own copy, assign only the pages due
+        this week, and grade it without a stack to carry home. Keep your files, keep
+        your gradebook.
       </p>
       <p style="margin-top:28px;display:flex;gap:12px;flex-wrap:wrap">
         <a class="btn btn-primary" href="/?signin=1">Start free</a>
