@@ -33,7 +33,7 @@ const MAX_PAGES = 100;
  * notebook is a place to jot, and ten pages is enough to start without a wall
  * of empty ones to scroll past. Either can be changed before creating.
  */
-const defaultPages = (kind: "class" | "student" | "personal") => (kind === "student" ? 10 : 50);
+const defaultPages = (kind: "class" | "student" | "personal" | "template") => (kind === "student" ? 10 : 50);
 
 /** A sample of the paper, drawn with the code that paints the real page. */
 function Sample({ pattern, color, width = 58 }: { pattern: string; color: string; width?: number }) {
@@ -55,7 +55,8 @@ export default function NewNotebookModal({
   destination:
     | { kind: "class"; classId: string }
     | { kind: "personal" }
-    | { kind: "student"; classId: string };
+    | { kind: "student"; classId: string }
+    | { kind: "template" };
   onClose: () => void;
   onCreated: (notebookId: string) => void;
 }) {
@@ -74,6 +75,7 @@ export default function NewNotebookModal({
   const createUrl =
     destination.kind === "class" ? `/api/classes/${destination.classId}/notebooks/blank`
     : destination.kind === "student" ? `/api/classes/${destination.classId}/my-notebooks`
+    : destination.kind === "template" ? "/api/my/templates"
     : "/api/my/personal-notebooks";
 
   // Class notebooks and a student's class notebook are both uploaded from the

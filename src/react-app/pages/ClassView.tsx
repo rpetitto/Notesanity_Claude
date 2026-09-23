@@ -63,7 +63,7 @@ interface RosterRow {
   joined_at: string;
 }
 
-interface ClassNotebook {
+export interface ClassNotebook {
   id: string;
   title: string;
   status: "draft" | "published";
@@ -822,7 +822,7 @@ function DeleteClassModal({
   );
 }
 
-function NotebookCard({
+export function NotebookCard({
   nb, to, byline, menu,
 }: { nb: ClassNotebook; to: string; byline?: string; menu?: MenuItem[] }) {
   const accent = nb.accent_color || DEFAULT_ACCENT;

@@ -38,6 +38,17 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 23, 2026",
+    "A Notebooks tab with templates, documents straight into the library, and a presenting mode.",
+    [
+      ["new", "<b>Build a notebook once, use it in every class.</b> The new <b>Notebooks</b> tab lists everything you teach from, filtered by class \u2014 and holds <b>templates</b>: notebooks that belong to you rather than to a class. Push a template into any class you teach and it arrives as a draft, ready to publish there. Add pages or answer boxes to the template later and press <b>Send updates</b>: every class gets what's new. Nothing already in a class is changed \u2014 a page you renamed for one section, a box you moved, work students have done \u2014 only added to. A typo fixed in the template is fixed in the classes by hand, on purpose."],
+      ["new", "<b>Bring a document straight into your page library.</b> On the Library page, <b>Add pages</b> takes a PDF, Word or PowerPoint file (or one from Google Drive), shows you every page, and saves the ones you tick \u2014 the two worksheets you wanted, not the twelve pages of answer key behind them. No notebook needed in between."],
+      ["new", "<b>Present a notebook.</b> A <b>Present</b> button beside the zoom menu shows just the pages, full screen, for a projector or a screen share: one page at a time with the arrow keys, or the whole notebook scrolling. Your unsent writing is included, so what's on the wall is what you're looking at. Nothing done there is saved."],
+      ["better", "<b>More room for the page.</b> The tool row tucks away with the arrow at its right end (the tabs stay, and picking one brings it back), and the page list beside the page folds to a sliver with the arrow at its top. Both remember how you left them."],
+      ["better", "<b>A notebook opens on the Pages tab</b>, where every notebook starts, rather than on Answer boxes."],
+    ],
+  ],
+  [
     "September 21, 2026",
     "A tidier editor, Google Classroom assignments, spoken comments, saved phrases, read aloud, shapes, and blanks found on scans.",
     [

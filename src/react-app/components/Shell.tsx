@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, ClipboardList, Eye, GraduationCap, LayoutGrid, LibraryBig, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { BookOpen, BookText, ClipboardList, Eye, LayoutGrid, LibraryBig, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { signOutHref, useSession } from "../lib/session";
 import { api } from "../lib/api";
 import { cn, initials } from "../lib/utils";
@@ -82,6 +82,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
   const nav = user?.role === "teacher"
     ? [
         { to: "/classes", label: "Classes", icon: LayoutGrid },
+        { to: "/notebooks", label: "Notebooks", icon: BookText },
         { to: "/assignments", label: "Assignments", icon: ClipboardList },
         { to: "/library", label: "Library", icon: LibraryBig },
         { to: "/settings", label: "Settings", icon: Settings },
@@ -112,6 +113,8 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
                 key={to}
                 to={to}
                 data-tour={`nav-${to.slice(1)}`}
+                title={label}
+                aria-label={label}
                 className={cn(
                   "flex min-h-[44px] shrink-0 items-center gap-2 rounded-full border-[3px] px-4 font-display text-[16px] font-bold transition-colors",
                   pathname.startsWith(to)
@@ -120,18 +123,13 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
                 )}
               >
                 <Icon className="h-4 w-4" />
-                {label}
+                {/* Five items now; below `xl` the icons carry them and the word is the tooltip. */}
+                <span className="hidden xl:inline">{label}</span>
               </Link>
             ))}
           </nav>
 
           <div className="ml-auto flex shrink-0 items-center gap-3">
-            {user && (
-              <span className="label-caps hidden items-center gap-1.5 rounded-full border-2 border-pine/25 px-2.5 py-1 text-pine/70 lg:flex">
-                <GraduationCap className="h-3.5 w-3.5" />
-                {user.role === "teacher" ? "Teacher" : "Student"}
-              </span>
-            )}
             {user && <Avatar name={user.name} picture={user.picture} size={30} />}
             <a href={signOutHref} title="Sign out" className="flex h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8">
               <LogOut className="h-4 w-4" />

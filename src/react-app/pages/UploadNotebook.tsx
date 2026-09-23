@@ -22,7 +22,7 @@ export default function UploadNotebook() {
   const { classId = "" } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const state = location.state as { file?: File; mine?: boolean } | null;
+  const state = location.state as { file?: File; mine?: boolean; template?: boolean } | null;
   const incoming = state?.file;
   /**
    * A student's own notebook rather than a teacher's class notebook: the same
@@ -31,6 +31,8 @@ export default function UploadNotebook() {
    * the class page decides and this page only obeys.
    */
   const mine = !!state?.mine;
+  /** A template: the teacher's own, outside any class, pushed into classes later. */
+  const template = !!state?.template;
 
   const [file, setFile] = useState<File | null>(incoming ?? null);
   const [title, setTitle] = useState(incoming ? incoming.name.replace(/\.[^.]+$/, "") : "");
@@ -61,7 +63,8 @@ export default function UploadNotebook() {
       form.append("file", new File([pdf], source.name.replace(/\.[^.]+$/, ".pdf"), { type: "application/pdf" }));
       form.append("title", notebookTitle.trim() || source.name.replace(/\.[^.]+$/, ""));
       const created = await api.upload<{ notebook: { id: string; assetKey?: string } }>(
-        mine ? `/api/classes/${classId}/my-notebooks/upload` : `/api/classes/${classId}/notebooks`,
+        template ? "/api/my/templates/upload"
+          : mine ? `/api/classes/${classId}/my-notebooks/upload` : `/api/classes/${classId}/notebooks`,
         form,
       );
 
@@ -85,7 +88,7 @@ export default function UploadNotebook() {
       setPhase("idle");
       setError(err as Error);
     }
-  }, [classId, mine, navigate]);
+  }, [classId, mine, template, navigate]);
 
   // A file handed over from the class screen starts immediately.
   useEffect(() => {
@@ -170,7 +173,7 @@ export default function UploadNotebook() {
               type="button"
               variant="secondary"
               disabled={busy}
-              onClick={() => navigate(`/classes/${classId}`)}
+              onClick={() => navigate(template ? "/notebooks" : `/classes/${classId}`)}
             >
               Cancel
             </Button>

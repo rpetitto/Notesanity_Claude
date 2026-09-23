@@ -103,6 +103,28 @@ const BODY = () => `
          its own, so changing or deleting the original notebook doesn't touch it.`,
       ],
       [
+        "Can I use one notebook in several classes?",
+        `Yes \u2014 make it a <b>template</b>. On the <b>Notebooks</b> tab, <b>New template</b> builds a
+         notebook that belongs to you rather than to a class. Push it into any class you teach and it
+         arrives there as a draft for you to publish. When you add pages or answer boxes to the template
+         later, <b>Send updates</b> gives every class the new material. It only ever adds: a page you
+         changed in one class, or work students have done there, is never overwritten, and a change to
+         something already in the classes has to be made in each class.`,
+      ],
+      [
+        "Can I put a whole document into my page library?",
+        `Yes. On the Library page, <b>Add pages</b> takes a PDF, Word or PowerPoint file, or one from
+         Google Drive, shows you every page in it, and saves the ones you tick. Each becomes its own entry,
+         named after the file and its page number, which you can rename afterwards.`,
+      ],
+      [
+        "Can I show a notebook on the projector?",
+        `Press <b>Present</b>, next to the zoom menu in a notebook. It goes full screen with only the
+         pages showing \u2014 one at a time with the arrow keys, or the whole notebook scrolling \u2014 and
+         includes writing you haven't sent to students yet. Nothing you do while presenting is saved.
+         Escape brings the editor back.`,
+      ],
+      [
         "What blank paper is there?",
         `Lined (wide or college), graph, dot grid, music staves, engineering, isometric, a
          coordinate plane, or plain blank — in eight rule colors, and you choose how many

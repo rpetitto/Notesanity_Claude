@@ -8,13 +8,16 @@
  * — so this page is for keeping the library in order, not for using it.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, LibraryBig, Pencil, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, FolderOpen, LibraryBig, Loader2, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
-import { Button, Card, ConfirmModal, Input } from "../components/ui";
+import { Button, Card, ConfirmModal, Input, Label, Menu, Modal, buttonClass } from "../components/ui";
+import { convertToPdf, driveFileAsPdf, hasDrivePicker, hasGoogleClientId, needsConversion, pickDriveFile } from "../lib/google";
+import { readPageSizes, type PageSize } from "../lib/pdf";
+import { cn } from "../lib/utils";
 import { api, libraryPageSource, type LibraryPageRec } from "../lib/api";
 import { useSession } from "../lib/session";
 import { relativeTime } from "../lib/utils";
@@ -25,6 +28,20 @@ export default function PageLibrary() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [removing, setRemoving] = useState<LibraryPageRec | null>(null);
+  /** A document on its way in: picked, converted if it needs it, then its pages chosen. */
+  const [importing, setImporting] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const importFromDrive = async () => {
+    try {
+      const picked = await pickDriveFile();
+      if (!picked) return;
+      const blob = await driveFileAsPdf(picked);
+      setImporting(new File([blob], picked.name.replace(/\.[^.]+$/, "") + ".pdf", { type: "application/pdf" }));
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
 
   const library = useQuery({
     queryKey: ["page-library"],
@@ -66,11 +83,45 @@ export default function PageLibrary() {
 
   return (
     <Shell>
-      <h1 className="mb-2 font-display text-[32px] text-pine">Page library</h1>
+      <div className="mb-2 flex flex-wrap items-center gap-3">
+        <h1 className="font-display text-[32px] text-pine">Page library</h1>
+        <Menu
+          label="Add pages"
+          className="ml-auto"
+          triggerClassName={buttonClass("primary", "md")}
+          trigger={<><Plus className="h-5 w-5" strokeWidth={2.5} /> Add pages <ChevronDown className="h-4 w-4" strokeWidth={2.5} /></>}
+          items={[
+            {
+              label: "A file from this device",
+              icon: <Upload className="h-5 w-5" strokeWidth={2.5} />,
+              hint: "PDF, Word or PowerPoint — you choose which pages to keep",
+              onClick: () => fileRef.current?.click(),
+            },
+            ...(hasDrivePicker ? [{
+              label: "From Google Drive",
+              icon: <FolderOpen className="h-5 w-5" strokeWidth={2.5} />,
+              hint: "Pick a file without downloading it",
+              onClick: () => void importFromDrive(),
+            }] : []),
+          ]}
+        />
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".pdf,.docx,.doc,.pptx,.ppt,application/pdf"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) setImporting(f);
+          }}
+        />
+      </div>
       <p className="mb-6 measure text-[16px] text-pine/70">
-        Pages you've saved to reuse. Add one from any notebook's page list, then drop it into
-        another notebook with <span className="font-display font-bold text-pine">Add pages</span>{" "}
-        &rarr; <span className="font-display font-bold text-pine">Page library</span>.
+        Pages you've saved to reuse. Save one from any notebook's page list, or bring a document
+        straight in here and keep the pages you want. Drop any of them into a notebook from its{" "}
+        <span className="font-display font-bold text-pine">Pages</span> tab &rarr;{" "}
+        <span className="font-display font-bold text-pine">Library</span>.
       </p>
 
       {library.isLoading && <Spinner label="Loading your library…" />}
@@ -156,6 +207,17 @@ export default function PageLibrary() {
         </p>
       )}
 
+      {importing && (
+        <LibraryImport
+          source={importing}
+          onClose={() => setImporting(null)}
+          onSaved={async (n) => {
+            setImporting(null);
+            await qc.invalidateQueries({ queryKey: ["page-library"] });
+            toast.success(`Added ${n} page${n === 1 ? "" : "s"} to your library`);
+          }}
+        />
+      )}
       {removing && (
         <ConfirmModal
           title="Remove from your library?"
@@ -168,5 +230,130 @@ export default function PageLibrary() {
         />
       )}
     </Shell>
+  );
+}
+
+/**
+ * A document coming into the library: converted if it's Word or PowerPoint,
+ * uploaded to the library's own shelf, then laid out page by page so the
+ * teacher keeps the two worksheets they wanted and not the twelve pages of
+ * answer key behind them. Nothing is an entry until they say so — backing
+ * out throws the upload away.
+ */
+function LibraryImport({ source, onClose, onSaved }: { source: File; onClose: () => void; onSaved: (n: number) => void }) {
+  const [phase, setPhase] = useState<"preparing" | "choose" | "saving">("preparing");
+  const [message, setMessage] = useState("Reading the file…");
+  const [error, setError] = useState<string | null>(null);
+  const [assetKey, setAssetKey] = useState("");
+  const [sizes, setSizes] = useState<PageSize[]>([]);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [title, setTitle] = useState(source.name.replace(/\.[^.]+$/, ""));
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    (async () => {
+      try {
+        let pdf: Blob = source;
+        if (needsConversion(source)) {
+          if (!hasGoogleClientId) throw new Error("Word and PowerPoint conversion needs Google Drive access, which isn't configured. Export the file to PDF and upload that instead.");
+          setMessage("Converting to PDF…");
+          pdf = await convertToPdf(source, setMessage);
+        }
+        setMessage("Uploading…");
+        const form = new FormData();
+        form.append("file", new File([pdf], source.name.replace(/\.[^.]+$/, ".pdf"), { type: "application/pdf" }));
+        const { assetKey: key } = await api.upload<{ assetKey: string }>("/api/my/page-library/upload", form);
+        setAssetKey(key);
+        setMessage("Reading pages…");
+        const read = await readPageSizes(pdf);
+        if (read.length === 0) throw new Error("That PDF has no pages.");
+        setSizes(read);
+        setPicked(new Set(read.map((p) => p.sourceIndex)));
+        setPhase("choose");
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    })();
+  }, [source]);
+
+  const cancel = () => {
+    // Nothing kept: the upload goes too. Best effort — a leftover file costs
+    // nothing a person would notice, and the modal shouldn't hang on it.
+    if (assetKey && phase !== "saving") api.post("/api/my/page-library/discard-upload", { key: assetKey }).catch(() => {});
+    onClose();
+  };
+
+  const save = async () => {
+    setPhase("saving");
+    try {
+      const chosen = sizes.filter((p) => picked.has(p.sourceIndex));
+      const res = await api.post<{ ids: string[] }>("/api/my/page-library/from-upload", { assetKey, title, pages: chosen });
+      onSaved(res.ids.length);
+    } catch (e) {
+      setError((e as Error).message);
+      setPhase("choose");
+    }
+  };
+
+  const toggle = (i: number) => setPicked((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; });
+  const all = picked.size === sizes.length;
+  const pdfUrl = `/api/my/page-library/asset?key=${encodeURIComponent(assetKey)}`;
+
+  return (
+    <Modal onClose={cancel} title="Add pages to your library">
+      {error && <ErrorNote error={new Error(error)} />}
+      {phase === "preparing" && !error && (
+        <div className="flex items-center gap-3 py-6 text-[16px] text-pine/70">
+          <Loader2 className="h-5 w-5 animate-spin" /> {message}
+        </div>
+      )}
+      {phase !== "preparing" && (
+        <>
+          <Label htmlFor="lib-import-title">Name</Label>
+          <Input id="lib-import-title" value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1.5" />
+          <p className="mt-1 text-[16px] text-pine/60">Each page is saved as “{title.trim() || "Uploaded page"} — p.N”. You can rename any of them after.</p>
+
+          <div className="mt-4 flex items-center justify-between">
+            <span className="font-display text-[16px] font-bold text-pine">{picked.size} of {sizes.length} page{sizes.length === 1 ? "" : "s"} chosen</span>
+            <button type="button" className="text-[16px] font-bold text-pine underline" onClick={() => setPicked(all ? new Set() : new Set(sizes.map((p) => p.sourceIndex)))}>
+              {all ? "Choose none" : "Choose all"}
+            </button>
+          </div>
+          <div className="mt-2 grid max-h-[50vh] grid-cols-3 gap-2 overflow-y-auto p-1 sm:grid-cols-4 md:grid-cols-5">
+            {sizes.map((p) => {
+              const on = picked.has(p.sourceIndex);
+              return (
+                <button
+                  key={p.sourceIndex}
+                  type="button"
+                  onClick={() => toggle(p.sourceIndex)}
+                  aria-pressed={on}
+                  className={cn(
+                    "relative flex flex-col items-center gap-1 rounded-[12px] border-2 p-1.5 transition-colors",
+                    on ? "border-pine bg-mint/20" : "border-pine/15 opacity-60 hover:opacity-100",
+                  )}
+                >
+                  <PageThumb pdfUrl={pdfUrl} sourceIndex={p.sourceIndex} pageWidth={p.width} pageHeight={p.height} width={88} />
+                  <span className="text-[16px] text-pine/70">p.{p.sourceIndex + 1}</span>
+                  <span className={cn("absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-pine", on ? "bg-mint" : "bg-white")}>
+                    {on && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="ghost" onClick={cancel} disabled={phase === "saving"}>Cancel</Button>
+            <Button variant="primary" onClick={() => void save()} disabled={picked.size === 0 || phase === "saving"}>
+              {phase === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" strokeWidth={2.5} />}
+              Save {picked.size} page{picked.size === 1 ? "" : "s"}
+            </Button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }

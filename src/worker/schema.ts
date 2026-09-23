@@ -989,3 +989,29 @@ migrate("030_classroom_coursework", async () => {
     await db.prepare(`ALTER TABLE assignments ADD COLUMN google_posted_at TEXT`).run();
   }
 });
+
+/**
+ * Templates: a notebook that belongs to a teacher rather than to a class.
+ *
+ * Pushing one into a class copies it; the copy remembers where it came from,
+ * and each copied page and field remembers which template page or field it
+ * mirrors. That mapping is what makes "send updates" add-only and repeatable:
+ * a template page with no mirror in a copy is new and gets copied across, one
+ * that has a mirror is left exactly as the class has it.
+ */
+migrate("031_templates", async () => {
+  const has = async (table: string, name: string) => {
+    const cols = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    return (cols.results ?? []).some((c) => c.name === name);
+  };
+  if (!(await has("notebooks", "template_id"))) {
+    await db.prepare(`ALTER TABLE notebooks ADD COLUMN template_id TEXT`).run();
+  }
+  if (!(await has("pages", "template_page_id"))) {
+    await db.prepare(`ALTER TABLE pages ADD COLUMN template_page_id TEXT`).run();
+  }
+  if (!(await has("fields", "template_field_id"))) {
+    await db.prepare(`ALTER TABLE fields ADD COLUMN template_field_id TEXT`).run();
+  }
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_notebooks_template ON notebooks(template_id)`).run();
+});

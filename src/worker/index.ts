@@ -22,6 +22,7 @@ import "./routes/assignments";
 import "./routes/admin";
 import "./routes/org-admin";
 import "./routes/page-library";
+import "./routes/templates";
 import "./routes/comment-bank";
 import "./routes/billing";
 import "./routes/billing-webhooks";

@@ -190,3 +190,109 @@ app.delete("/api/my/page-library/:id", handler(async (c) => {
   }
   return c.json({ ok: true });
 }));
+
+/* ---------- bringing a document straight into the library ---------- */
+
+/** Same ceiling as a notebook upload; the file is the same kind of file. */
+const MAX_LIBRARY_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/** Only keys under this person's own library prefix are theirs to read or drop. */
+function ownedAssetKey(userId: string, key: string) {
+  const prefix = `library/${userId}/assets/`;
+  if (!key.startsWith(prefix) || key.includes("..")) throw new HttpError(400, "That isn't one of your library documents");
+  return key;
+}
+
+/**
+ * Upload a PDF to the library itself, ahead of choosing which of its pages to
+ * keep. Until now a page reached the library only by way of a notebook, which
+ * meant making a notebook you didn't want in order to save two pages out of a
+ * packet. The document lands under the library's own prefix, and the pages are
+ * picked in a second call once the browser has read them.
+ */
+app.post("/api/my/page-library/upload", handler(async (c) => {
+  const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
+  const form = await c.req.parseBody();
+  const file = form["file"] as File | undefined;
+  if (!file) throw new HttpError(400, "No file uploaded");
+  if (file.size > MAX_LIBRARY_UPLOAD_BYTES) {
+    throw new HttpError(413, `That file is ${(file.size / 1048576).toFixed(1)}MB — the limit is 25MB.`);
+  }
+  const assetKey = `library/${user.id}/assets/upload-${uid()}.pdf`;
+  await storage.put(assetKey, await file.arrayBuffer(), { contentType: "application/pdf" });
+  return c.json({ assetKey });
+}));
+
+/** The document behind an upload, for the picker's thumbnails — before any entry exists to serve it through. */
+app.get("/api/my/page-library/asset", handler(async (c) => {
+  const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
+  const key = ownedAssetKey(user.id, c.req.query("key") || "");
+  const obj = await storage.get(key);
+  if (!obj) throw new HttpError(404, "Document not found");
+  return new Response(await obj.arrayBuffer(), {
+    headers: { "Content-Type": "application/pdf", "Cache-Control": "private, max-age=31536000, immutable" },
+  });
+}));
+
+/** The pages chosen out of an upload, each becoming its own entry. */
+app.post("/api/my/page-library/from-upload", handler(async (c) => {
+  const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
+  const body = await c.req.json<{
+    assetKey?: string;
+    title?: string;
+    pages?: { sourceIndex: number; width: number; height: number; title?: string }[];
+  }>();
+  const assetKey = ownedAssetKey(user.id, String(body.assetKey ?? ""));
+  const pages = (body.pages ?? []).filter((p) =>
+    Number.isInteger(p.sourceIndex) && p.sourceIndex >= 0 && Number.isFinite(p.width) && Number.isFinite(p.height) && p.width > 0 && p.height > 0);
+  if (pages.length === 0) throw new HttpError(400, "Pick at least one page");
+
+  const count = await db
+    .prepare(`SELECT COUNT(*) AS n FROM library_pages WHERE owner_id = ?`)
+    .bind(user.id)
+    .first<{ n: number }>();
+  const room = MAX_LIBRARY_PAGES - (count?.n ?? 0);
+  if (pages.length > room) {
+    throw new HttpError(409, room <= 0
+      ? `Your library is full at ${MAX_LIBRARY_PAGES} pages — remove some to add more.`
+      : `Only ${room} more page${room === 1 ? "" : "s"} fit in your library — pick fewer, or remove some.`);
+  }
+
+  const base = (body.title ?? "").trim().slice(0, 100) || "Uploaded page";
+  const ids: string[] = [];
+  for (const p of pages) {
+    const id = uid();
+    const title = ((p.title ?? "").trim().slice(0, 120)) || (pages.length === 1 ? base : `${base} — p.${p.sourceIndex + 1}`);
+    await db
+      .prepare(
+        `INSERT INTO library_pages (id, owner_id, title, asset_key, source_index, width, height,
+                                    pattern, pattern_color, fields, annotation, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '[]', '', ?)`,
+      )
+      .bind(id, user.id, title, assetKey, p.sourceIndex, p.width, p.height, now())
+      .run();
+    ids.push(id);
+  }
+  return c.json({ ids });
+}));
+
+/**
+ * An upload nothing was kept from. Refused while any entry still draws on it.
+ * A POST with its own name rather than a DELETE on the asset path, because
+ * `DELETE /:id` above would take "asset" for an entry id first.
+ */
+app.post("/api/my/page-library/discard-upload", handler(async (c) => {
+  const user = await requireTeacher(c);
+  const { key: raw } = await c.req.json<{ key?: string }>();
+  const key = ownedAssetKey(user.id, String(raw ?? ""));
+  const used = await db
+    .prepare(`SELECT 1 FROM library_pages WHERE owner_id = ? AND asset_key = ?`)
+    .bind(user.id, key)
+    .first();
+  if (used) throw new HttpError(409, "Pages in your library still use that document");
+  await storage.delete(key);
+  return c.json({ ok: true });
+}));

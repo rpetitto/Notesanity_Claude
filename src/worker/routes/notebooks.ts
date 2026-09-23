@@ -7,7 +7,7 @@ import type { LibraryField } from "../lib/page-library";
 import { requireNotebookRoom, requirePlan } from "../lib/plans";
 import { MAX_TEMPLATE_PAGES, TEMPLATES, templateFor } from "../lib/templates";
 
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 /** A spoken comment is a sentence or two, not a lecture. */
 const MAX_COMMENT_AUDIO_BYTES = 8 * 1024 * 1024;
 
@@ -40,8 +40,9 @@ async function notebookAccess(c: any, notebookId: string) {
 
   // A personal notebook has no class to be a member of. Only its owner may
   // touch it, and they hold the editing rights a teacher holds over a class
-  // notebook — it's their own book, so adding pages is theirs to do.
-  if (nb.kind === "personal") {
+  // notebook — it's their own book, so adding pages is theirs to do. A
+  // template is the same shape: a teacher's own, outside any class.
+  if (nb.kind === "personal" || nb.kind === "template") {
     const user = await requireUser(c);
     if (nb.owner_id !== user.id) throw new HttpError(404, "Notebook not found");
     return { nb, user, isTeacher: true };
@@ -169,6 +170,8 @@ app.get("/api/notebooks/:id", handler(async (c) => {
       pageCount: nb.page_count, assetKey: nb.asset_key, lastPublishedAt: nb.last_published_at,
       accentColor: nb.accent_color ?? "#2E7D6B", hasCover: !!nb.cover_key,
       kind: nb.kind ?? "class", ownerId: nb.owner_id, archived: !!nb.archived,
+      // Where a class copy came from, so the editor can say so.
+      templateId: nb.template_id ?? null,
     },
     pages: pages.results ?? [],
     fields: fields.results ?? [],
@@ -183,7 +186,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
  * existing ones without renumbering the notebook: the run is spread evenly
  * across the gap after the anchor. With no anchor the run goes on the end.
  */
-async function seqWindow(notebookId: string, insertAfterPageId: string | null | undefined, count: number) {
+export async function seqWindow(notebookId: string, insertAfterPageId: string | null | undefined, count: number) {
   if (insertAfterPageId) {
     const anchor = await db
       .prepare(`SELECT seq, group_name FROM pages WHERE id = ? AND notebook_id = ?`)
@@ -210,7 +213,7 @@ async function seqWindow(notebookId: string, insertAfterPageId: string | null | 
 }
 
 /** Keep `notebooks.page_count` in step after pages are added or removed. */
-async function syncPageCount(notebookId: string) {
+export async function syncPageCount(notebookId: string) {
   const count = await db
     .prepare(`SELECT COUNT(*) AS n FROM pages WHERE notebook_id = ? AND archived = 0`)
     .bind(notebookId)
@@ -257,7 +260,7 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
 }));
 
 /** Rulings a blank page may carry — mirrored from the client's `PatternKey`. */
-const PAGE_PATTERNS = [
+export const PAGE_PATTERNS = [
   "blank", "lined-wide", "lined-college", "dot", "graph",
   "music", "engineering", "isometric", "coordinate",
 ];
@@ -1201,7 +1204,7 @@ app.get("/api/my/notebooks", handler(async (c) => {
 // ---------- starting a notebook without a source document ----------
 
 /** Create the pages a template describes, in one go. */
-async function fillFromTemplate(notebookId: string, pages: number, pattern: string, color: string) {
+export async function fillFromTemplate(notebookId: string, pages: number, pattern: string, color: string) {
   for (let i = 1; i <= pages; i++) {
     await db
       .prepare(

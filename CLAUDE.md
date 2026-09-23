@@ -32,6 +32,7 @@ district's database once sharding is needed.
 ## Commands
 
 ```
+npm install --legacy-peer-deps   a fresh clone needs the flag: glide-data-grid pins marked@4, the app uses 18
 npm run dev        wrangler dev — the whole thing with real bindings, port 8787
 npm run dev:ui     vite with HMR, proxying /api to wrangler on 8787
 npm run build      builds the SPA and renders the marketing pages

@@ -29,6 +29,8 @@ interface Props {
    * and every answer typed into a box. Absent where there is nothing to clear.
    */
   onClearPage?: () => void;
+  /** Rendered after the zoom menu: whatever the host wants at the row's end. */
+  trailing?: React.ReactNode;
 }
 
 const BASE_TOOLS: { kind: ToolKind; icon: typeof Pen; label: string; hint?: string }[] = [
@@ -64,7 +66,7 @@ const ZOOM_OPTIONS: { value: string; label: string }[] = [
 export default function InkToolbar({
   tool, onToolChange, fingerDraw, onFingerDrawChange,
   onUndo, onRedo, canUndo, canRedo, status, teacherPalette, allowComments, zoom, onZoomChange,
-  onClearPage,
+  onClearPage, trailing,
 }: Props) {
   const TOOLS = allowComments
     ? [...BASE_TOOLS.slice(0, 6), COMMENT_TOOL, BASE_TOOLS[6]]
@@ -270,6 +272,7 @@ export default function InkToolbar({
           )}
         </select>
 
+        {trailing}
         {status && <SaveIndicator status={status} />}
       </div>
     </div>

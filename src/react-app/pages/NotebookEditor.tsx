@@ -5,7 +5,7 @@ import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
-  FolderOpen, LibraryBig, Wand2, Eye,
+  FolderOpen, LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, pageSource, type FieldRec, type PageRec } from "../lib/api";
@@ -20,6 +20,7 @@ import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
 import InkToolbar from "../components/InkToolbar";
 import { RibbonButton, RibbonDivider, RibbonGroup, RibbonHint, RibbonRow, RibbonTabs, type RibbonTab } from "../components/Ribbon";
+import { usePersistedBool } from "../lib/usePersisted";
 import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
 import { emptyLayer, markRefAt, parseLayer, PEN_COLORS, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
@@ -27,7 +28,7 @@ import { usePinchZoom } from "../lib/usePinchZoom";
 import { detectFieldsOnPage, type FieldCandidate } from "../lib/formFields";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
-import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea } from "../components/ui";
+import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea, buttonClass } from "../components/ui";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
 
@@ -52,6 +53,9 @@ interface NotebookResponse {
     accentColor: string; hasCover: boolean;
     /** Put away for the class: hidden from students, still here for the teacher. */
     archived?: boolean;
+    /** 'class', 'template', 'personal' or 'student' — a template has no class and is pushed into them. */
+    kind?: string;
+    templateId?: string | null;
   };
   pages: EditorPage[];
   fields: FieldRow[];
@@ -142,13 +146,15 @@ export default function NotebookEditor() {
   const { notebookId = "" } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const goBack = useBackTo("/classes");
 
   const query = useQuery({
     queryKey: ["notebook", notebookId],
     queryFn: () => api.get<NotebookResponse>(`/api/notebooks/${notebookId}?archived=1`),
     enabled: !!notebookId,
   });
+  const isTemplate = query.data?.notebook.kind === "template";
+  const goBack = useBackTo(isTemplate ? "/notebooks" : "/classes");
+
 
   const assignmentsQuery = useQuery({
     queryKey: ["notebook-assignments", notebookId],
@@ -194,12 +200,19 @@ export default function NotebookEditor() {
   }, [pagesDrawerOpen]);
 
   // ---- master-page annotation mode ----
-  /**
-   * Which ribbon tab is up. Unset until the teacher picks one, so a notebook
-   * with no pages yet opens on Pages and every other one opens on Answer
-   * boxes — the thing most sessions are for.
-   */
+  /** Which ribbon tab is up. Pages first: it is where every notebook starts. */
   const [tabChoice, setTabChoice] = useState<RibbonTab | null>(null);
+  /** The tool row can be tucked away to give the page the height; the tabs stay. */
+  const [ribbonOpen, setRibbonOpen] = usePersistedBool("notesanity:nbRibbon", true);
+  /** The page list beside the page, likewise. */
+  const [railOpen, setRailOpen] = usePersistedBool("notesanity:nbRail", true);
+  /**
+   * Presenting: the page and nothing else, full screen, for a projector.
+   * `pages` steps one page at a time with arrows; `scroll` is the whole
+   * notebook as one long sheet.
+   */
+  const [presenting, setPresenting] = useState<null | { mode: "pages" | "scroll"; idx: number }>(null);
+  const [presentZoom, setPresentZoom] = useState<ZoomMode>("page");
   /**
    * The mark a press outside annotate mode landed on, handed to the editor that
    * opens because of it. Reaching for an annotation *is* asking to work on it,
@@ -250,7 +263,7 @@ export default function NotebookEditor() {
   const allPages = query.data?.pages ?? [];
   const livePages = useMemo(() => allPages.filter((p) => !p.archived), [allPages]);
 
-  const tab: RibbonTab = tabChoice ?? (livePages.length === 0 ? "pages" : "boxes");
+  const tab: RibbonTab = tabChoice ?? "pages";
   const annotateMode = tab === "annotate";
   /** Kept as a verb for the call sites that only know about the mode: off means back to Answer boxes. */
   const setAnnotateMode = (on: boolean) => setTabChoice(on ? "annotate" : "boxes");
@@ -258,6 +271,8 @@ export default function NotebookEditor() {
     setTool("none");
     setPendingMark(null);
     setTabChoice(next);
+    // Picking a tab while the tools are tucked away is asking for them back.
+    if (!ribbonOpen) setRibbonOpen(true);
   };
   const page = livePages[Math.min(pageIdx, Math.max(0, livePages.length - 1))];
   const fields = useMemo(
@@ -747,7 +762,7 @@ export default function NotebookEditor() {
   });
 
   const deleteNotebook = useMutation({
-    mutationFn: () => api.del(`/api/notebooks/${notebookId}`),
+    mutationFn: () => api.del(isTemplate ? `/api/templates/${notebookId}` : `/api/notebooks/${notebookId}`),
     onSuccess: () => {
       toast.success("Notebook deleted");
       navigate(query.data ? `/classes/${query.data.notebook.classId}` : "/classes");
@@ -820,7 +835,18 @@ export default function NotebookEditor() {
   const sidePanelBody = (isMobile: boolean) => (
     <>
       <div className="flex border-b-2 border-pine/12">
-        {(["pages", "assignments"] as const).map((tab) => (
+        {!isMobile && (
+          <button
+            type="button"
+            onClick={() => setRailOpen(false)}
+            title="Hide the page list"
+            aria-label="Hide the page list"
+            className="flex h-12 w-10 shrink-0 items-center justify-center text-pine/60 hover:bg-oat hover:text-pine"
+          >
+            <PanelLeftClose className="h-4 w-4" strokeWidth={2.5} />
+          </button>
+        )}
+        {(isTemplate ? (["pages"] as const) : (["pages", "assignments"] as const)).map((tab) => (
           <button
             key={tab}
             onClick={() => setSidePanel(tab)}
@@ -900,6 +926,48 @@ export default function NotebookEditor() {
     </>
   );
 
+  const presentButton = (
+    <button
+      type="button"
+      onClick={() => setPresenting({ mode: "pages", idx: pageIdx })}
+      disabled={livePages.length === 0}
+      title="Full screen, just the pages — for a projector or a screen share"
+      className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 font-display text-[16px] font-bold text-pine/80 hover:bg-oat disabled:opacity-40"
+    >
+      <Presentation className="h-4 w-4" strokeWidth={2.5} />
+      <span className="hidden md:inline">Present</span>
+    </button>
+  );
+  const ribbonToggle = (
+    <button
+      type="button"
+      onClick={() => setRibbonOpen(!ribbonOpen)}
+      aria-pressed={!ribbonOpen}
+      title={ribbonOpen ? "Hide the tools — the tabs stay, and bring them back" : "Show the tools"}
+      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-pine/20 text-pine/80 hover:bg-oat"
+    >
+      {ribbonOpen ? <ChevronUp className="h-4 w-4" strokeWidth={2.5} /> : <ChevronDown className="h-4 w-4" strokeWidth={2.5} />}
+      <span className="sr-only">{ribbonOpen ? "Hide tools" : "Show tools"}</span>
+    </button>
+  );
+  const zoomSelect = (
+    <select
+      value={zoom}
+      onChange={(e) => setZoom(Number(e.target.value))}
+      className="hidden h-10 rounded-[12px] border-2 border-pine/20 px-1.5 text-[16px] text-pine sm:block"
+      aria-label="Zoom"
+    >
+      {[0.5, 0.75, 1, 1.25, 1.5].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
+      {![0.5, 0.75, 1, 1.25, 1.5].includes(zoom) && <option value={zoom}>{Math.round(zoom * 100)}%</option>}
+    </select>
+  );
+  /** Present · zoom · hide, in that order, at the right end of every row. */
+  const rowTail = (
+    <div className="ml-auto flex items-center gap-2 self-center sm:pb-4">
+      {presentButton}{zoomSelect}{ribbonToggle}
+    </div>
+  );
+
   return (
     <div className="flex h-dvh flex-col bg-oat">
       <div className="h-1 shrink-0" style={{ backgroundColor: notebook.accentColor || "#20302C" }} />
@@ -963,6 +1031,9 @@ export default function NotebookEditor() {
               there when there isn't. Pages and fields reach students the moment
               they're made — annotations are the only thing publishing holds
               back — so "Up to date" means exactly what it says. */}
+          {isTemplate ? (
+            <TemplateClassesMenu templateId={notebookId} className={cn(COMPACT, "xl:order-7")} />
+          ) : (
           <Button
             variant={upToDate ? "secondary" : "primary"}
             data-tour="nb-publish"
@@ -978,6 +1049,7 @@ export default function NotebookEditor() {
                   <span className="sm:hidden">{notebook.status === "published" ? "Update" : "Publish"}</span>
                   <span className="hidden sm:inline">{notebook.status === "published" ? "Update student notebooks" : "Publish to students"}</span></>}
           </Button>
+          )}
         </div>
         {/* A direct child of the header, not of the actions row: its `order`
             is what puts it in the title row on a phone, and order only works
@@ -1202,7 +1274,7 @@ export default function NotebookEditor() {
       )}
 
       {/* The ribbon's tool row: only the current tab's tools, never a scrollbar. */}
-      {tab === "pages" && (
+      {tab === "pages" && ribbonOpen && (
       <RibbonRow>
         <RibbonGroup caption="Add pages">
           <RibbonButton icon={Rows3} label="Blank" title="Blank pages — lined, graph, dot grid, staves…" onClick={() => setBlankOpen(true)} disabled={!!busyMessage} />
@@ -1224,21 +1296,11 @@ export default function NotebookEditor() {
           <RibbonButton icon={Eye} label="Preview" title="See this notebook the way a student will, including writing you haven't sent yet" onClick={openPreview} />
         </RibbonGroup>
         {tool !== "none" && <RibbonHint>Drag on the page to place {tool === "figure" ? "the picture" : "the text"}</RibbonHint>}
-        <div className="ml-auto hidden self-center sm:block">
-          <select
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-            className="rounded-[12px] border-2 border-pine/20 px-1.5 py-1 text-[16px] text-pine"
-            aria-label="Zoom"
-          >
-            {[0.5, 0.75, 1, 1.25, 1.5].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
-            {![0.5, 0.75, 1, 1.25, 1.5].includes(zoom) && <option value={zoom}>{Math.round(zoom * 100)}%</option>}
-          </select>
-        </div>
+        {rowTail}
       </RibbonRow>
       )}
 
-      {tab === "boxes" && (
+      {tab === "boxes" && ribbonOpen && (
       <RibbonRow tour="nb-fields">
         <RibbonGroup caption="Student fills in">
           {([
@@ -1272,21 +1334,11 @@ export default function NotebookEditor() {
             Drag on the page to place {({ text: "a text box", checkbox: "a checkbox", choice: "a dropdown", prompt: "a prompt", image: "an image box", audio: "an audio box" } as Record<string, string>)[tool] ?? "it"}
           </RibbonHint>
         )}
-        <div className="ml-auto hidden self-center sm:block">
-          <select
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-            className="rounded-[12px] border-2 border-pine/20 px-1.5 py-1 text-[16px] text-pine"
-            aria-label="Zoom"
-          >
-            {[0.5, 0.75, 1, 1.25, 1.5].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
-            {![0.5, 0.75, 1, 1.25, 1.5].includes(zoom) && <option value={zoom}>{Math.round(zoom * 100)}%</option>}
-          </select>
-        </div>
+        {rowTail}
       </RibbonRow>
       )}
 
-      {annotateMode && (
+      {annotateMode && ribbonOpen && (
         <div>
           <InkToolbar
             tool={inkTool}
@@ -1303,14 +1355,36 @@ export default function NotebookEditor() {
             zoom={zoom}
             onZoomChange={(z) => setZoom(typeof z === "number" ? z : 1)}
             onClearPage={clearAnnotationPage}
+            trailing={<>{presentButton}{ribbonToggle}</>}
           />
+        </div>
+      )}
+      {/* Tucked away: a slim strip that keeps the three controls reachable. */}
+      {!ribbonOpen && (
+        <div className="flex items-center border-b-2 border-pine/12 bg-white px-3 py-1">
+          <span className="text-[16px] text-pine/50">Tools hidden</span>
+          <div className="ml-auto flex items-center gap-2">{presentButton}{zoomSelect}{ribbonToggle}</div>
         </div>
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside data-tour="nb-rail" className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
-          {sidePanelBody(false)}
-        </aside>
+        {railOpen ? (
+          <aside data-tour="nb-rail" className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
+            {sidePanelBody(false)}
+          </aside>
+        ) : (
+          <aside data-tour="nb-rail" className="hidden w-11 shrink-0 flex-col items-center border-r-2 border-pine/12 bg-white pt-1 sm:flex">
+            <button
+              type="button"
+              onClick={() => setRailOpen(true)}
+              title="Show the page list"
+              aria-label="Show the page list"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-pine/70 hover:bg-oat hover:text-pine"
+            >
+              <PanelLeftOpen className="h-4 w-4" strokeWidth={2.5} />
+            </button>
+          </aside>
+        )}
 
         {pagesDrawerOpen && (
           <div className="fixed inset-0 z-40 flex sm:hidden">
@@ -1612,7 +1686,23 @@ export default function NotebookEditor() {
 
       {/* Held back until nothing is layered over the editor: a spotlight cut
           through a drawer or an inspector would ring the wrong thing. */}
-      {!blankOpen && !libraryOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && !previewing && (
+      {presenting && (
+        <PresentMode
+          notebookId={notebookId}
+          pages={livePages}
+          fields={query.data?.fields ?? []}
+          masterLayers={railAnnotations}
+          state={presenting}
+          onChange={setPresenting}
+          zoom={presentZoom}
+          onZoomChange={setPresentZoom}
+          tool={previewTool}
+          fingerDraw={previewFinger}
+          onExit={() => { setPageIdx(presenting.idx); setPresenting(null); }}
+        />
+      )}
+
+      {!blankOpen && !libraryOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && !previewing && !presenting && (
         <Tour place="notebook" />
       )}
     </div>
@@ -2481,5 +2571,216 @@ function FieldInspector({
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * The pages and nothing else.
+ *
+ * Built for a projector: a dark ground so the paper reads as paper, one
+ * floating strip of controls that fades unless the pointer is near it, and
+ * the browser's own full screen so the tab bar goes too. Nothing here is
+ * saved — the surface is the same read-only one the preview uses, with the
+ * teacher's unsent ink included, because the page on the wall should be the
+ * page the teacher is looking at.
+ */
+function PresentMode({
+  notebookId, pages, fields, masterLayers, state, onChange, zoom, onZoomChange, tool, fingerDraw, onExit,
+}: {
+  notebookId: string;
+  pages: EditorPage[];
+  fields: FieldRow[];
+  masterLayers: Record<string, LayerData>;
+  state: { mode: "pages" | "scroll"; idx: number };
+  onChange: (next: { mode: "pages" | "scroll"; idx: number }) => void;
+  zoom: ZoomMode;
+  onZoomChange: (z: ZoomMode) => void;
+  tool: ToolState;
+  fingerDraw: boolean;
+  onExit: () => void;
+}) {
+  const { mode, idx } = state;
+  const last = Math.max(0, pages.length - 1);
+  const go = (n: number) => onChange({ mode, idx: Math.max(0, Math.min(last, n)) });
+
+  // The browser's full screen, entered on the way in and left on the way out —
+  // and if the person leaves it themselves (Escape does), that is an exit too.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.requestFullscreen?.().catch(() => {});
+    const onChangeFs = () => { if (!document.fullscreenElement) onExit(); };
+    // Registered a beat later so the entry itself doesn't read as an exit.
+    const t = setTimeout(() => document.addEventListener("fullscreenchange", onChangeFs), 300);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("fullscreenchange", onChangeFs);
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onExit(); return; }
+      if (mode !== "pages") return;
+      if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); go(idx + 1); }
+      if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); go(idx - 1); }
+      if (e.key === "Home") go(0);
+      if (e.key === "End") go(last);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const shown = mode === "pages" ? pages.slice(idx, idx + 1) : pages;
+  const seg = (on: boolean) => cn(
+    "inline-flex h-9 items-center gap-1.5 rounded-full px-3 font-display text-[16px] font-bold transition-colors",
+    on ? "bg-oat text-pine" : "text-oat/80 hover:bg-oat/15",
+  );
+  const arrow = "flex h-10 w-10 items-center justify-center rounded-full text-oat hover:bg-oat/15 disabled:opacity-30 disabled:hover:bg-transparent";
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-pine">
+      <div className="min-h-0 flex-1">
+        <NotebookSurface
+          key={mode}
+          notebookId={notebookId}
+          pages={shown}
+          fields={fields}
+          studentLayers={{}}
+          teacherLayers={{}}
+          masterLayers={masterLayers}
+          fieldValues={{}}
+          writeTarget={null}
+          tool={tool}
+          fingerDraw={fingerDraw}
+          zoom={zoom}
+          onZoomChange={onZoomChange}
+          fieldsEditable={false}
+          preview
+          onLayerChange={() => {}}
+          onFieldChange={() => {}}
+        />
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-4">
+        <div className="pointer-events-auto flex items-center gap-1 rounded-full border-2 border-oat/30 bg-pine/95 p-1.5 shadow-lg backdrop-blur">
+          <button type="button" className={seg(mode === "pages")} onClick={() => onChange({ mode: "pages", idx })} title="One page at a time — arrow keys or the buttons">
+            <Rows2 className="h-4 w-4" strokeWidth={2.5} /> Pages
+          </button>
+          <button type="button" className={seg(mode === "scroll")} onClick={() => onChange({ mode: "scroll", idx })} title="The whole notebook, scrolling">
+            <GalleryVertical className="h-4 w-4" strokeWidth={2.5} /> Scroll
+          </button>
+          {mode === "pages" && (
+            <>
+              <span className="mx-1 h-6 w-px bg-oat/30" aria-hidden />
+              <button type="button" className={arrow} onClick={() => go(idx - 1)} disabled={idx === 0} aria-label="Previous page">
+                <ChevronLeft className="h-5 w-5" strokeWidth={2.5} />
+              </button>
+              <span className="min-w-[72px] text-center font-display text-[16px] font-bold text-oat">{idx + 1} / {pages.length}</span>
+              <button type="button" className={arrow} onClick={() => go(idx + 1)} disabled={idx >= last} aria-label="Next page">
+                <ChevronRight className="h-5 w-5" strokeWidth={2.5} />
+              </button>
+            </>
+          )}
+          <span className="mx-1 h-6 w-px bg-oat/30" aria-hidden />
+          <select
+            value={String(zoom)}
+            onChange={(e) => { const v = e.target.value; onZoomChange(v === "page" || v === "width" ? v : Number(v)); }}
+            className="h-9 rounded-full border-2 border-oat/30 bg-transparent px-2 font-display text-[16px] font-bold text-oat"
+            aria-label="Zoom"
+          >
+            <option value="page" className="text-pine">Fit page</option>
+            <option value="width" className="text-pine">Fit width</option>
+            {[1, 1.25, 1.5, 2].map((z) => <option key={z} value={z} className="text-pine">{Math.round(z * 100)}%</option>)}
+          </select>
+          <button type="button" onClick={onExit} className="ml-1 inline-flex h-9 items-center gap-1.5 rounded-full bg-oat px-3.5 font-display text-[16px] font-bold text-pine hover:bg-white">
+            <X className="h-4 w-4" strokeWidth={2.5} /> Exit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * A template's classes, from inside the editor: push it to one it isn't in
+ * yet, or send the classes it is in whatever's new. The same actions as the
+ * Notebooks page offers, reached without leaving the page being edited.
+ */
+function TemplateClassesMenu({ templateId, className }: { templateId: string; className?: string }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const classes = useQuery({
+    queryKey: ["classes", "active"],
+    queryFn: () => api.get<{ classes: { id: string; name: string; my_role: string }[] }>("/api/classes"),
+  });
+  const list = useQuery({
+    queryKey: ["teaching-notebooks"],
+    queryFn: () => api.get<{ notebooks: { id: string; copies?: { classId: string; className: string; pendingPages: number; pendingFields: number }[] }[] }>("/api/my/teaching-notebooks"),
+  });
+  const me = list.data?.notebooks.find((n) => n.id === templateId);
+  const copies = me?.copies ?? [];
+  const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
+  const pushed = new Set(copies.map((c) => c.classId));
+  const teachable = (classes.data?.classes ?? []).filter((c) => c.my_role === "teacher" && !pushed.has(c.id));
+  const refresh = () => qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
+
+  const push = useMutation({
+    mutationFn: (classId: string) => api.post<{ notebook: { id: string } }>(`/api/templates/${templateId}/push`, { classId }),
+    onSuccess: (res, classId) => {
+      refresh();
+      const cls = classes.data?.classes.find((c) => c.id === classId);
+      toast.success(`Now in ${cls?.name ?? "the class"} as a draft — publish it there when it's ready.`, {
+        action: { label: "Open", onClick: () => navigate(`/notebooks/${res.notebook.id}/edit`) },
+      });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const sync = useMutation({
+    mutationFn: () => api.post<{ classes: number; pagesAdded: number; fieldsAdded: number }>(`/api/templates/${templateId}/sync`, {}),
+    onSuccess: (res) => {
+      refresh();
+      const bits = [];
+      if (res.pagesAdded) bits.push(`${res.pagesAdded} page${res.pagesAdded === 1 ? "" : "s"}`);
+      if (res.fieldsAdded) bits.push(`${res.fieldsAdded} answer box${res.fieldsAdded === 1 ? "" : "es"}`);
+      toast.success(bits.length ? `Sent ${bits.join(" and ")} to ${res.classes} class${res.classes === 1 ? "" : "es"}` : "Every class already has everything in this template");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const items = [
+    ...teachable.map((c) => ({
+      label: `Push to ${c.name}`,
+      icon: <Send className="h-5 w-5" strokeWidth={2.5} />,
+      hint: "A copy in that class, as a draft. Publish it there when it's ready.",
+      onClick: () => push.mutate(c.id),
+    })),
+    ...(copies.length > 0 ? [{
+      label: pending ? `Send updates to ${copies.length} class${copies.length === 1 ? "" : "es"}` : "Send updates",
+      icon: <RefreshCw className="h-5 w-5" strokeWidth={2.5} />,
+      disabled: !pending,
+      hint: pending
+        ? `${pending} new page${pending === 1 ? "" : "s"} or box${pending === 1 ? "" : "es"} waiting. Only what's new is added — nothing already in a class is changed.`
+        : "Every class already has everything in this template.",
+      onClick: () => sync.mutate(),
+    }] : []),
+  ];
+  if (items.length === 0) {
+    items.push({ label: "No classes to push to", icon: <Send className="h-5 w-5" strokeWidth={2.5} />, disabled: true, hint: "Make a class first, or join one as a teacher.", onClick: () => {} });
+  }
+
+  return (
+    <Menu
+      label="Classes"
+      className={className}
+      triggerClassName={buttonClass(pending ? "primary" : "secondary", "md", className)}
+      trigger={<>
+        <Send className="h-5 w-5" strokeWidth={2.5} />
+        <span>{pending ? `Send updates (${pending})` : copies.length ? `In ${copies.length} class${copies.length === 1 ? "" : "es"}` : "Push to a class"}</span>
+        <ChevronDown className="h-4 w-4" strokeWidth={2.5} />
+      </>}
+      items={items}
+    />
   );
 }
