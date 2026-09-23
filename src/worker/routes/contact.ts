@@ -13,6 +13,14 @@
  *    types can redirect it, which is what turns a contact form into an open
  *    relay.
  *
+ * Two ways in. The page's script posts JSON and shows the reply inline; with
+ * no script (blocked, off, an in-app browser, a submit before it loaded) the
+ * form posts itself as an ordinary form. Both reach this handler. The second
+ * gets a redirect back to the page, to an anchor the page shows with CSS
+ * alone: `#sent`, or `#err-…` naming what to fix. Answering a form post with
+ * JSON — or, as it once did, with a 500 because the body wasn't JSON — leaves
+ * a person looking at raw text and their message lost.
+ *
  * The row is written before the email is attempted, and the reply reports
  * success once it is stored. An enquiry that reached us but whose notification
  * failed is not a failed enquiry, and telling a district "something went wrong"
@@ -36,16 +44,59 @@ const looksLikeEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-app.post("/api/contact", handler(async (c) => {
-  const b = await c.req.json<Record<string, unknown>>();
+/** What can be wrong with a submission, with the anchor on the page that explains each. */
+const PROBLEMS = {
+  name: [400, "Please tell us your name."],
+  email: [400, "That doesn't look like an email address."],
+  wait: [429, "We've just received a message from you — give us a moment to read that one."],
+  unreadable: [400, "We couldn't read that message. Try again, or email us directly."],
+} as const;
+type Problem = keyof typeof PROBLEMS;
 
+class ContactProblem extends HttpError {
+  constructor(public problem: Problem) {
+    super(PROBLEMS[problem][0], PROBLEMS[problem][1]);
+  }
+}
+
+app.post("/api/contact", handler(async (c) => {
+  const isJson = (c.req.header("Content-Type") ?? "").toLowerCase().includes("application/json");
+
+  if (isJson) {
+    const b = await c.req.json<Record<string, unknown>>().catch(() => null);
+    if (!b || typeof b !== "object") throw new ContactProblem("unreadable");
+    await accept(b);
+    return c.json({ ok: true });
+  }
+
+  // A plain form post — urlencoded or multipart, whichever the browser chose.
+  // Every answer is a redirect back to the page, never JSON.
+  try {
+    const form = await c.req.parseBody();
+    const b: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(form)) if (typeof v === "string") b[k] = v;
+    await accept(b);
+    return c.redirect("/contact#sent", 303);
+  } catch (err) {
+    if (err instanceof ContactProblem) return c.redirect(`/contact#err-${err.problem}`, 303);
+    console.error("contact form failed", err);
+    return c.redirect("/contact#err-general", 303);
+  }
+}));
+
+/**
+ * Validate, store and forward one submission. Throws a ContactProblem the
+ * person can fix; anything else is ours.
+ */
+async function accept(b: Record<string, unknown>): Promise<void> {
   // A field positioned off-screen and left empty by anyone using the page.
-  if (clean(b.website, 100)) return c.json({ ok: true });
+  // Filled means a bot: it is told it succeeded, and nothing is kept.
+  if (clean(b.website, 100)) return;
 
   const email = clean(b.email, MAX.email).toLowerCase();
   const name = clean(b.name, MAX.name);
-  if (!name) throw new HttpError(400, "Please tell us your name.");
-  if (!looksLikeEmail(email)) throw new HttpError(400, "That doesn't look like an email address.");
+  if (!name) throw new ContactProblem("name");
+  if (!looksLikeEmail(email)) throw new ContactProblem("email");
 
   const recent = await db
     .prepare(
@@ -55,9 +106,7 @@ app.post("/api/contact", handler(async (c) => {
     )
     .bind(email, `-${COOLDOWN_SECONDS} seconds`)
     .first();
-  if (recent) {
-    throw new HttpError(429, "We've just received a message from you — give us a moment to read that one.");
-  }
+  if (recent) throw new ContactProblem("wait");
 
   const row = {
     id: uid(),
@@ -113,6 +162,4 @@ app.post("/api/contact", handler(async (c) => {
       .bind(`stored, not emailed: ${(err as Error).message}`.slice(0, 180), row.id)
       .run();
   }
-
-  return c.json({ ok: true });
-}));
+}

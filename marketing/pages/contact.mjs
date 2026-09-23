@@ -101,6 +101,13 @@ export default () =>
 .sent h3{margin-bottom:6px}
 .formerr{display:none;border:3px solid #A3341F;background:rgba(163,52,31,.08);color:#7d2716;
   border-radius:14px;padding:12px 14px;margin-bottom:16px;font-size:16px}
+/* Without JavaScript the form posts natively and the server redirects back to
+   an anchor: #sent, or #err-… for what to fix. These show that state with CSS
+   alone; the script, when it runs, never navigates to them. */
+.formerr:target,#sent:target{display:block}
+/* Room for the sticky header when the browser scrolls to the anchor. */
+.formerr,#sent{scroll-margin-top:110px}
+#form-card:has(~ #sent:target){display:none}
 </style>
 
 <section>
@@ -134,11 +141,16 @@ export default () =>
     </div>
 
     <div>
-      <div class="card">
+      <div class="card" id="form-card">
         <h2 style="font-size:24px">Send us a message</h2>
         <p class="form-note">Two fields are required. The rest just help us reply well.</p>
 
         <div class="formerr" id="formerr" role="alert"></div>
+        <div class="formerr" id="err-name" role="alert">Please tell us your name, then send it again.</div>
+        <div class="formerr" id="err-email" role="alert">That email address didn't look right — check it and send it again.</div>
+        <div class="formerr" id="err-wait" role="alert">We've just received a message from you — give us a moment to read that one.</div>
+        <div class="formerr" id="err-unreadable" role="alert">We couldn't read that message. Try again, or <a href="mailto:support@notesanity.com">email us directly</a>.</div>
+        <div class="formerr" id="err-general" role="alert">Something went wrong on our side and your message didn't send. Please try again, or <a href="mailto:support@notesanity.com">email us directly</a>.</div>
 
         <form id="contact-form" method="post" action="/api/contact" novalidate>
           <div class="row">
@@ -196,6 +208,9 @@ export default () =>
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     err.style.display = "none";
+    // A state left over from a submission without the script (#sent, #err-…)
+    // would otherwise stay on screen beside this one's.
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);
 
     var data = {};
     new FormData(form).forEach(function (v, k) { data[k] = v; });
