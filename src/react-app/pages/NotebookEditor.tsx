@@ -18,7 +18,7 @@ import {
 import PageCanvas, { type FieldValue, type ToolState } from "../components/PageCanvas";
 import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
-import InkToolbar from "../components/InkToolbar";
+import InkToolbar, { ZoomSelect } from "../components/InkToolbar";
 import { RibbonButton, RibbonDivider, RibbonGroup, RibbonHint, RibbonRow, RibbonTabs, type RibbonTab } from "../components/Ribbon";
 import { usePersistedBool } from "../lib/usePersisted";
 import Tour from "../components/Tour";
@@ -181,9 +181,10 @@ export default function NotebookEditor() {
     next.set("panel", tab);
     setSearchParams(next, { replace: true });
   };
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState<ZoomMode>(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
   const addPagesRef = useRef<HTMLInputElement>(null);
   const [blankOpen, setBlankOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -253,7 +254,7 @@ export default function NotebookEditor() {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => setContainerWidth(el.clientWidth);
+    const measure = () => { setContainerWidth(el.clientWidth); setContainerHeight(el.clientHeight); };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -384,12 +385,20 @@ export default function NotebookEditor() {
     return counts;
   }, [assignmentsQuery.data]);
 
-  const scale = useMemo(() => {
+  // The same menu as the annotation toolbar, so the same arithmetic: the
+  // presets are multiples of fit-width, and Fit page is whatever fits.
+  const fitWidth = useMemo(() => {
     if (!page) return 1;
     const usable = Math.max(280, containerWidth - 48);
-    return Math.min(1.8, usable / page.width) * zoom;
-  }, [page, containerWidth, zoom]);
-  usePinchZoom(containerRef, zoom, setZoom);
+    return Math.min(1.8, usable / page.width);
+  }, [page, containerWidth]);
+  const scale = useMemo(() => {
+    if (!page) return 1;
+    if (zoom === "width") return fitWidth;
+    if (zoom === "page") return Math.max(0.15, Math.min(fitWidth, Math.max(240, containerHeight - 76) / page.height));
+    return fitWidth * zoom;
+  }, [page, containerHeight, zoom, fitWidth]);
+  usePinchZoom(containerRef, scale / fitWidth, setZoom);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["notebook", notebookId] });
@@ -932,7 +941,7 @@ export default function NotebookEditor() {
       onClick={() => setPresenting({ mode: "pages", idx: pageIdx })}
       disabled={livePages.length === 0}
       title="Full screen, just the pages — for a projector or a screen share"
-      className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 font-display text-[16px] font-bold text-pine/80 hover:bg-oat disabled:opacity-40"
+      className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full border-2 border-pine/25 px-3.5 font-display text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-40"
     >
       <Presentation className="h-4 w-4" strokeWidth={2.5} />
       <span className="hidden md:inline">Present</span>
@@ -944,23 +953,13 @@ export default function NotebookEditor() {
       onClick={() => setRibbonOpen(!ribbonOpen)}
       aria-pressed={!ribbonOpen}
       title={ribbonOpen ? "Hide the tools — the tabs stay, and bring them back" : "Show the tools"}
-      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-pine/20 text-pine/80 hover:bg-oat"
+      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-pine/25 text-pine hover:bg-oat"
     >
       {ribbonOpen ? <ChevronUp className="h-4 w-4" strokeWidth={2.5} /> : <ChevronDown className="h-4 w-4" strokeWidth={2.5} />}
       <span className="sr-only">{ribbonOpen ? "Hide tools" : "Show tools"}</span>
     </button>
   );
-  const zoomSelect = (
-    <select
-      value={zoom}
-      onChange={(e) => setZoom(Number(e.target.value))}
-      className="hidden h-10 rounded-[12px] border-2 border-pine/20 px-1.5 text-[16px] text-pine sm:block"
-      aria-label="Zoom"
-    >
-      {[0.5, 0.75, 1, 1.25, 1.5].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
-      {![0.5, 0.75, 1, 1.25, 1.5].includes(zoom) && <option value={zoom}>{Math.round(zoom * 100)}%</option>}
-    </select>
-  );
+  const zoomSelect = <ZoomSelect zoom={zoom} onZoomChange={setZoom} className="hidden sm:block" />;
   /** Present · zoom · hide, in that order, at the right end of every row. */
   const rowTail = (
     <div className="ml-auto flex items-center gap-2 self-center sm:pb-4">
@@ -1353,7 +1352,7 @@ export default function NotebookEditor() {
             teacherPalette
             allowComments
             zoom={zoom}
-            onZoomChange={(z) => setZoom(typeof z === "number" ? z : 1)}
+            onZoomChange={setZoom}
             onClearPage={clearAnnotationPage}
             trailing={<>{presentButton}{ribbonToggle}</>}
           />

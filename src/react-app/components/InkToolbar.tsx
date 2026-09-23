@@ -254,23 +254,7 @@ export default function InkToolbar({
           </button>
         </div>
 
-        <select
-          value={String(zoom)}
-          onChange={(e) => {
-            const v = e.target.value;
-            onZoomChange(v === "page" || v === "width" ? v : Number(v));
-          }}
-          className="hidden h-11 rounded-full border-2 border-pine/25 bg-white px-3 font-display text-[16px] text-pine sm:block"
-          aria-label="Zoom"
-        >
-          {ZOOM_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-          {/* A pinch lands between the presets; the menu says where. */}
-          {typeof zoom === "number" && !ZOOM_OPTIONS.some((o) => String(o.value) === String(zoom)) && (
-            <option value={String(zoom)}>{Math.round(zoom * 100)}%</option>
-          )}
-        </select>
+        <ZoomSelect zoom={zoom} onZoomChange={onZoomChange} className="hidden sm:block" />
 
         {trailing}
         {status && <SaveIndicator status={status} />}
@@ -299,5 +283,30 @@ export function SaveIndicator({ status }: { status: SaveStatus }) {
       )} />
       {s.label}
     </span>
+  );
+}
+
+/**
+ * The zoom menu, one shape everywhere a page is shown: Fit page, Fit width,
+ * and the presets. A pinch lands between the presets; the menu says where.
+ */
+export function ZoomSelect({ zoom, onZoomChange, className }: { zoom: ZoomMode; onZoomChange: (z: ZoomMode) => void; className?: string }) {
+  return (
+    <select
+      value={String(zoom)}
+      onChange={(e) => {
+        const v = e.target.value;
+        onZoomChange(v === "page" || v === "width" ? v : Number(v));
+      }}
+      className={cn("h-11 rounded-full border-2 border-pine/25 bg-white px-3 font-display text-[16px] text-pine", className)}
+      aria-label="Zoom"
+    >
+      {ZOOM_OPTIONS.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+      {typeof zoom === "number" && !ZOOM_OPTIONS.some((o) => String(o.value) === String(zoom)) && (
+        <option value={String(zoom)}>{Math.round(zoom * 100)}%</option>
+      )}
+    </select>
   );
 }
