@@ -86,8 +86,8 @@ export default () =>
   border-radius:14px;background:var(--white);font-family:var(--body);font-size:17px;color:var(--pine)}
 .fld textarea{min-height:130px;resize:vertical}
 .fld select{appearance:none;
-  background-image:linear-gradient(45deg,transparent 50%,var(--pine) 50%),linear-gradient(135deg,var(--pine) 50%,transparent 50%);
-  background-position:calc(100% - 20px) 22px,calc(100% - 14px) 22px;background-size:6px 6px;background-repeat:no-repeat;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2320302c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position:right 16px center;background-size:16px 16px;background-repeat:no-repeat;
   padding-right:44px}
 .fld input:focus,.fld select:focus,.fld textarea:focus{outline:3px solid var(--mint);outline-offset:2px}
 .hint{margin:6px 0 0;font-size:14px;color:var(--quiet)}

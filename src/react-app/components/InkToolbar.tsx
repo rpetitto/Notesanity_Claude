@@ -298,7 +298,7 @@ export function ZoomSelect({ zoom, onZoomChange, className }: { zoom: ZoomMode; 
         const v = e.target.value;
         onZoomChange(v === "page" || v === "width" ? v : Number(v));
       }}
-      className={cn("h-11 rounded-full border-2 border-pine/25 bg-white px-3 font-display text-[16px] text-pine", className)}
+      className={cn("h-11 rounded-full border-2 border-pine/25 bg-white pl-3 pr-10 font-display text-[16px] text-pine", className)}
       aria-label="Zoom"
     >
       {ZOOM_OPTIONS.map((o) => (

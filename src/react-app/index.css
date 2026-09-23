@@ -89,6 +89,25 @@ h1, h2, h3, h4, .font-display {
 .rule-r { border-right: 2px solid rgba(32, 48, 44, 0.12); }
 .rule-l { border-left: 2px solid rgba(32, 48, 44, 0.12); }
 
+/**
+ * One caret on every dropdown. The browser's own arrow sits hard against the
+ * padding and differs per platform, so it is drawn instead, a fixed 16px in
+ * from the border. Every select sets its right padding (pr-10 or more) so the
+ * text stops short of it. .select-on-dark swaps the Pine caret for Oat.
+ */
+@layer base {
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2320302c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 16px center;
+    background-size: 16px 16px;
+  }
+  select.select-on-dark {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f4efe6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+}
+
 /* iOS Safari zooms the page when an input under 16px takes focus. */
 @supports (-webkit-touch-callout: none) {
   input,

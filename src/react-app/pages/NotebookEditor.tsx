@@ -2685,7 +2685,7 @@ function PresentMode({
           <select
             value={String(zoom)}
             onChange={(e) => { const v = e.target.value; onZoomChange(v === "page" || v === "width" ? v : Number(v)); }}
-            className="h-9 rounded-full border-2 border-oat/30 bg-transparent px-2 font-display text-[16px] font-bold text-oat"
+            className="h-9 rounded-full border-2 select-on-dark border-oat/30 bg-transparent pl-3 pr-10 font-display text-[16px] font-bold text-oat"
             aria-label="Zoom"
           >
             <option value="page" className="text-pine">Fit page</option>

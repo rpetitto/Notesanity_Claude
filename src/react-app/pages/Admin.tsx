@@ -842,7 +842,7 @@ function OrgUsers() {
               value={u.role === "pending" ? "" : u.role}
               onChange={(e) => mutation.mutate({ id: u.id, role: e.target.value as "teacher" | "student" })}
               disabled={mutation.isPending}
-              className="min-h-[40px] w-auto shrink-0 px-2 text-[16px]"
+              className="min-h-[40px] w-auto shrink-0 pl-2 pr-10 text-[16px]"
             >
               <option value="" disabled>
                 Pending

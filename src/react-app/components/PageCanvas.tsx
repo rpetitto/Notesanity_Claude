@@ -1500,8 +1500,15 @@ function FieldControl({
         value={text}
         onChange={(e) => onChange(e.target.value)}
         title={field.label}
-        className="absolute rounded border-2 border-pine/45 bg-white/80 px-1 outline-none focus:border-pine"
-        style={{ ...style, fontSize: Math.max(11, field.h * scale * 0.5) }}
+        className="absolute rounded border-2 border-pine/45 bg-white/80 pl-1 outline-none focus:border-pine"
+        style={{
+          ...style,
+          fontSize: Math.max(11, field.h * scale * 0.5),
+          // The caret scales with the page, so it is set in em rather than px.
+          paddingRight: "1.6em",
+          backgroundPosition: "right 0.35em center",
+          backgroundSize: "0.9em 0.9em",
+        }}
       >
         <option value="">—</option>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
