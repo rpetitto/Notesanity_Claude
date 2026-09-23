@@ -28,7 +28,8 @@ import { usePinchZoom } from "../lib/usePinchZoom";
 import { detectFieldsOnPage, type FieldCandidate } from "../lib/formFields";
 import type { SaveStatus } from "../lib/autosave";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
-import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea, buttonClass } from "../components/ui";
+import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea, buttonClass, type MenuItem } from "../components/ui";
+import PushToClassesModal from "../components/PushToClassesModal";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
 
@@ -1031,7 +1032,7 @@ export default function NotebookEditor() {
               they're made — annotations are the only thing publishing holds
               back — so "Up to date" means exactly what it says. */}
           {isTemplate ? (
-            <TemplateClassesMenu templateId={notebookId} className={cn(COMPACT, "xl:order-7")} />
+            <TemplateClassesMenu templateId={notebookId} title={notebook.title} className={cn(COMPACT, "xl:order-7")} />
           ) : (
           <Button
             variant={upToDate ? "secondary" : "primary"}
@@ -2703,13 +2704,13 @@ function PresentMode({
 
 
 /**
- * A template's classes, from inside the editor: push it to one it isn't in
+ * A template's classes, from inside the editor: push it to classes it isn't in
  * yet, or send the classes it is in whatever's new. The same actions as the
  * Notebooks page offers, reached without leaving the page being edited.
  */
-function TemplateClassesMenu({ templateId, className }: { templateId: string; className?: string }) {
+function TemplateClassesMenu({ templateId, title, className }: { templateId: string; title: string; className?: string }) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
+  const [pushOpen, setPushOpen] = useState(false);
   const classes = useQuery({
     queryKey: ["classes", "active"],
     queryFn: () => api.get<{ classes: { id: string; name: string; my_role: string }[] }>("/api/classes"),
@@ -2723,19 +2724,9 @@ function TemplateClassesMenu({ templateId, className }: { templateId: string; cl
   const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
   const pushed = new Set(copies.map((c) => c.classId));
   const teachable = (classes.data?.classes ?? []).filter((c) => c.my_role === "teacher" && !pushed.has(c.id));
+  const hasClasses = (classes.data?.classes ?? []).some((c) => c.my_role === "teacher");
   const refresh = () => qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
 
-  const push = useMutation({
-    mutationFn: (classId: string) => api.post<{ notebook: { id: string } }>(`/api/templates/${templateId}/push`, { classId }),
-    onSuccess: (res, classId) => {
-      refresh();
-      const cls = classes.data?.classes.find((c) => c.id === classId);
-      toast.success(`Now in ${cls?.name ?? "the class"} as a draft — publish it there when it's ready.`, {
-        action: { label: "Open", onClick: () => navigate(`/notebooks/${res.notebook.id}/edit`) },
-      });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
   const sync = useMutation({
     mutationFn: () => api.post<{ classes: number; pagesAdded: number; fieldsAdded: number }>(`/api/templates/${templateId}/sync`, {}),
     onSuccess: (res) => {
@@ -2748,13 +2739,13 @@ function TemplateClassesMenu({ templateId, className }: { templateId: string; cl
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const items = [
-    ...teachable.map((c) => ({
-      label: `Push to ${c.name}`,
+  const items: MenuItem[] = [
+    ...(teachable.length > 0 ? [{
+      label: "Push to classes…",
       icon: <Send className="h-5 w-5" strokeWidth={2.5} />,
-      hint: "A copy in that class, as a draft. Publish it there when it's ready.",
-      onClick: () => push.mutate(c.id),
-    })),
+      hint: "Pick one class or several. Each gets a copy as a draft.",
+      onClick: () => setPushOpen(true),
+    }] : []),
     ...(copies.length > 0 ? [{
       label: pending ? `Send updates to ${copies.length} class${copies.length === 1 ? "" : "es"}` : "Send updates",
       icon: <RefreshCw className="h-5 w-5" strokeWidth={2.5} />,
@@ -2766,10 +2757,17 @@ function TemplateClassesMenu({ templateId, className }: { templateId: string; cl
     }] : []),
   ];
   if (items.length === 0) {
-    items.push({ label: "No classes to push to", icon: <Send className="h-5 w-5" strokeWidth={2.5} />, disabled: true, hint: "Make a class first, or join one as a teacher.", onClick: () => {} });
+    items.push({
+      label: hasClasses ? "In every class already" : "No classes to push to",
+      icon: <Send className="h-5 w-5" strokeWidth={2.5} />,
+      disabled: true,
+      hint: hasClasses ? "Every class you teach has this template." : "Make a class first, or join one as a teacher.",
+      onClick: () => {},
+    });
   }
 
   return (
+    <>
     <Menu
       label="Classes"
       className={className}
@@ -2781,5 +2779,12 @@ function TemplateClassesMenu({ templateId, className }: { templateId: string; cl
       </>}
       items={items}
     />
+    {pushOpen && (
+      <PushToClassesModal
+        templates={[{ id: templateId, title, copies }]}
+        onClose={() => setPushOpen(false)}
+      />
+    )}
+    </>
   );
 }

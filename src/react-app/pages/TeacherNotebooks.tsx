@@ -11,11 +11,12 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookText, ChevronDown, FolderOpen, Plus, Rows3, Send, Trash2, Upload, RefreshCw } from "lucide-react";
+import { BookText, CheckSquare, ChevronDown, FolderOpen, Plus, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import NewNotebookModal from "../components/NewNotebookModal";
-import { Chip, ConfirmModal, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
+import PushToClassesModal from "../components/PushToClassesModal";
+import { Button, Chip, ConfirmModal, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 import { NotebookCard, type ClassNotebook } from "./ClassView";
@@ -37,6 +38,10 @@ export default function TeacherNotebooks() {
   const [filter, setFilter] = useState<string>("all");
   const [blankOpen, setBlankOpen] = useState(false);
   const [deleting, setDeleting] = useState<TeachingNotebook | null>(null);
+  /** Template ids the push dialog is open for. */
+  const [pushing, setPushing] = useState<string[] | null>(null);
+  /** Picking several templates to push at once; null when not picking. */
+  const [picked, setPicked] = useState<Set<string> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const list = useQuery({
@@ -48,19 +53,6 @@ export default function TeacherNotebooks() {
     queryFn: () => api.get<{ classes: ClassSummary[] }>("/api/classes"),
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
-
-  const push = useMutation({
-    mutationFn: ({ templateId, classId }: { templateId: string; classId: string }) =>
-      api.post<{ notebook: { id: string }; pages: number }>(`/api/templates/${templateId}/push`, { classId }),
-    onSuccess: (res, vars) => {
-      refresh();
-      const cls = classes.data?.classes.find((c) => c.id === vars.classId);
-      toast.success(`Now in ${cls?.name ?? "the class"} as a draft — publish it there when it's ready.`, {
-        action: { label: "Open", onClick: () => navigate(`/notebooks/${res.notebook.id}/edit`) },
-      });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   const sync = useMutation({
     mutationFn: (templateId: string) =>
@@ -96,7 +88,7 @@ export default function TeacherNotebooks() {
   };
 
   const all = list.data?.notebooks ?? [];
-  const teachable = (classes.data?.classes ?? []).filter((c) => c.my_role === "teacher");
+  const hasClasses = (classes.data?.classes ?? []).some((c) => c.my_role === "teacher");
   const shown = useMemo(() => {
     if (filter === "all") return all;
     if (filter === "templates") return all.filter((n) => n.kind === "template");
@@ -106,15 +98,17 @@ export default function TeacherNotebooks() {
   const inClasses = shown.filter((n) => n.kind !== "template");
 
   const templateMenu = (t: TeachingNotebook): MenuItem[] => {
-    const pushed = new Set((t.copies ?? []).map((c) => c.classId));
     const pending = (t.copies ?? []).reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
     return [
-      ...teachable.filter((c) => !pushed.has(c.id)).map((c) => ({
-        label: `Push to ${c.name}`,
+      {
+        label: "Push to classes…",
         icon: <Send className="h-5 w-5" strokeWidth={2.5} />,
-        hint: "A copy in that class, as a draft. Publish it there when it's ready.",
-        onClick: () => push.mutate({ templateId: t.id, classId: c.id }),
-      })),
+        disabled: !hasClasses,
+        hint: hasClasses
+          ? "Pick one class or several. Each gets a copy as a draft."
+          : "Make a class first, or join one as a teacher.",
+        onClick: () => setPushing([t.id]),
+      },
       ...((t.copies ?? []).length > 0 ? [{
         label: pending ? `Send updates to ${t.copies!.length} class${t.copies!.length === 1 ? "" : "es"}` : "Send updates",
         icon: <RefreshCw className="h-5 w-5" strokeWidth={2.5} />,
@@ -133,6 +127,14 @@ export default function TeacherNotebooks() {
       },
     ];
   };
+
+  const togglePicked = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  const allTemplates = all.filter((n) => n.kind === "template");
 
   const byline = (t: TeachingNotebook) => {
     const copies = t.copies ?? [];
@@ -188,6 +190,18 @@ export default function TeacherNotebooks() {
               <h2 className="mb-3 flex items-center gap-2 font-display text-[20px] text-pine">
                 <BookText className="h-5 w-5" strokeWidth={2.5} /> Templates
                 <Chip tone="quiet">{templates.length}</Chip>
+                {templates.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant={picked ? "primary" : "secondary"}
+                    className="ml-auto"
+                    onClick={() => setPicked(picked ? null : new Set())}
+                    aria-pressed={!!picked}
+                  >
+                    {picked ? <X className="h-4 w-4" strokeWidth={2.5} /> : <CheckSquare className="h-4 w-4" strokeWidth={2.5} />}
+                    {picked ? "Done selecting" : "Select"}
+                  </Button>
+                )}
               </h2>
               {templates.length === 0 ? (
                 <EmptyState
@@ -197,7 +211,15 @@ export default function TeacherNotebooks() {
               ) : (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {templates.map((t) => (
-                    <NotebookCard key={t.id} nb={t} to={`/notebooks/${t.id}/edit`} byline={byline(t)} menu={templateMenu(t)} />
+                    <NotebookCard
+                      key={t.id}
+                      nb={t}
+                      to={`/notebooks/${t.id}/edit`}
+                      byline={byline(t)}
+                      menu={templateMenu(t)}
+                      selected={picked?.has(t.id)}
+                      onSelect={picked ? () => togglePicked(t.id) : undefined}
+                    />
                   ))}
                 </div>
               )}
@@ -229,6 +251,32 @@ export default function TeacherNotebooks() {
         </>
       )}
 
+      {/* The selection's actions stay in reach however far down the list goes. */}
+      {picked && (
+        <div className="sticky bottom-4 z-30 mt-6 flex flex-wrap items-center gap-3 rounded-[22px] border-[3px] border-pine bg-white p-3 shadow-[4px_4px_0_0_var(--color-pine)]">
+          <span className="pl-2 font-display text-[17px] text-pine">
+            {picked.size === 0 ? "Tap templates to select them" : `${picked.size} selected`}
+          </span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {picked.size < allTemplates.length ? (
+              <Button variant="ghost" onClick={() => setPicked(new Set(allTemplates.map((t) => t.id)))}>Select all</Button>
+            ) : (
+              <Button variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
+            )}
+            <Button variant="primary" disabled={picked.size === 0 || !hasClasses} onClick={() => setPushing([...picked])}>
+              <Send className="h-5 w-5" strokeWidth={2.5} /> Push to classes…
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {pushing && (
+        <PushToClassesModal
+          templates={allTemplates.filter((t) => pushing.includes(t.id))}
+          onClose={() => setPushing(null)}
+          onDone={() => setPicked(null)}
+        />
+      )}
       {blankOpen && (
         <NewNotebookModal
           destination={{ kind: "template" }}

@@ -823,18 +823,22 @@ function DeleteClassModal({
 }
 
 export function NotebookCard({
-  nb, to, byline, menu,
-}: { nb: ClassNotebook; to: string; byline?: string; menu?: MenuItem[] }) {
+  nb, to, byline, menu, selected, onSelect,
+}: {
+  nb: ClassNotebook; to: string; byline?: string; menu?: MenuItem[];
+  /** Picking several at once: a press toggles the card instead of opening it. */
+  selected?: boolean; onSelect?: () => void;
+}) {
   const accent = nb.accent_color || DEFAULT_ACCENT;
-  return (
-    <Link
-      to={to}
-      className={cn(
-        "group relative overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--color-pine)]",
-        // A notebook that's been put away reads as put away.
-        nb.archived && "opacity-70",
-      )}
-    >
+  const selecting = !!onSelect;
+  const cardClass = cn(
+    "group relative block w-full overflow-hidden rounded-[22px] border-[3px] border-pine bg-white text-left shadow-[4px_4px_0_0_var(--color-pine)] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--color-pine)]",
+    // A notebook that's been put away reads as put away.
+    nb.archived && "opacity-70",
+    selected && "bg-mint/25 ring-[3px] ring-mint ring-offset-2 ring-offset-oat",
+  );
+  const body = (
+    <>
       <div className="h-2" style={{ background: accent }} />
       <div className="flex gap-3 p-4">
         {/* An uploaded cover wins; otherwise the first page stands in. */}
@@ -869,9 +873,24 @@ export function NotebookCard({
         </div>
         {/* Sits inside the card, which is a link — the menu stops its own
             presses from reaching it so opening the menu doesn't navigate. */}
-        {menu && menu.length > 0 && <Menu items={menu} className="-mr-1 -mt-1" />}
+        {selecting ? (
+          <span
+            aria-hidden
+            className={cn(
+              "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-[3px] border-pine",
+              selected ? "bg-mint" : "bg-white",
+            )}
+          >
+            {selected && <Check className="h-4 w-4 text-pine" strokeWidth={3} />}
+          </span>
+        ) : menu && menu.length > 0 && <Menu items={menu} className="-mr-1 -mt-1" />}
       </div>
-    </Link>
+    </>
+  );
+  return selecting ? (
+    <button type="button" role="checkbox" aria-checked={!!selected} onClick={onSelect} className={cardClass}>{body}</button>
+  ) : (
+    <Link to={to} className={cardClass}>{body}</Link>
   );
 }
 

@@ -105,8 +105,9 @@ const BODY = () => `
       [
         "Can I use one notebook in several classes?",
         `Yes \u2014 make it a <b>template</b>. On the <b>Notebooks</b> tab, <b>New template</b> builds a
-         notebook that belongs to you rather than to a class. Push it into any class you teach and it
-         arrives there as a draft for you to publish. When you add pages or answer boxes to the template
+         notebook that belongs to you rather than to a class. <b>Push to classes…</b> in its menu puts it
+         into as many of your classes as you tick, each as a draft for you to publish there. To push several
+         templates together, press <b>Select</b> above them first. When you add pages or answer boxes to the template
          later, <b>Send updates</b> gives every class the new material. It only ever adds: a page you
          changed in one class, or work students have done there, is never overwritten, and a change to
          something already in the classes has to be made in each class.`,

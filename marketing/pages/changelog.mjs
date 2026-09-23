@@ -46,6 +46,8 @@ const RELEASES = [
       ["new", "<b>Present a notebook.</b> A <b>Present</b> button beside the zoom menu shows just the pages, full screen, for a projector or a screen share: one page at a time with the arrow keys, or the whole notebook scrolling. Your unsent writing is included, so what's on the wall is what you're looking at. Nothing done there is saved."],
       ["better", "<b>More room for the page.</b> The tool row tucks away with the arrow at its right end (the tabs stay, and picking one brings it back), and the page list beside the page folds to a sliver with the arrow at its top. Both remember how you left them."],
       ["better", "<b>A notebook opens on the Pages tab</b>, where every notebook starts, rather than on Answer boxes."],
+      ["better", "<b>Push to several classes at once — and several templates at once.</b> A template's menu has one <b>Push to classes…</b> instead of a line for every class you teach. Tick as many classes as you like; the ones that already have it are shown and left alone. To send a whole unit, press <b>Select</b> above your templates, tick the ones you want, and push them together."],
+      ["fixed", "<b>The arrow on a dropdown menu no longer crowds its edge.</b> It sat hard against the border on some menus; every dropdown now has the same arrow with room around it."],
     ],
   ],
   [
