@@ -7,12 +7,13 @@ import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { useSession, signOutHref, type Plan } from "../lib/session";
 import { api } from "../lib/api";
 import { Button, ButtonLink, Card, Chip } from "../components/ui";
+import { FREE_NOTEBOOK_LIMIT, FREE_STUDENT_LIMIT } from "../../shared/plans.mjs";
 
 const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
 
 /** One plain sentence per way of having a plan, keyed by how the plan was reached. */
 const PLAN_BLURBS: Record<Plan["source"], string> = {
-  free: "Up to 10 class notebooks, unlimited students, and every marking tool.",
+  free: `Up to ${FREE_NOTEBOOK_LIMIT} class notebooks, up to ${FREE_STUDENT_LIMIT} students in each class, and every marking tool.`,
   pro: "Unlimited class notebooks, plus a page library you can reuse across them.",
   department: "A Pro seat from your school's department bundle — unlimited notebooks and the page library.",
   school: "Everything Notesanity does, for every teacher in your school, plus the admin panel.",

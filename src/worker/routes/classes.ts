@@ -2,6 +2,7 @@ import { app, db, storage } from "../platform";
 import {
   handler, now, uid, SQL_UUID, requireUser, requireTeacher, requireClassTeacher, requireClassMember, findUserInOrg, HttpError, param,} from "../lib/session";
 import { queueMail } from "../lib/mailqueue";
+import { CLASS_FULL_FOR_STUDENT, CLASS_FULL_FOR_TEACHER, studentRoom } from "../lib/plans";
 import { HAS_INK_BYTES } from "../lib/ink";
 import { deleteNotebookCascade } from "./notebooks";
 
@@ -143,6 +144,7 @@ app.post("/api/classes/import-classroom", handler(async (c) => {
   }
 
   let added = 0;
+  let room = await studentRoom(cls.id);
   const skipped: { email: string; reason: string }[] = [];
   for (const s of body.students ?? []) {
     const email = s.email?.toLowerCase();
@@ -152,6 +154,18 @@ app.post("/api/classes/import-classroom", handler(async (c) => {
     if (!student && existingAnywhere) {
       skipped.push({ email, reason: "That account belongs to another school." });
       continue;
+    }
+    // A full class on the Free plan takes nobody new; someone already in it
+    // is fine. Checked before an account is made, so a skipped address
+    // leaves nothing behind.
+    if (room !== null && room < 1) {
+      const already = student
+        ? await db.prepare(`SELECT 1 FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`).bind(cls.id, student.id).first()
+        : null;
+      if (!already) {
+        skipped.push({ email, reason: CLASS_FULL_FOR_TEACHER });
+        continue;
+      }
     }
     if (!student) {
       // Pre-create the account so the roster is complete before they ever sign in.
@@ -176,6 +190,7 @@ app.post("/api/classes/import-classroom", handler(async (c) => {
         .run();
       await provisionForStudent(cls.id, student!.id);
       added++;
+      if (room !== null) room--;
     }
   }
   return c.json({ class: cls, added, skipped });
@@ -385,6 +400,14 @@ app.post("/api/classes/join", handler(async (c) => {
   if (!cls) throw new HttpError(404, "No class matches that code");
   if (cls.org_id !== user.org_id) throw new HttpError(403, "That class belongs to another school");
   if (cls.owner_id === user.id) throw new HttpError(400, "You already teach this class");
+  const room = await studentRoom(cls.id);
+  if (room !== null && room < 1) {
+    const already = await db
+      .prepare(`SELECT 1 FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`)
+      .bind(cls.id, user.id)
+      .first();
+    if (!already) throw new HttpError(403, CLASS_FULL_FOR_STUDENT);
+  }
 
   // Join (or rejoin) and get every published notebook, in one batch. An
   // existing enrollment keeps its role and is only made active again.
@@ -409,6 +432,7 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
   const cls = await db.prepare(`SELECT name FROM classes WHERE id = ?`).bind(classId).first<any>();
   if (!cls) throw new HttpError(404, "Class not found");
   let added = 0;
+  let room = await studentRoom(classId);
   const skipped: { email: string; reason: string }[] = [];
   for (const raw of emails) {
     const email = String(raw ?? "").trim().toLowerCase();
@@ -419,6 +443,18 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
     if (!student && existingAnywhere) {
       skipped.push({ email, reason: "That account belongs to another school." });
       continue;
+    }
+    // A full class on the Free plan takes nobody new; someone already in it
+    // is fine. Checked before an account is made, so a skipped address
+    // leaves nothing behind.
+    if (room !== null && room < 1) {
+      const already = student
+        ? await db.prepare(`SELECT 1 FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`).bind(classId, student.id).first()
+        : null;
+      if (!already) {
+        skipped.push({ email, reason: CLASS_FULL_FOR_TEACHER });
+        continue;
+      }
     }
     if (!student) {
       const sid = uid();
@@ -438,6 +474,7 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
         .bind(uid(), classId, student!.id, now())
         .run();
       await provisionForStudent(classId, student!.id);
+      if (room !== null) room--;
 
       /*
        * Tell them. Inviting used to create the account and the enrolment in

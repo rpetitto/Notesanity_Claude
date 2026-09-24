@@ -292,9 +292,9 @@ const BODY = () => `
       ],
       [
         "Is there a limit on how many notebooks I can make?",
-        `Not during the beta. When paid plans arrive, the Free plan will allow ten class notebooks at
-         a time — archived ones don't count, nothing is ever deleted, and you'll have a full
-         semester's notice first. See <a href="/pricing">pricing</a> for what's coming.`,
+        `Not during the beta. When paid plans arrive, the Free plan will allow five class notebooks
+         at a time and 35 students in each class — archived notebooks don't count, nothing is ever
+         deleted, and you'll have a full semester's notice first. Pro has no limit on either. See <a href="/pricing">pricing</a> for what's coming.`,
       ],
       [
         "Who can see a student's work?",

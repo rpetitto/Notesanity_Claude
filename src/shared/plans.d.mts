@@ -3,6 +3,7 @@
 
 export const BETA_FREE: boolean;
 export const FREE_NOTEBOOK_LIMIT: number;
+export const FREE_STUDENT_LIMIT: number;
 
 export type PlanKey = "free" | "pro" | "department" | "school";
 
@@ -14,6 +15,8 @@ export interface PlanSpec {
   seats: number | null;
   /** Class notebooks per teacher; null means unlimited. */
   notebookLimit: number | null;
+  /** Students per class; null means unlimited. */
+  studentLimit: number | null;
   pageLibrary: boolean;
   schoolAdmin: boolean;
   selfServe: boolean;

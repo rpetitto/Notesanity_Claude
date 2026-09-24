@@ -1,5 +1,5 @@
 import { layout } from "../layout.mjs";
-import { BETA_FREE, PLANS, FREE_NOTEBOOK_LIMIT, dollars } from "../../src/shared/plans.mjs";
+import { BETA_FREE, PLANS, FREE_NOTEBOOK_LIMIT, FREE_STUDENT_LIMIT, dollars } from "../../src/shared/plans.mjs";
 
 /**
  * Pricing, during the beta and after it.
@@ -74,7 +74,7 @@ export default () =>
         who: "One teacher, getting started",
         bullets: [
           `${FREE_NOTEBOOK_LIMIT} class notebooks at a time`,
-          "Unlimited students and classes",
+          `Unlimited classes, up to ${FREE_STUDENT_LIMIT} students in each`,
           "PDF, Word, PowerPoint and Google Drive imports",
           "Find the blanks in a worksheet and make them fillable",
           "Students' own personal notebooks",
@@ -88,6 +88,7 @@ export default () =>
         bullets: [
           "Everything in Free",
           "Unlimited class notebooks",
+          "Classes of any size",
           "The page library — save any page, reuse it anywhere",
           "Support straight from the people who build it",
         ],
@@ -165,8 +166,8 @@ export default () =>
     <h3>Is there a limit we could hit?</h3>
     <p>
       ${BETA_FREE
-        ? `Not during the beta. When paid plans arrive, the Free plan will be capped at ${FREE_NOTEBOOK_LIMIT} class notebooks per teacher — you'll have a full semester's notice, nothing is deleted, and archived notebooks don't count. The technical ceilings — a notebook starts at up to 100 pages, uploads are capped at 25&nbsp;MB — are described in the <a href="/help">help center</a> where they apply.`
-        : `On the Free plan, ${FREE_NOTEBOOK_LIMIT} class notebooks at a time — archived notebooks don't count, and nothing is ever deleted. Otherwise only technical ceilings: a notebook starts at up to 100 pages, uploads are capped at 25&nbsp;MB, and they're described in the <a href="/help">help center</a> where they apply.`}
+        ? `Not during the beta. When paid plans arrive, the Free plan will be capped at ${FREE_NOTEBOOK_LIMIT} class notebooks per teacher and ${FREE_STUDENT_LIMIT} students in each class — you'll have a full semester's notice, nothing is deleted, and archived notebooks don't count. The technical ceilings — a notebook starts at up to 100 pages, uploads are capped at 25&nbsp;MB — are described in the <a href="/help">help center</a> where they apply.`
+        : `On the Free plan, ${FREE_NOTEBOOK_LIMIT} class notebooks at a time and ${FREE_STUDENT_LIMIT} students in each class — archived notebooks don't count, and nothing is ever deleted. Otherwise only technical ceilings: a notebook starts at up to 100 pages, uploads are capped at 25&nbsp;MB, and they're described in the <a href="/help">help center</a> where they apply.`}
     </p>
   </div>
 </section>`,

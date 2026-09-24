@@ -9,7 +9,7 @@
  * pricing page from day one, and flipping one constant is what turns it on.
  */
 
-import { BETA_FREE, FREE_NOTEBOOK_LIMIT, PLANS } from "../../shared/plans.mjs";
+import { BETA_FREE, FREE_NOTEBOOK_LIMIT, FREE_STUDENT_LIMIT, PLANS } from "../../shared/plans.mjs";
 import { db } from "../platform";
 import { HttpError, now, type AppUser } from "./session";
 
@@ -181,3 +181,32 @@ export async function requireNotebookRoom(user: AppUser, count = 1): Promise<voi
     );
   }
 }
+
+/**
+ * How many more students this class can take: null for no limit, which is
+ * every class during the beta and every class whose owner is on a paid plan.
+ * The owner's plan decides, not the plan of whoever is adding the student —
+ * a co-teacher on Pro doesn't lift the cap on a Free teacher's class.
+ */
+export async function studentRoom(classId: string): Promise<number | null> {
+  if (BETA_FREE) return null;
+  const row = await db
+    .prepare(
+      `SELECT c.owner_id, u.org_id,
+              (SELECT COUNT(*) FROM enrollments WHERE class_id = c.id AND role = 'student' AND status = 'active') AS n
+         FROM classes c JOIN users u ON u.id = c.owner_id
+        WHERE c.id = ?`,
+    )
+    .bind(classId)
+    .first<{ owner_id: string; org_id: string; n: number }>();
+  if (!row) return null;
+  const plan = await planForUser({ id: row.owner_id, org_id: row.org_id });
+  const limit = plan.tier === "free" ? PLANS.free.studentLimit : null;
+  return limit === null ? null : Math.max(0, limit - row.n);
+}
+
+/** Said to the teacher, beside each student an invite or import couldn't add. */
+export const CLASS_FULL_FOR_TEACHER =
+  `The class is full: a class on the Free plan can have ${FREE_STUDENT_LIMIT} students. Upgrade to Pro for bigger classes.`;
+/** Said to a student trying to join with a code. */
+export const CLASS_FULL_FOR_STUDENT = "This class is full. Ask your teacher to make room for you.";

@@ -18,29 +18,36 @@
 export const BETA_FREE = true;
 
 /** Class notebooks a Free teacher can have at once. Archived ones don't count. */
-export const FREE_NOTEBOOK_LIMIT = 10;
+export const FREE_NOTEBOOK_LIMIT = 5;
+
+/**
+ * Students in one class taught on the Free plan — a whole class, not a trial.
+ * It's the class owner's plan that counts: a co-teacher on Pro doesn't lift
+ * the cap on a Free teacher's class, and a Free co-teacher doesn't lower it.
+ */
+export const FREE_STUDENT_LIMIT = 35;
 
 /**
  * `seats`: how many people one purchase covers — null means everyone in the
- * school. `notebookLimit`: null means unlimited. `selfServe`: whether there is
+ * school. `notebookLimit`, `studentLimit` (per class): null means unlimited. `selfServe`: whether there is
  * a Checkout button, or a conversation and an invoice.
  */
 export const PLANS = {
   free: {
     label: "Free", priceCents: 0, interval: "year", seats: 1,
-    notebookLimit: FREE_NOTEBOOK_LIMIT, pageLibrary: false, schoolAdmin: false, selfServe: false,
+    notebookLimit: FREE_NOTEBOOK_LIMIT, studentLimit: FREE_STUDENT_LIMIT, pageLibrary: false, schoolAdmin: false, selfServe: false,
   },
   pro: {
     label: "Pro", priceCents: 4900, interval: "year", seats: 1,
-    notebookLimit: null, pageLibrary: true, schoolAdmin: false, selfServe: true,
+    notebookLimit: null, studentLimit: null, pageLibrary: true, schoolAdmin: false, selfServe: true,
   },
   department: {
     label: "Department", priceCents: 49900, interval: "year", seats: 20,
-    notebookLimit: null, pageLibrary: true, schoolAdmin: false, selfServe: false,
+    notebookLimit: null, studentLimit: null, pageLibrary: true, schoolAdmin: false, selfServe: false,
   },
   school: {
     label: "School", priceCents: 99900, interval: "year", seats: null,
-    notebookLimit: null, pageLibrary: true, schoolAdmin: true, selfServe: false,
+    notebookLimit: null, studentLimit: null, pageLibrary: true, schoolAdmin: true, selfServe: false,
   },
 };
 
