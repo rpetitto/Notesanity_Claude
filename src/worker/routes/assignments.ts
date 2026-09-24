@@ -133,9 +133,63 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
   return c.json({ assignments, isTeacher });
 }));
 
+/**
+ * The same notebook in the teacher's other classes: every class copy of the
+ * template this one was pushed from, in a class they still teach. A notebook
+ * uploaded straight into one class has no template, and so no siblings.
+ *
+ * Pages are matched through the template page each copy mirrors, which is
+ * the only mapping that survives reordering and renaming in one class. A page
+ * added to just one copy has no template page, and can't carry over; an
+ * archived page in the other copy doesn't either, since students can't see it.
+ */
+async function siblingCopies(userId: string, notebookId: string) {
+  const [classesRes, pagesRes] = await db.batch([
+    db.prepare(
+      `SELECT n.id AS notebook_id, n.status, c.id AS class_id, c.name, c.section, c.google_course_id
+         FROM notebooks src
+         JOIN notebooks n ON n.template_id = src.template_id AND n.id != src.id AND n.kind = 'class' AND n.archived = 0
+         JOIN classes c ON c.id = n.class_id AND c.archived = 0
+        WHERE src.id = ? AND src.template_id IS NOT NULL
+          AND (c.owner_id = ? OR EXISTS (
+                SELECT 1 FROM enrollments e
+                 WHERE e.class_id = c.id AND e.user_id = ? AND e.role = 'teacher' AND e.status = 'active'))
+        ORDER BY c.name, c.section`,
+    ).bind(notebookId, userId, userId),
+    db.prepare(
+      `SELECT sp.id AS src, tp.id AS dst, tp.notebook_id
+         FROM pages sp
+         JOIN pages tp ON tp.template_page_id = sp.template_page_id AND tp.notebook_id != sp.notebook_id AND tp.archived = 0
+        WHERE sp.notebook_id = ? AND sp.template_page_id IS NOT NULL`,
+    ).bind(notebookId),
+  ]);
+  const maps = new Map<string, Record<string, string>>();
+  for (const r of (pagesRes.results ?? []) as { src: string; dst: string; notebook_id: string }[]) {
+    const m = maps.get(r.notebook_id) ?? {};
+    m[r.src] = r.dst;
+    maps.set(r.notebook_id, m);
+  }
+  return ((classesRes.results ?? []) as any[]).map((r) => ({
+    classId: r.class_id as string,
+    className: r.section ? `${r.name} · ${r.section}` : (r.name as string),
+    notebookId: r.notebook_id as string,
+    published: r.status === "published",
+    googleCourseId: (r.google_course_id as string | null) ?? null,
+    pageMap: maps.get(r.notebook_id) ?? {},
+  }));
+}
+
+app.get("/api/notebooks/:id/sibling-classes", handler(async (c) => {
+  const notebookId = param(c, "id");
+  const nb = await db.prepare(`SELECT class_id FROM notebooks WHERE id = ? AND kind = 'class'`).bind(notebookId).first<{ class_id: string }>();
+  if (!nb) throw new HttpError(404, "Notebook not found");
+  const user = await requireClassTeacher(c, nb.class_id);
+  return c.json({ classes: await siblingCopies(user.id, notebookId) });
+}));
+
 app.post("/api/classes/:id/assignments", handler(async (c) => {
   const classId = param(c, "id");
-  await requireClassTeacher(c, classId);
+  const user = await requireClassTeacher(c, classId);
   const b = await c.req.json<any>();
   if (!b.title?.trim()) throw new HttpError(400, "Title is required");
   if (!b.notebookId) throw new HttpError(400, "Pick a notebook");
@@ -148,24 +202,58 @@ app.post("/api/classes/:id/assignments", handler(async (c) => {
     .first();
   if (!nb) throw new HttpError(404, "Notebook not found in this class");
 
-  const id = uid();
   const status = b.status === "active" ? "active" : "draft";
   // Checked before the insert, not after: a refusal that leaves an active
   // assignment behind is the exact state this is here to prevent.
   if (status === "active") await requirePublishedNotebook(b.notebookId);
-  await db
-    .prepare(
+
+  type Row = { id: string; classId: string; notebookId: string; pageIds: string[]; releaseAt: string | null; dueAt: string | null; status: string };
+  const rows: Row[] = [{
+    id: uid(), classId, notebookId: b.notebookId, pageIds: b.pageIds,
+    releaseAt: b.releaseAt || null, dueAt: b.dueAt || null, status,
+  }];
+
+  // The same assignment in other classes with a copy of this notebook. Each
+  // is its own assignment from here on; they're only made together, in one
+  // transaction, so a failure can't leave some periods assigned and not others.
+  // Class and pages are resolved here rather than taken from the request: a
+  // class id is only honored if it's one of this teacher's copies.
+  const skipped: { classId: string; reason: string }[] = [];
+  if (Array.isArray(b.alsoIn) && b.alsoIn.length) {
+    const siblings = new Map((await siblingCopies(user.id, b.notebookId)).map((s) => [s.classId, s]));
+    for (const want of b.alsoIn as { classId: string; releaseAt?: string; dueAt?: string }[]) {
+      const sib = siblings.get(want.classId);
+      if (!sib) { skipped.push({ classId: want.classId, reason: "not a copy of this notebook you teach" }); continue; }
+      const mapped = (b.pageIds as string[]).map((pid) => sib.pageMap[pid]).filter(Boolean);
+      if (!mapped.length) { skipped.push({ classId: sib.classId, reason: "none of these pages are in that class's copy" }); continue; }
+      rows.push({
+        id: uid(), classId: sib.classId, notebookId: sib.notebookId, pageIds: mapped,
+        releaseAt: want.releaseAt || null, dueAt: want.dueAt || null,
+        // A copy students can't open yet gets a draft, not a refusal.
+        status: status === "active" && sib.published ? "active" : "draft",
+      });
+    }
+  }
+
+  const stamp = now();
+  const statements = rows.flatMap((r) => [
+    db.prepare(
       `INSERT INTO assignments (id, class_id, notebook_id, title, instructions, page_ids, release_at, due_at, grading, points_max, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      id, classId, b.notebookId, b.title.trim(), b.instructions ?? "", JSON.stringify(b.pageIds),
-      b.releaseAt || null, b.dueAt || null, b.grading ?? "points", b.pointsMax ?? 100, status, now(), now(),
-    )
-    .run();
+    ).bind(
+      r.id, r.classId, r.notebookId, b.title.trim(), b.instructions ?? "", JSON.stringify(r.pageIds),
+      r.releaseAt, r.dueAt, b.grading ?? "points", b.pointsMax ?? 100, r.status, stamp, stamp,
+    ),
+    ...(r.status === "active" ? [submissionsFor(r.id, r.classId)] : []),
+  ]);
+  await db.batch(statements);
 
-  if (status === "active") await ensureSubmissions(id, classId);
-  return c.json({ assignment: { id } });
+  const [first, ...others] = rows;
+  return c.json({
+    assignment: { id: first.id },
+    alsoIn: others.map((r) => ({ id: r.id, classId: r.classId, status: r.status, pages: r.pageIds.length })),
+    skipped,
+  });
 }));
 
 /**
@@ -197,16 +285,20 @@ async function requirePublishedNotebook(notebookId: string) {
  * exactly as they are, and settles two of these running at once.
  */
 async function ensureSubmissions(assignmentId: string, classId: string) {
+  await submissionsFor(assignmentId, classId).run();
+}
+
+/** A not-started submission for every active student, as one statement a batch can carry. */
+function submissionsFor(assignmentId: string, classId: string) {
   const stamp = now();
-  await db
+  return db
     .prepare(
       `INSERT OR IGNORE INTO submissions (id, assignment_id, student_id, status, created_at, updated_at)
        SELECT ${SQL_UUID}, ?, e.user_id, 'not_started', ?, ?
          FROM enrollments e
         WHERE e.class_id = ? AND e.role = 'student' AND e.status = 'active'`,
     )
-    .bind(assignmentId, stamp, stamp, classId)
-    .run();
+    .bind(assignmentId, stamp, stamp, classId);
 }
 
 app.patch("/api/assignments/:id", handler(async (c) => {

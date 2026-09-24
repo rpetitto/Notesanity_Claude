@@ -142,6 +142,16 @@ const BODY = () => `
          something already in the classes has to be made in each class.`,
       ],
       [
+        "Can I give the same assignment to several classes?",
+        `Yes, when they have copies of the same template. Creating an assignment over one of those
+         notebooks shows <b>Also assign in</b>, listing your other classes that have it; tick them and
+         give each its own release and due dates. Each class gets its own assignment, graded and returned
+         on its own, and changing one later doesn't change the others. A page you added to just one
+         class's copy can't carry over, and a class where the notebook isn't published yet gets the
+         assignment as a draft. Notebooks uploaded straight into one class aren't linked, so they don't
+         offer this.`,
+      ],
+      [
         "Can I put a whole document into my page library?",
         `Yes. On the Library page, <b>Add pages</b> takes a PDF, Word or PowerPoint file, or one from
          Google Drive, shows you every page in it, and saves the ones you tick. Each becomes its own entry,
@@ -207,8 +217,9 @@ const BODY = () => `
       [
         "How do I set work?",
         `Publish the notebook to the class first, then create an assignment over it: choose which
-         of its pages the task covers and set a due date. Those pages are the ones that come back
-         to you to be graded. A student who joins later is caught up automatically, and you're
+         of its pages the task covers and set a due date. From inside a notebook, <b>New assignment</b>
+         on its <b>Assignments</b> tab starts one with that notebook and the page you're on already
+         chosen. Those pages are the ones that come back to you to be graded. A student who joins later is caught up automatically, and you're
          asked which past assignments should apply to them.`,
       ],
       [

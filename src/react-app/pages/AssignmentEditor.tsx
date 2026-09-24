@@ -3,12 +3,13 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, ExternalLink, Trash2 } from "lucide-react";
+
 import { api, pageSource, type PageRec } from "../lib/api";
 import Shell, { ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
 import { Button, Card, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import { cn, toIso, toLocalInput } from "../lib/utils";
-import { createCoursework, hasGoogleClientId, type PostedCoursework } from "../lib/google";
+import { createCoursework, hasGoogleClientId } from "../lib/google";
 
 type Grading = "none" | "complete" | "points" | "letter";
 
@@ -91,6 +92,16 @@ function DeleteAssignmentModal({
     </Modal>
   );
 }
+
+type SiblingClass = {
+  classId: string;
+  className: string;
+  notebookId: string;
+  published: boolean;
+  googleCourseId: string | null;
+  /** This notebook's page id → the same page in that class's copy. */
+  pageMap: Record<string, string>;
+};
 
 export default function AssignmentEditor() {
   const { classId: classIdParam, assignmentId } = useParams();
@@ -183,6 +194,29 @@ export default function AssignmentEditor() {
   const pages = notebookQuery.data?.pages ?? [];
 
   /**
+   * The same notebook in the teacher's other classes (copies of one template),
+   * for setting this assignment there too. Each class gets its own assignment
+   * with its own dates; only creating them is shared.
+   */
+  const siblingsQuery = useQuery({
+    queryKey: ["sibling-classes", notebookId],
+    queryFn: () => api.get<{ classes: SiblingClass[] }>(`/api/notebooks/${notebookId}/sibling-classes`),
+    enabled: !editing && !!notebookId,
+  });
+  const siblings = siblingsQuery.data?.classes ?? [];
+  /** Per class: whether it's ticked, and dates only once the teacher changes them (until then it follows this class's). */
+  const [alsoIn, setAlsoIn] = useState<Record<string, { on: boolean; releaseAt?: string; dueAt?: string }>>({});
+  useEffect(() => { setAlsoIn({}); }, [notebookId]);
+  // A ticked class that has none of the chosen pages drops out rather than getting an empty assignment.
+  const chosenSiblings = siblings.filter((sib) => alsoIn[sib.classId]?.on && pageIds.some((pid) => sib.pageMap[pid]));
+  const datesFor = (classId: string) => ({
+    releaseAt: alsoIn[classId]?.releaseAt ?? releaseAt,
+    dueAt: alsoIn[classId]?.dueAt ?? dueAt,
+  });
+  const setSibling = (classId: string, patch: { on?: boolean; releaseAt?: string; dueAt?: string }) =>
+    setAlsoIn((m) => ({ ...m, [classId]: { ...(m[classId] ?? { on: false }), ...patch } }));
+
+  /**
    * Pages are picked, not read — nobody needs to see all hundred at once to
    * tick the four they want. Paginated the same way the notebook's own page
    * list is, at a size that fills the grid's widest layout (7 columns) evenly.
@@ -200,42 +234,67 @@ export default function AssignmentEditor() {
         releaseAt: toIso(releaseAt), dueAt: toIso(dueAt),
         grading, pointsMax, status,
       };
+      const extra = editing ? [] : chosenSiblings.map((sib) => {
+        const d = datesFor(sib.classId);
+        return { classId: sib.classId, releaseAt: toIso(d.releaseAt), dueAt: toIso(d.dueAt) };
+      });
+      type Created = { assignment: { id: string }; alsoIn?: { id: string; classId: string; status: string }[] };
       const res = editing
         ? await api.patch(`/api/assignments/${assignmentId}`, body)
-        : await api.post<{ assignment: { id: string } }>(`/api/classes/${classId}/assignments`, body);
-      const id = editing ? assignmentId! : (res as { assignment: { id: string } }).assignment.id;
+        : await api.post<Created>(`/api/classes/${classId}/assignments`, { ...body, alsoIn: extra });
+      const id = editing ? assignmentId! : (res as Created).assignment.id;
+      const others = editing ? [] : (res as Created).alsoIn ?? [];
 
-      // A draft is deliberately not posted: the link would be one students
-      // can't open yet, which is worse than not having posted at all.
-      if (!(canPostToClassroom && postToClassroom && status === "active" && googleCourseId)) {
-        return { id, classroom: null as PostedCoursework | null, classroomError: null as string | null };
+      // Each class posts to its own Classroom course, if it came from one. A
+      // draft is deliberately not posted: the link would be one students can't
+      // open yet, which is worse than not having posted at all.
+      const targets: { id: string; courseId: string; releaseAt: string; dueAt: string }[] = [];
+      if (postToClassroom && hasGoogleClientId && status === "active") {
+        if (canPostToClassroom && googleCourseId) targets.push({ id, courseId: googleCourseId, releaseAt, dueAt });
+        for (const o of others) {
+          const sib = siblings.find((x) => x.classId === o.classId);
+          if (o.status === "active" && sib?.googleCourseId) targets.push({ id: o.id, courseId: sib.googleCourseId, ...datesFor(o.classId) });
+        }
       }
 
       // Google refusing is not the assignment failing — it already exists, and
       // saying otherwise would send the teacher back to recreate it.
-      try {
-        const posted = await createCoursework(googleCourseId, {
-          title,
-          description: instructions,
-          link: `${window.location.origin}/assignments/${id}`,
-          dueAt: toIso(dueAt),
-          scheduledAt: toIso(releaseAt),
-          maxPoints: classroomMaxPoints(grading, pointsMax),
-        });
-        await api.post(`/api/assignments/${id}/classroom`, { courseworkId: posted.id, link: posted.link });
-        return { id, classroom: posted, classroomError: null };
-      } catch (e) {
-        return { id, classroom: null, classroomError: (e as Error).message };
+      let posted = 0, scheduled = 0;
+      const refusals: string[] = [];
+      for (const t of targets) {
+        try {
+          const cw = await createCoursework(t.courseId, {
+            title,
+            description: instructions,
+            link: `${window.location.origin}/assignments/${t.id}`,
+            dueAt: toIso(t.dueAt),
+            scheduledAt: toIso(t.releaseAt),
+            maxPoints: classroomMaxPoints(grading, pointsMax),
+          });
+          await api.post(`/api/assignments/${t.id}/classroom`, { courseworkId: cw.id, link: cw.link });
+          if (cw.published) posted++; else scheduled++;
+        } catch (e) {
+          refusals.push((e as Error).message);
+        }
       }
+      return { id, others, posted, scheduled, refusals };
     },
     onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ["assignments", classId] });
-      qc.invalidateQueries({ queryKey: ["class", classId] });
-      toast.success(editing ? "Assignment updated" : "Assignment created");
-      if (res.classroomError) {
-        toast.error(`Saved here, but Google Classroom refused it: ${res.classroomError}`);
-      } else if (res.classroom) {
-        toast.success(res.classroom.published ? "Posted to Google Classroom" : "Scheduled in Google Classroom");
+      for (const cid of [classId, ...res.others.map((o) => o.classId)]) {
+        qc.invalidateQueries({ queryKey: ["assignments", cid] });
+        qc.invalidateQueries({ queryKey: ["class", cid] });
+      }
+      qc.invalidateQueries({ queryKey: ["notebook-assignments"] });
+      const drafts = res.others.filter((o) => o.status === "draft").length;
+      toast.success(
+        editing ? "Assignment updated"
+          : res.others.length ? `Assignment created in ${res.others.length + 1} classes` : "Assignment created",
+        drafts && res.others.length ? { description: `${drafts} saved as a draft, where the notebook isn't published yet.` } : undefined,
+      );
+      if (res.refusals.length) {
+        toast.error(`Saved here, but Google Classroom refused ${res.refusals.length === 1 ? "it" : `${res.refusals.length} of them`}: ${res.refusals[0]}`);
+      } else if (res.posted || res.scheduled) {
+        toast.success(res.scheduled && !res.posted ? "Scheduled in Google Classroom" : "Posted to Google Classroom");
       }
       navigate(`/classes/${classId}`);
     },
@@ -444,7 +503,79 @@ export default function AssignmentEditor() {
             )}
           </div>
 
-          {(canPostToClassroom || alreadyPosted) && (
+          {!editing && siblings.length > 0 && (
+            <fieldset className="rounded-[12px] border-[3px] border-pine/20 p-3">
+              <legend className="px-1 font-display text-[16px] text-pine">Also assign in</legend>
+              <p className="text-[16px] text-pine/70">
+                Your other classes with this notebook. Each gets its own assignment, graded on its own, with its own dates.
+              </p>
+              <ul className="mt-2 space-y-2">
+                {siblings.map((sib) => {
+                  const row = alsoIn[sib.classId];
+                  const on = !!row?.on;
+                  const missing = pageIds.filter((pid) => !sib.pageMap[pid]).length;
+                  const none = pageIds.length > 0 && missing === pageIds.length;
+                  const d = datesFor(sib.classId);
+                  return (
+                    <li key={sib.classId} className={cn("rounded-[12px] p-2", on && "bg-oat")}>
+                      <label className="flex min-h-11 items-start gap-3 text-[16px] text-pine">
+                        <input
+                          type="checkbox"
+                          checked={on && !none}
+                          disabled={none}
+                          onChange={(e) => setSibling(sib.classId, { on: e.target.checked })}
+                          className="mt-1 h-5 w-5 shrink-0 accent-mint"
+                        />
+                        <span>
+                          <span className="block font-display">{sib.className}</span>
+                          {none ? (
+                            <span className="block text-pine/70">None of these pages are in this class's copy.</span>
+                          ) : (
+                            <>
+                              {missing > 0 && (
+                                <span className="block text-[#8a6a1f]">
+                                  {missing} of these pages {missing === 1 ? "isn't" : "aren't"} in this class's copy, so {missing === 1 ? "it's" : "they're"} left out there.
+                                </span>
+                              )}
+                              {!sib.published && (
+                                <span className="block text-pine/70">Not published in this class yet, so it's saved there as a draft.</span>
+                              )}
+                            </>
+                          )}
+                        </span>
+                      </label>
+                      {on && !none && (
+                        <div className="mt-2 grid gap-3 pl-8 sm:grid-cols-2">
+                          <div>
+                            <Label>Release</Label>
+                            <Input
+                              type="datetime-local"
+                              value={d.releaseAt}
+                              onChange={(e) => setSibling(sib.classId, { releaseAt: e.target.value })}
+                              className="mt-1.5"
+                              aria-label={`Release in ${sib.className}`}
+                            />
+                          </div>
+                          <div>
+                            <Label>Due</Label>
+                            <Input
+                              type="datetime-local"
+                              value={d.dueAt}
+                              onChange={(e) => setSibling(sib.classId, { dueAt: e.target.value })}
+                              className="mt-1.5"
+                              aria-label={`Due in ${sib.className}`}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </fieldset>
+          )}
+
+          {(canPostToClassroom || alreadyPosted || (!editing && hasGoogleClientId && chosenSiblings.some((sib) => sib.googleCourseId))) && (
             <div className="rounded-[12px] border-[3px] border-pine/20 bg-oat p-3">
               {alreadyPosted ? (
                 <div className="flex items-start gap-2 text-[16px] text-pine">
@@ -475,7 +606,9 @@ export default function AssignmentEditor() {
                     <span>
                       <span className="block font-display">Also post to Google Classroom</span>
                       <span className="block text-pine/70">
-                        Creates an assignment in the course this class came from, linking back here.
+                        {chosenSiblings.length
+                          ? "Creates an assignment in the Classroom course each class came from, linking back here."
+                          : "Creates an assignment in the course this class came from, linking back here."}
                         Google asks your permission the first time.
                       </span>
                     </span>
@@ -493,7 +626,7 @@ export default function AssignmentEditor() {
 
           <div className="flex flex-wrap gap-2 pt-2">
             <Button variant="primary" disabled={!canSave || save.isPending} onClick={() => save.mutate("active")}>
-              {editing ? "Save changes" : "Assign to class"}
+              {editing ? "Save changes" : chosenSiblings.length ? `Assign to ${chosenSiblings.length + 1} classes` : "Assign to class"}
             </Button>
             <Button variant="secondary" disabled={!canSave || save.isPending} onClick={() => save.mutate("draft")}>
               Save as draft

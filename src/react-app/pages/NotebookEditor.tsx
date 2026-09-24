@@ -1026,6 +1026,8 @@ export default function NotebookEditor() {
         {(isTemplate ? (["pages"] as const) : (["pages", "assignments"] as const)).map((tab) => (
           <button
             key={tab}
+            type="button"
+            aria-pressed={sidePanel === tab}
             onClick={() => setSidePanel(tab)}
             className={cn(
               "flex h-12 flex-1 items-center justify-center gap-1.5 px-3 font-display text-[17px] font-bold capitalize transition-colors",
@@ -1069,9 +1071,22 @@ export default function NotebookEditor() {
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (isMobile) setPagesDrawerOpen(false);
+              // Starts on the page in view; the form's page grid adds the rest.
+              navigate(`/classes/${query.data!.notebook.classId}/assignments/new`, {
+                state: { notebookId, pageIds: page && !page.archived ? [page.id] : [] },
+              });
+            }}
+            className="mb-2 flex h-11 w-full items-center justify-center gap-2 rounded-full border-[3px] border-pine bg-mint font-display text-[16px] font-bold text-pine shadow-[4px_4px_0_0_var(--color-pine)] hover:bg-mint/80 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_var(--color-pine)]"
+          >
+            <ClipboardList className="h-4 w-4" strokeWidth={2.5} /> New assignment
+          </button>
           {assignments.length === 0 ? (
-            <p className="px-2 py-6 text-center text-[16px] text-pine/60">
-              No assignments use this notebook yet. Select pages, then choose “Create assignment”.
+            <p className="px-2 py-4 text-center text-[16px] text-pine/60">
+              No assignments use this notebook yet. You can also select pages in the page list and choose “Create assignment”.
             </p>
           ) : (
             assignments.map((a) => (
