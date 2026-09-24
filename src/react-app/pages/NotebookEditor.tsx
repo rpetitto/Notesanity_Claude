@@ -1910,8 +1910,6 @@ export default function NotebookEditor() {
           onChange={setPresenting}
           zoom={presentZoom}
           onZoomChange={setPresentZoom}
-          tool={previewTool}
-          fingerDraw={previewFinger}
           onExit={() => { setPageIdx(presenting.idx); setPresenting(null); }}
         />
       )}
@@ -3030,12 +3028,16 @@ function FieldInspector({
  * Built for a projector: a dark ground so the paper reads as paper, one
  * floating strip of controls that fades unless the pointer is near it, and
  * the browser's own full screen so the tab bar goes too. Nothing here is
- * saved — the surface is the same read-only one the preview uses, with the
- * teacher's unsent ink included, because the page on the wall should be the
- * page the teacher is looking at.
+ * saved — the surface is the same one the preview uses, with the teacher's
+ * unsent ink included, because the page on the wall should be the page the
+ * teacher is looking at.
+ *
+ * Annotate brings the writing tools up for working an example in front of the
+ * class. That ink is a whiteboard marker: it lives in this component, on top
+ * of the page, and goes when presenting ends.
  */
 function PresentMode({
-  notebookId, pages, fields, masterLayers, state, onChange, zoom, onZoomChange, tool, fingerDraw, onExit,
+  notebookId, pages, fields, masterLayers, state, onChange, zoom, onZoomChange, onExit,
 }: {
   notebookId: string;
   pages: EditorPage[];
@@ -3045,13 +3047,40 @@ function PresentMode({
   onChange: (next: { mode: "pages" | "scroll"; idx: number }) => void;
   zoom: ZoomMode;
   onZoomChange: (z: ZoomMode) => void;
-  tool: ToolState;
-  fingerDraw: boolean;
   onExit: () => void;
 }) {
   const { mode, idx } = state;
   const last = Math.max(0, pages.length - 1);
   const go = (n: number) => onChange({ mode, idx: Math.max(0, Math.min(last, n)) });
+
+  // ---- Annotate: the tools, and ink that is never sent anywhere ----
+  const [annotating, setAnnotating] = useState(false);
+  const [tool, setTool] = useState<ToolState>({
+    kind: "pen", color: TEACHER_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 18, erase: "quick",
+  });
+  const [fingerDraw, setFingerDraw] = useState(false);
+  const [ink, setInk] = useState<Record<string, LayerData>>({});
+  const history = useRef<{ past: { pageId: string; layer: LayerData }[]; future: { pageId: string; layer: LayerData }[] }>({ past: [], future: [] });
+  const [, bump] = useState(0);
+  const [visiblePageId, setVisiblePageId] = useState<string | null>(null);
+  const currentPageId = mode === "pages" ? pages[idx]?.id : visiblePageId ?? pages[idx]?.id;
+  const inkOf = (pageId: string) => ink[pageId] ?? emptyLayer();
+  const writeInk = (pageId: string, layer: LayerData, record = true) => {
+    if (record) {
+      history.current.past.push({ pageId, layer: inkOf(pageId) });
+      history.current.future = [];
+      bump((n) => n + 1);
+    }
+    setInk((m) => ({ ...m, [pageId]: layer }));
+  };
+  const step = (from: "past" | "future") => {
+    const h = history.current;
+    const entry = h[from].pop();
+    if (!entry) return;
+    (from === "past" ? h.future : h.past).push({ pageId: entry.pageId, layer: inkOf(entry.pageId) });
+    writeInk(entry.pageId, entry.layer, false);
+    bump((n) => n + 1);
+  };
 
   // The browser's full screen, entered on the way in and left on the way out —
   // and if the person leaves it themselves (Escape does), that is an exit too.
@@ -3071,6 +3100,10 @@ function PresentMode({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A key some control already handled (Escape closing the tool options)
+      // isn't also a command to the room, and nor is typing or moving along the toolbar.
+      if (e.defaultPrevented || isEditableTarget(e.target)) return;
+      if ((e.target as HTMLElement | null)?.closest?.('[role="toolbar"],[role="dialog"]')) return;
       if (e.key === "Escape") { onExit(); return; }
       if (mode !== "pages") return;
       if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); go(idx + 1); }
@@ -3090,7 +3123,27 @@ function PresentMode({
   const arrow = "flex h-10 w-10 items-center justify-center rounded-full text-oat hover:bg-oat/15 disabled:opacity-30 disabled:hover:bg-transparent";
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-pine">
+    <div data-presenting className="fixed inset-0 z-[60] flex flex-col bg-pine">
+      {annotating && (
+        <div className="flex justify-center px-3 pt-3">
+          <div className="max-w-full rounded-[22px] border-[3px] border-oat/30 bg-white px-1.5">
+            <InkToolbar
+              tool={tool}
+              onToolChange={setTool}
+              fingerDraw={fingerDraw}
+              onFingerDrawChange={setFingerDraw}
+              onUndo={() => step("past")}
+              onRedo={() => step("future")}
+              canUndo={history.current.past.length > 0}
+              canRedo={history.current.future.length > 0}
+              teacherPalette
+              zoom={zoom}
+              onZoomChange={onZoomChange}
+              onClearPage={currentPageId && ink[currentPageId] ? () => writeInk(currentPageId, emptyLayer()) : undefined}
+            />
+          </div>
+        </div>
+      )}
       <div className="min-h-0 flex-1">
         <NotebookSurface
           key={mode}
@@ -3098,18 +3151,19 @@ function PresentMode({
           pages={shown}
           fields={fields}
           studentLayers={{}}
-          teacherLayers={{}}
+          teacherLayers={ink}
           masterLayers={masterLayers}
           fieldValues={{}}
-          writeTarget={null}
+          writeTarget={annotating && tool.kind !== "select" ? "teacher" : null}
           tool={tool}
           fingerDraw={fingerDraw}
           zoom={zoom}
           onZoomChange={onZoomChange}
           fieldsEditable={false}
           preview
-          onLayerChange={() => {}}
+          onLayerChange={(pageId, layer) => writeInk(pageId, layer)}
           onFieldChange={() => {}}
+          onVisiblePageChange={setVisiblePageId}
         />
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-4">
@@ -3132,6 +3186,16 @@ function PresentMode({
               </button>
             </>
           )}
+          <span className="mx-1 h-6 w-px bg-oat/30" aria-hidden />
+          <button
+            type="button"
+            className={seg(annotating)}
+            aria-pressed={annotating}
+            onClick={() => setAnnotating((a) => !a)}
+            title={annotating ? "Put the writing tools away" : "Write on the page for the room. Nothing you write here is saved."}
+          >
+            <PenLine className="h-4 w-4" strokeWidth={2.5} /> Annotate
+          </button>
           <span className="mx-1 h-6 w-px bg-oat/30" aria-hidden />
           <select
             value={String(zoom)}

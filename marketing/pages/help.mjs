@@ -151,8 +151,9 @@ const BODY = () => `
         "Can I show a notebook on the projector?",
         `Choose <b>View</b> &rarr; <b>Present</b> in a notebook. It goes full screen with only the
          pages showing \u2014 one at a time with the arrow keys, or the whole notebook scrolling \u2014 and
-         includes writing you haven't sent to students yet. Nothing you do while presenting is saved.
-         Escape brings the editor back.`,
+         includes writing you haven't sent to students yet. <b>Annotate</b> brings up the pen, highlighter
+         and the rest for working an example in front of the class; that writing stays on screen until
+         you stop presenting and is never saved or sent to students. Escape brings the editor back.`,
       ],
       [
         "What blank paper is there?",
