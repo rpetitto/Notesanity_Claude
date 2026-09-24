@@ -1,5 +1,5 @@
 import { layout } from "../layout.mjs";
-import { BETA_FREE, PLANS, dollars } from "../../src/shared/plans.mjs";
+import { BETA_FREE, FREE_NOTEBOOK_LIMIT, FREE_STUDENT_LIMIT, PLANS, dollars } from "../../src/shared/plans.mjs";
 
 /**
  * How Notesanity compares with the tools a teacher already knows.
@@ -114,9 +114,12 @@ const table = () => `
   </table>
 </div>`;
 
+/** The heading is phrased the way a teacher searches: "Notesanity vs Kami". */
+const slug = (name) => name.toLowerCase().replace(/ class notebook$/, "").replace(/\s+/g, "-");
+
 const versus = (name, strengths, choose, us) => `
-  <div class="card">
-    <h3>Notesanity and ${name}</h3>
+  <div class="card" id="${slug(name)}">
+    <h3>Notesanity vs ${name}</h3>
     <p class="small"><b>Where ${name} is stronger.</b> ${strengths}</p>
     <p class="small"><b>Choose ${name} if</b> ${choose}</p>
     <p class="small" style="margin:0"><b>Choose Notesanity if</b> ${us}</p>
@@ -140,26 +143,101 @@ const CSS = `
 .cmp thead th.us{background:var(--mint)}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .cmp-note{margin-top:14px}
+.cmp-jump{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0;padding:0;list-style:none}
+.cmp-jump a{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border:3px solid var(--pine);border-radius:999px;
+  background:var(--white);font-family:var(--display);font-size:16px;font-weight:700;text-decoration:none}
+.cmp-jump a:hover{background:var(--mint)}
+.card[id]{scroll-margin-top:84px}
+.cmp-faq h3{margin-top:26px}
 @media(max-width:560px){.cmp{min-width:820px;font-size:14px}.cmp th,.cmp td{padding:12px}.cmp tbody th{width:104px}}
 </style>`;
+
+/**
+ * The questions a teacher weighing a switch actually types. Rendered on the
+ * page and as FAQPage data from the same list, so the two can't disagree.
+ */
+const FAQ = [
+  [
+    "Is Notesanity a Kami alternative?",
+    `For the classroom part, yes. Kami annotates documents that are assigned through an LMS;
+     Notesanity builds the worksheet into a notebook, gives each student their own copy, and has
+     assigning and grading built in. If you rely on Kami's read-aloud, math tools or Canvas and
+     Schoology connections, it's worth keeping.`,
+  ],
+  [
+    "Does Notesanity work on Chromebooks?",
+    `Yes. It runs in any modern browser — Chromebook, iPad, Windows or Mac — with nothing to
+     install, and students can write with a stylus or type.`,
+  ],
+  [
+    "Can I use Notesanity with Google Classroom?",
+    `Yes. Import a class from Google Classroom, post Notesanity assignments to it, and send grades
+     back to your Classroom gradebook. You don't need Classroom to use Notesanity, either.`,
+  ],
+  [
+    "Can students write on PDFs?",
+    `Yes. Upload a PDF and each page becomes a page in the notebook, ready for handwriting, typing,
+     and the answer boxes you place on it.`,
+  ],
+  [
+    "Is Notesanity free?",
+    BETA_FREE
+      ? `Yes, for every teacher while it's in beta. After that there's a Free plan — ${FREE_NOTEBOOK_LIMIT}
+         class notebooks at a time and up to ${FREE_STUDENT_LIMIT} students in each class — and Pro at
+         ${dollars(PLANS.pro.priceCents)}/year, with a full semester's notice before anything costs money.`
+      : `There's a Free plan — ${FREE_NOTEBOOK_LIMIT} class notebooks at a time and up to
+         ${FREE_STUDENT_LIMIT} students in each class — and Pro at ${dollars(PLANS.pro.priceCents)}/year.`,
+  ],
+];
+
+const stripTags = (html) => String(html).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+
+const SCHEMA = () => ({
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Notesanity", item: "https://notesanity.com/" },
+        { "@type": "ListItem", position: 2, name: "Compare", item: "https://notesanity.com/compare" },
+      ],
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: FAQ.map(([q, a]) => ({
+        "@type": "Question",
+        name: q,
+        acceptedAnswer: { "@type": "Answer", text: stripTags(a) },
+      })),
+    },
+  ],
+});
 
 export default () =>
   layout({
     path: "/compare",
-    title: "Notesanity compared with Kami, OneNote, Google Classroom and Notability",
+    title: "Compare",
+    headTitle: "Notesanity vs Kami, OneNote, Google Classroom & Notability",
     description:
-      "An honest comparison of Notesanity with Kami, OneNote Class Notebook, Google Classroom and Notability — what each does, where each is stronger, and which to choose.",
+      "Compare Notesanity with Kami, OneNote Class Notebook, Google Classroom and Notability: student copies, handwriting, assigning pages, grading and cost.",
+    schema: SCHEMA(),
     body: `
 ${CSS}
 <section style="padding-top:56px">
   <div class="wrap narrow">
     <p class="eyebrow">Compare</p>
-    <h1>How Notesanity compares.</h1>
+    <h1>Notesanity compared with Kami, OneNote, Google Classroom and Notability</h1>
     <p class="lede">
       You probably already use one of these, and each is good at something. Here's what they do,
       where they're stronger than we are, and where Notesanity fits — a notebook the whole class
       writes in, from handing out a worksheet to handing back a grade.
     </p>
+    <ul class="cmp-jump" aria-label="Jump to a comparison">
+      <li><a href="#kami">vs Kami</a></li>
+      <li><a href="#onenote">vs OneNote</a></li>
+      <li><a href="#google-classroom">vs Google Classroom</a></li>
+      <li><a href="#notability">vs Notability</a></li>
+    </ul>
   </div>
 </section>
 
@@ -224,6 +302,14 @@ ${CSS}
 </section>
 
 <section>
+  <div class="wrap narrow cmp-faq">
+    <h2>Common questions</h2>
+    ${FAQ.map(([q, a]) => `<h3>${q}</h3>\n    <p>${a}</p>`).join("\n    ")}
+    <p class="small quiet">More in the <a href="/help">help center</a>.</p>
+  </div>
+</section>
+
+<section style="padding-top:0">
   <div class="wrap narrow">
     <div class="card" style="background:var(--mint)">
       <h2 style="margin-bottom:10px">See it with your own worksheet.</h2>

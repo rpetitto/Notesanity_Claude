@@ -39,8 +39,9 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "September 24, 2026",
-    "What the Free plan will include after the beta.",
+    "A page comparing Notesanity with the tools you already know, and what the Free plan will include after the beta.",
     [
+      ["new", "<b>How Notesanity compares.</b> A new <a href=\"/compare\">comparison page</a> sets Notesanity beside Kami, OneNote Class Notebook, Google Classroom and Notability — what each does, where each is stronger than we are, and which to choose — with every claim about another product checked against that company's own site and dated."],
       ["better", "<b>The Free plan's limits, set out ahead of time.</b> When paid plans arrive, the Free plan will include five class notebooks at a time and up to 35 students in each class. Nothing changes during the beta: every class and notebook stays open, and you'll get a full semester's notice before any limit applies. Archived notebooks never count, nothing is ever deleted, and Pro has no limit on either. See <a href=\"/pricing\">pricing</a>."],
     ],
   ],

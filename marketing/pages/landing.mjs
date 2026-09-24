@@ -164,7 +164,7 @@ export default () =>
     path: "/",
     title: "Notesanity",
     description:
-      "The worksheet you already made, handed out and handed back without printing. Build a notebook from a PDF or blank paper, send it to your class, and grade it on the page they wrote on.",
+      "Turn the worksheet you already made into a digital notebook. Every student gets their own copy to write on, and you grade it on the page — no printing.",
     body: `
 ${HERO_CSS}
 <section style="padding-top:56px">
@@ -218,6 +218,10 @@ ${HERO_CSS}
         the ones in your class, and write on any page a student opens to you. Never more than
         that: their writing stays theirs, and none of it is assigned.`)}
     </div>
+    <p class="small quiet" style="margin:24px 0 0">
+      Coming from Kami, OneNote or Google Classroom?
+      <a href="/compare">See how Notesanity compares</a>.
+    </p>
   </div>
 </section>
 

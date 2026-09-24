@@ -51,7 +51,7 @@ export default () =>
     path: "/pricing",
     title: "Pricing",
     description: BETA_FREE
-      ? "Notesanity is free for every teacher, class and school while it is in beta. Here are the plans that are coming, with a full semester's notice before anything costs money."
+      ? "Notesanity is free for every teacher while in beta. See the Free and Pro plans that follow, with a full semester's notice before anything costs money."
       : "Simple plans for one teacher or a whole school. Free to start, Pro for one teacher, and Department and School plans by invoice.",
     body: `
 <section>
@@ -162,6 +162,12 @@ export default () =>
       addendum before staff can adopt a tool — many do — email
       <a href="mailto:support@notesanity.com">support@notesanity.com</a> and we'll work through
       your paperwork.
+    </p>
+    <h3>How does that compare with Kami, OneNote or Google Classroom?</h3>
+    <p>
+      Each prices differently, and each does a different job. The
+      <a href="/compare">comparison page</a> sets out what they cost, what they do, and where each
+      is stronger than we are.
     </p>
     <h3>Is there a limit we could hit?</h3>
     <p>

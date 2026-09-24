@@ -81,6 +81,13 @@ const BODY = () => `
          one only hides it until you ask for it back.`,
       ],
       [
+        "How is Notesanity different from Kami, OneNote or Google Classroom?",
+        `Notesanity keeps the whole loop in one place: build a notebook from a worksheet, give every
+         student their own copy, assign pages, and grade on the page they wrote on. The
+         <a href="/compare">comparison page</a> goes product by product, including where each is
+         stronger.`,
+      ],
+      [
         "Who can create an account?",
         `Only addresses on a domain your school has approved. The first person to sign in sets
          the school up; after that an admin decides which domains count as staff and which as

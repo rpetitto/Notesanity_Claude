@@ -218,9 +218,15 @@ export const esc = (s) =>
  * `path` drives the current-page marker in the nav; `description` is what a
  * search result and a link preview actually show, so every page sets one.
  */
-export function layout({ path, title, description, body, schema = null, wide = false }) {
-  const full = path === "/" ? "Notesanity — interactive notebooks for classrooms" : `${title} · Notesanity`;
-  const canonical = `https://notesanity.com${path === "/" ? "" : path}`;
+/**
+ * `headTitle` replaces the "<title> · Notesanity" pattern outright, for a page
+ * whose search title needs every character — the comparison page's does.
+ * The root's canonical URL ends in a slash, matching the sitemap, so the two
+ * never name the front page two different ways.
+ */
+export function layout({ path, title, headTitle = null, description, body, schema = null, wide = false }) {
+  const full = headTitle ?? (path === "/" ? "Notesanity — interactive notebooks for classrooms" : `${title} · Notesanity`);
+  const canonical = `https://notesanity.com${path}`;
   const nav = NAV.map(
     (n) => `<a href="${n.href}"${n.href === path ? ' aria-current="page"' : ""}>${n.label}</a>`,
   ).join("");
@@ -233,6 +239,7 @@ export function layout({ path, title, description, body, schema = null, wide = f
 <title>${esc(full)}</title>
 <meta name="description" content="${esc(description)}">
 <link rel="canonical" href="${canonical}">
+<meta name="robots" content="index,follow,max-image-preview:large">
 <meta property="og:title" content="${esc(full)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${canonical}">
@@ -248,6 +255,7 @@ export function layout({ path, title, description, body, schema = null, wide = f
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:image" content="https://notesanity.com/og.png">
+<meta property="og:image:alt" content="Notesanity — interactive notebooks for classrooms">
 ${SITE_SCHEMA}
 ${schema ? `<script type="application/ld+json">${JSON.stringify(schema)}</script>` : ""}
 <style>${CSS}</style>
