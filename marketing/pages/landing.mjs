@@ -1,5 +1,6 @@
 import { layout } from "../layout.mjs";
 import { BETA_FREE } from "../../src/shared/plans.mjs";
+import { lessonLoop } from "./lesson-loop.mjs";
 
 /**
  * The landing page.
@@ -158,104 +159,6 @@ const HERO_CSS = `
  * readers entirely. The heading beside each one already says it.
  */
 
-/** A sheet of paper with the house 4px offset shadow, drawn as a second rect. */
-const sheet = (x, y, w, h, fill = "#fff", r = 12) =>
-  `<rect x="${x + 4}" y="${y + 4}" width="${w}" height="${h}" rx="${r}" fill="#20302C"/>` +
-  `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${fill}" stroke="#20302C" stroke-width="3"/>`;
-
-/** Faint ruling, the same weight the hero panels use. */
-const rules = (x, w, ys) =>
-  `<g stroke="rgba(32,48,44,.18)" stroke-width="2" stroke-linecap="round">${ys
-    .map((y) => `<path d="M${x} ${y}h${w}"/>`)
-    .join("")}</g>`;
-
-const STEP_BUILD = `
-<svg viewBox="0 0 140 112" role="presentation">
-  ${sheet(10, 8, 86, 96)}
-  ${rules(22, 62, [28, 40])}
-  ${scribble(["M24 28c8-5 15 3 23-1s14-4 22-1"], "#20302C", 2.4)}
-  <!-- an answer box dropped onto the page, which is the whole move -->
-  <rect x="24" y="56" width="58" height="32" rx="9" fill="#7FD1AE" stroke="#20302C" stroke-width="3"/>
-  ${rules(34, 38, [70, 80])}
-  <!-- the thing you press to add another -->
-  <circle cx="106" cy="82" r="17" fill="#F4EFE6" stroke="#20302C" stroke-width="3"/>
-  <path d="M106 74v16M98 82h16" stroke="#20302C" stroke-width="3" stroke-linecap="round"/>
-</svg>`;
-
-const STEP_PUSH = `
-<svg viewBox="0 0 140 112" role="presentation">
-  ${sheet(6, 20, 46, 62)}
-  ${rules(16, 26, [36, 46, 56])}
-  <!-- one copy per student, which is what publishing actually does -->
-  ${sheet(84, 8, 34, 46, "#F4EFE6", 8)}
-  ${sheet(90, 26, 34, 46, "#F4EFE6", 8)}
-  ${sheet(96, 44, 34, 46, "#fff", 8)}
-  ${rules(104, 18, [58, 68])}
-  <!-- Two arrows, not one: the press that sends it is the press that sends it
-       again next week. A circular "refresh" glyph was the obvious alternative
-       and was illegible at 118px, which is the only size this is ever drawn. -->
-  <g stroke="#20302C" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M58 44h16"/><path d="M68 37l8 7-8 7"/>
-    <path d="M58 66h16"/><path d="M68 59l8 7-8 7"/>
-  </g>
-</svg>`;
-
-const STEP_ASSIGN = `
-<svg viewBox="0 0 140 112" role="presentation">
-  <!-- some of the pages, not all of them: an assignment is a selection -->
-  ${sheet(4, 2, 32, 38, "#fff", 8)}
-  ${sheet(46, 2, 32, 38, "#fff", 8)}
-  ${sheet(88, 2, 32, 38, "#F4EFE6", 8)}
-  ${rules(11, 18, [16, 26])}
-  ${rules(53, 18, [16, 26])}
-  <g fill="#7FD1AE" stroke="#20302C" stroke-width="3">
-    <circle cx="34" cy="38" r="11"/><circle cx="76" cy="38" r="11"/>
-  </g>
-  ${scribble(["M29 38l3.5 4 7-8", "M71 38l3.5 4 7-8"], "#20302C", 3)}
-  <!-- and the date they're due, which is the other half of setting a task.
-       The two rings and the band under them are what make a rounded green card
-       read as a calendar at this size; without them it is just a pill. -->
-  <g stroke="#20302C" stroke-width="4" stroke-linecap="round">
-    <path d="M56 54v14M84 54v14"/>
-  </g>
-  ${sheet(42, 62, 56, 42, "#7FD1AE", 9)}
-  <path d="M42 78h56" stroke="#20302C" stroke-width="3.5"/>
-</svg>`;
-
-const STEP_GRADE = `
-<svg viewBox="0 0 140 112" role="presentation">
-  ${sheet(10, 8, 86, 96)}
-  ${rules(22, 62, [30, 44])}
-  ${scribble(["M24 30c9-5 16 3 24-1s15-4 22-1", "M24 44c11-4 18 3 28-1s16-3 22-1"], "#20302C", 2.4)}
-  <!-- the teacher's mark, in the red they'd actually reach for -->
-  ${scribble(["M28 68l12 13 26-31"], "#A3341F", 6)}
-  <rect x="70" y="76" width="62" height="28" rx="14" fill="#7FD1AE" stroke="#20302C" stroke-width="3"/>
-  <text x="101" y="95" text-anchor="middle"
-        style="font-family:var(--display);font-weight:700;font-size:16px;fill:#20302C">18/20</text>
-</svg>`;
-
-const STEPS_CSS = `
-<style>
-/* Top-aligned by default: on a narrow screen the paragraph runs to seven lines
-   and a centered drawing floats away from the heading it belongs to. Once the
-   text is short enough for that not to happen, centering looks better. */
-.step{display:flex;gap:20px;align-items:flex-start}
-@media(min-width:720px){.step{align-items:center}}
-.step-art{flex:0 0 118px}
-.step-art svg{display:block;width:100%;height:auto}
-.step h3{margin-bottom:6px}
-@media(max-width:560px){.step{gap:14px}.step-art{flex-basis:92px}}
-</style>`;
-
-const step = (title, art, body) => `
-  <div class="card step">
-    <div class="step-art" aria-hidden="true">${art}</div>
-    <div>
-      <h3>${title}</h3>
-      <p class="small quiet" style="margin:0">${body}</p>
-    </div>
-  </div>`;
-
 export default () =>
   layout({
     path: "/",
@@ -308,11 +211,8 @@ ${HERO_CSS}
         grade. Hover any mark to see when it was made.`)}
       ${feature("Nothing gets lost", `
         Work is saved as it's written and mirrored locally first, so a dropped Wi-Fi
-        connection doesn't cost a lesson. It syncs when the network comes back.`)}
-      ${feature("Keeps Google Classroom", `
-        Import a class and its roster in two taps. Post an assignment to that course and it
-        appears there with a link straight to the work; grade it here and the grade goes back
-        to your Classroom gradebook.`)}
+        connection doesn't cost a lesson. Every stroke, typed note and comment carries the
+        time it was made, and answers, hand-ins and grades are logged as they happen.`)}
       ${feature("Their own notebooks too", `
         Students can keep their own notebooks — for a class, or entirely private. You can read
         the ones in your class, and write on any page a student opens to you. Never more than
@@ -321,39 +221,34 @@ ${HERO_CSS}
   </div>
 </section>
 
-${STEPS_CSS}
 <section>
-  <div class="wrap narrow">
+  <div class="wrap">
     <p class="eyebrow">How a lesson goes</p>
     <h2>Four steps, and then it's just a notebook.</h2>
-    <div class="grid" style="gap:16px;margin-top:24px">
-      ${step(
-        "1 · Build it",
-        STEP_BUILD,
-        `Bring in a worksheet or start from blank paper. Add prompts and answer boxes where you
+    ${lessonLoop([
+      {
+        title: "1 · Build it",
+        body: `Bring in a worksheet or start from blank paper. Add prompts and answer boxes where you
          want them. Group pages into sections so "the practice set" means something.`,
-      )}
-      ${step(
-        "2 · Push it",
-        STEP_PUSH,
-        `One press sends it to the class, and every student gets their own copy. Fix a typo or
+      },
+      {
+        title: "2 · Push it",
+        body: `One press sends it to the class, and every student gets their own copy. Fix a typo or
          add a page next week and the same press updates every copy — their writing stays
          exactly where they put it.`,
-      )}
-      ${step(
-        "3 · Assign it",
-        STEP_ASSIGN,
-        `Not every notebook is homework. When one is, pick the pages that make up the task and
+      },
+      {
+        title: "3 · Assign it",
+        body: `Not every notebook is homework. When one is, pick the pages that make up the task and
          set a due date — those pages come back to you to be graded. A student who joins late
          gets caught up automatically.`,
-      )}
-      ${step(
-        "4 · Grade it",
-        STEP_GRADE,
-        `Open the roster, move between students, and write on their page. Return it with a
+      },
+      {
+        title: "4 · Grade it",
+        body: `Open the roster, move between students, and write on their page. Return it with a
          grade and a comment — or reopen it if they need another go.`,
-      )}
-    </div>
+      },
+    ])}
   </div>
 </section>
 
