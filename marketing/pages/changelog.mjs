@@ -85,7 +85,7 @@ const RELEASES = [
       ["better", "<b>Find fields now works on a scanned worksheet.</b> It used to read the document's own text, so a worksheet you photographed or scanned had nothing to find. It now looks at the page itself and picks out the ruled lines, which is what the blanks actually are on a scan."],
       ["new", "<b>Saved phrases.</b> The sentences you write on every third paper are now one tap away. Write a comment, press <b>Save this phrase</b>, and it's offered inside every comment box from then on — in your own classes, next term, next year. The ones you reach for most rise to the top on their own."],
       ["new", "<b>Say it instead of typing it.</b> Open a comment while marking and there's now a <b>Say it instead</b> button: record a few seconds out loud and it's pinned to that spot on the page for the student to play back. Faster to give than typing, and a lot warmer to receive. You can still add written text alongside it."],
-      ["new", "<b>Shapes.</b> A new tool in the annotation toolbar draws a line, an arrow, a box or a circle. Drag to place one, and use a line as an underline or a strikethrough. A shape behaves like anything else you draw: rub it out with the eraser, or pick it up to move, resize and turn it."],
+      ["new", "<b>Shapes.</b> A new tool in the annotation toolbar draws a line, an arrow, a box or a circle. Drag to place one, and use a line as an underline or a strikethrough. A shape behaves like anything else you draw: erase it, or pick it up to move, resize and turn it."],
       ["better", "<b>Finding the blanks in a worksheet stays free for everyone.</b> When the beta ends, Pro will be about making last year's work pay off again: unlimited notebooks and the page library. Nothing you need to teach this week goes behind it. You'll get a full semester's notice before anything changes."],
     ],
   ],
@@ -190,7 +190,7 @@ const RELEASES = [
     "August 24, 2026",
     "Erasing, students' own notebooks, and a save bug that could lose a stroke.",
     [
-      ["new", "The eraser has two modes. <b>Quick</b> removes a whole stroke wherever you touch it; <b>Manual</b> rubs out only the part you drag over, so you can fix one letter without redrawing the word."],
+      ["new", "The eraser has two modes. <b>Quick</b> removes a whole stroke wherever you touch it; <b>Manual</b> erases only the part you drag over, so you can fix one letter without redrawing the word."],
       ["new", "Students can keep their own notebook inside a class. Their teacher can read it; nobody can write in it, and it is never assigned."],
       ["new", "Students can name and group the pages of their own notebooks into sections."],
       ["new", "Teachers can build a notebook from a file already in Google Drive, without downloading it first."],

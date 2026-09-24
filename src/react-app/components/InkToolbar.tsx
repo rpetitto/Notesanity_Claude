@@ -612,7 +612,7 @@ function ToolOptions({
           <div role="radiogroup" aria-labelledby="opt-erase" onKeyDown={groupKeys} className="grid gap-1.5">
             {([
               { mode: "quick", name: "Whole strokes", hint: "Touch a stroke to remove all of it" },
-              { mode: "manual", name: "Just what I rub", hint: "Removes only the part you drag over" },
+              { mode: "manual", name: "Part of a stroke", hint: "Erases only where you drag" },
             ] as const).map((o) => {
               const on = (tool.erase ?? "quick") === o.mode;
               return (

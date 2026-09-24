@@ -322,7 +322,7 @@ const BODY = () => `
       [
         "What's the difference between the two erasers?",
         `Pick the eraser and both are offered; tap it again, or its <b>▾</b>, to change later. <b>Whole strokes</b> removes a stroke wherever
-         you touch it — fastest for clearing a mistake. <b>Just what I rub</b> rubs out only the part you drag over, for fixing one letter
+         you touch it — fastest for clearing a mistake. <b>Part of a stroke</b> erases only where you drag, for fixing one letter
          without redrawing the word.`,
       ],
       [
