@@ -19,17 +19,20 @@ const item = (t) => `<li style="display:flex;gap:10px;margin-bottom:10px">${tick
 
 const srOnly = `position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap`;
 
+/** Every price says what it's per, so a budget line can be copied straight off the page. */
+const perYear = `<span class="quiet" style="font-size:16px;font-weight:400">/year</span>`;
 const price = (key) => {
   const p = PLANS[key];
-  if (p.priceCents === 0) return `<p style="margin:0 0 4px;font-family:var(--display);font-size:34px;font-weight:700">$0</p>`;
+  const big = "margin:0 0 4px;font-family:var(--display);font-size:34px;font-weight:700";
+  if (p.priceCents === 0) return `<p style="${big}">$0${perYear}</p>`;
   const amount = dollars(p.priceCents);
   if (BETA_FREE) {
-    return `<p style="margin:0 0 4px;font-family:var(--display);font-size:34px;font-weight:700">
-      <s aria-hidden="true" style="opacity:.45">${amount}</s><span style="${srOnly}">normally ${amount} a year,</span>
+    return `<p style="${big}">
+      <span aria-hidden="true" style="opacity:.45"><s>${amount}</s>${perYear}</span><span style="${srOnly}">normally ${amount} a year,</span>
       <span class="beta" style="vertical-align:middle;font-size:13px">Free while in beta</span>
     </p>`;
   }
-  return `<p style="margin:0 0 4px;font-family:var(--display);font-size:34px;font-weight:700">${amount}<span class="quiet" style="font-size:16px;font-weight:400">/year</span></p>`;
+  return `<p style="${big}">${amount}${perYear}</p>`;
 };
 
 const tier = ({ key, who, bullets, cta }) => `
