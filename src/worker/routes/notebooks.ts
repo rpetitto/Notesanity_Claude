@@ -878,6 +878,46 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
   return c.json({ ok: true });
 }));
 
+/**
+ * Copy one field, nudged down and right, and hand back its id.
+ *
+ * Server-side because a picture or a prompt's illustration is a file under
+ * this notebook's prefix: the copy needs its own, or deleting one box's
+ * picture would take the other's with it. Everything the teacher set — the
+ * words, the options, a link's address — comes across; nobody's answers do,
+ * because answers belong to a field id and the copy has a new one.
+ */
+app.post("/api/notebooks/:id/fields/:fieldId/duplicate", handler(async (c) => {
+  const { nb } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
+  const f = await db
+    .prepare(
+      `SELECT f.*, p.width AS page_w, p.height AS page_h FROM fields f JOIN pages p ON p.id = f.page_id
+        WHERE f.id = ? AND f.notebook_id = ? AND f.archived = 0`,
+    )
+    .bind(param(c, "fieldId"), nb.id)
+    .first<any>();
+  if (!f) throw new HttpError(404, "Field not found");
+
+  const id = uid();
+  let mediaKey: string | null = null;
+  if (f.media_key) {
+    mediaKey = `notebooks/${nb.id}/fields/${uid()}`;
+    await storage.copy(f.media_key, mediaKey);
+  }
+  // Offset, but never off the page: a box against the bottom edge is copied upward.
+  const nudge = 12;
+  const x = f.x + nudge + f.w <= f.page_w ? f.x + nudge : Math.max(0, f.x - nudge);
+  const y = f.y + nudge + f.h <= f.page_h ? f.y + nudge : Math.max(0, f.y - nudge);
+  await db.batch([
+    db.prepare(
+      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, media_key, archived, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    ).bind(id, nb.id, f.page_id, f.type, x, y, f.w, f.h, f.label ?? "", f.options ?? "[]", f.prompt ?? "", f.content ?? "", mediaKey, now(), now()),
+    db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id),
+  ]);
+  return c.json({ field: { id } });
+}));
+
 const MAX_FIELD_MEDIA_BYTES = 6 * 1024 * 1024;
 
 /** Attach a teacher-supplied image — a prompt illustration or a `figure` block. */

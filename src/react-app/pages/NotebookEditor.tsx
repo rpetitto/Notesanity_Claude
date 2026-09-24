@@ -6,8 +6,9 @@ import {
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
   FolderOpen, LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
-  Link2 as LinkIcon, ExternalLink, Unlink2,
+  Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal,
 } from "lucide-react";
+import { type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, pointFor, watchLongPress } from "../components/ContextMenu";
 import { toast } from "sonner";
 import { api, assetUrl, pageSource, type FieldRec, type PageRec } from "../lib/api";
 import { loadPdf, readPageLinks, readPageSizes, type PdfLink } from "../lib/pdf";
@@ -105,6 +106,13 @@ const FIELD_TYPE_LABEL: Record<string, string> = {
   link: "Link",
 };
 const fieldTypeLabel = (t: string) => FIELD_TYPE_LABEL[t] ?? t;
+
+/** What "edit" means for each kind of box, in the menu. */
+const FIELD_EDIT_LABEL: Record<string, string> = {
+  richtext: "Edit text…",
+  figure: "Change picture…",
+  link: "Edit link…",
+};
 
 /** What a field's box says on the page in the editor: its type, and what tells it apart. */
 function fieldChip(f: FieldRow): string {
@@ -612,9 +620,68 @@ export default function NotebookEditor() {
     onSuccess: () => invalidate(),
     onError: (e: Error) => toast.error(e.message),
   });
+  const restoreField = useMutation({
+    mutationFn: (id: string) => api.patch(`/api/notebooks/${notebookId}/fields/${id}`, { archived: false }),
+    onSuccess: (_r, id) => { invalidate(); setSelectedField(id); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  /**
+   * Deleting hides the box rather than erasing it — students' answers stay
+   * attached to it — so Undo is exact: the box comes back with every answer.
+   * That is why there's no "are you sure": the undo is the safety, and a
+   * dialog on every delete is a tax on tidying a page.
+   */
   const deleteField = useMutation({
     mutationFn: (id: string) => api.del(`/api/notebooks/${notebookId}/fields/${id}`),
-    onSuccess: () => { setSelectedField(null); invalidate(); },
+    onSuccess: (_r, id) => {
+      const f = (query.data?.fields ?? []).find((x) => x.id === id);
+      setSelectedField(null);
+      invalidate();
+      toast(`${f ? fieldTypeLabel(f.type) : "Box"} deleted`, {
+        action: { label: "Undo", onClick: () => restoreField.mutate(id) },
+      });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const duplicateField = useMutation({
+    mutationFn: (id: string) => api.post<{ field: { id: string } }>(`/api/notebooks/${notebookId}/fields/${id}/duplicate`, {}),
+    onSuccess: (res) => { invalidate(); setSelectedField(res.field.id); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  /** The right-click / long-press / "…" menu for one box. Every item is also in the side panel or on a key. */
+  const openFieldMenu = (f: FieldRow, x: number, y: number) => {
+    const href = f.type === "link" ? normalizeLink(f.content ?? "") : null;
+    const entries: ContextEntry[] = [];
+    if (href) entries.push({ label: "Open link", icon: <ExternalLink />, onSelect: () => window.open(href, "_blank", "noopener,noreferrer") });
+    entries.push({ label: FIELD_EDIT_LABEL[f.type] ?? "Edit box…", icon: <Pencil />, onSelect: () => setSelectedField(f.id) });
+    if (href) entries.push({ label: "Copy address", icon: <Copy />, onSelect: () => { void navigator.clipboard?.writeText(href); } });
+    entries.push(
+      { label: "Duplicate", icon: <CopyPlus />, shortcut: `${MOD}D`, onSelect: () => duplicateField.mutate(f.id) },
+      { kind: "separator" },
+      { label: "Delete", icon: <Trash2 />, danger: true, shortcut: "⌫", onSelect: () => deleteField.mutate(f.id) },
+    );
+    openContextMenu({ x, y, title: fieldChip(f), entries });
+  };
+
+  // Delete, duplicate and the menu key act on the selected box — never while
+  // something is being typed, in the side panel or anywhere else.
+  useEffect(() => {
+    if (!selectedField) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      const f = (query.data?.fields ?? []).find((x) => x.id === selectedField);
+      if (!f) return;
+      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteField.mutate(f.id); }
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateField.mutate(f.id); }
+      else if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") {
+        e.preventDefault();
+        const at = pointFor(document.querySelector(`[data-field-box="${f.id}"]`));
+        openFieldMenu(f, at.x, at.y);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
   const patchPage = useMutation({
     mutationFn: ({ id, ...body }: any) => api.patch(`/api/notebooks/${notebookId}/pages/${id}`, body),
@@ -965,6 +1032,7 @@ export default function NotebookEditor() {
           onArchiveToggle={(id, archived) => patchPage.mutate({ id, archived })}
           onDelete={(id) => confirmDelete([id])}
           onDuplicate={(id) => duplicatePages.mutate([id])}
+          onSaveToLibrary={(id) => saveToLibrary.mutate([id])}
           annotations={railAnnotations}
           onArrange={(entries) => arrangePages.mutate(entries)}
           onRenameGroup={(from, to) => {
@@ -1588,6 +1656,7 @@ export default function NotebookEditor() {
                         setTool("none");
                       }}
                       onCommit={(id, rect) => updateField.mutate({ id, ...rect })}
+                      onMenu={openFieldMenu}
                       onEmptyPress={({ x, y }) => {
                         const ref = markRefAt(annotationLayer, x, y, 6 / scale);
                         if (!ref) return false;
@@ -2106,8 +2175,10 @@ function AppearancePopover({
 
 /** Drag-to-create and drag-to-move overlay for form fields. */
 function FieldLayer({
-  pageWidth, pageHeight, scale, fields, tool, selected, onSelect, onCreate, onCommit, onEmptyPress,
+  pageWidth, pageHeight, scale, fields, tool, selected, onSelect, onCreate, onCommit, onEmptyPress, onMenu,
 }: {
+  /** The box's menu, at a point on screen: right-click, a held finger, or its "…" button. */
+  onMenu?: (field: FieldRow, x: number, y: number) => void;
   pageWidth: number;
   pageHeight: number;
   scale: number;
@@ -2126,8 +2197,14 @@ function FieldLayer({
   const ref = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [drag, setDrag] = useState<
-    { id: string; mode: "move" | "resize"; startX: number; startY: number; orig: FieldRow } | null
+    { id: string; mode: "move" | "resize"; startX: number; startY: number; orig: FieldRow; clientX: number; clientY: number } | null
   >(null);
+  /**
+   * Whether the drag has gone past a few pixels. Until it has, a press is a
+   * press: it selects the box but doesn't move it, so a held finger (the
+   * long-press) or a wobbly click can't nudge a box and save it somewhere new.
+   */
+  const dragMoved = useRef(false);
   const [preview, setPreview] = useState<Record<string, { x: number; y: number; w: number; h: number }>>({});
 
   const toPage = (e: React.PointerEvent | PointerEvent) => {
@@ -2155,6 +2232,10 @@ function FieldLayer({
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (drag) {
+      if (!dragMoved.current) {
+        if (Math.hypot(e.clientX - drag.clientX, e.clientY - drag.clientY) < 5) return;
+        dragMoved.current = true;
+      }
       const p = toPage(e);
       const dx = p.x - drag.startX;
       const dy = p.y - drag.startY;
@@ -2215,14 +2296,28 @@ function FieldLayer({
               isSelected ? "border-pine" : "border-pine/50 hover:border-pine",
             )}
             style={{ left: rect.x * scale, top: rect.y * scale, width: rect.w * scale, height: rect.h * scale, cursor: "move" }}
+            data-field-box={f.id}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!longPressJustFired()) onMenu?.(f, e.clientX, e.clientY);
+            }}
             onPointerDown={(e) => {
               if (tool !== "none") return;
               e.stopPropagation();
+              // The right button is the menu's (onContextMenu); it never drags.
+              if (e.pointerType === "mouse" && e.button !== 0) return;
               e.preventDefault();
               (e.currentTarget.parentElement as HTMLElement).setPointerCapture(e.pointerId);
               onSelect(f.id);
               const p = toPage(e);
-              setDrag({ id: f.id, mode: "move", startX: p.x, startY: p.y, orig: f });
+              dragMoved.current = false;
+              setDrag({ id: f.id, mode: "move", startX: p.x, startY: p.y, orig: f, clientX: e.clientX, clientY: e.clientY });
+              watchLongPress(e, (x, y) => {
+                setDrag(null);
+                setPreview((prev) => { const next = { ...prev }; delete next[f.id]; return next; });
+                onMenu?.(f, x, y);
+              });
             }}
           >
             <span
@@ -2245,9 +2340,26 @@ function FieldLayer({
                 (e.currentTarget.parentElement?.parentElement as HTMLElement).setPointerCapture(e.pointerId);
                 onSelect(f.id);
                 const p = toPage(e);
-                setDrag({ id: f.id, mode: "resize", startX: p.x, startY: p.y, orig: f });
+                dragMoved.current = false;
+                setDrag({ id: f.id, mode: "resize", startX: p.x, startY: p.y, orig: f, clientX: e.clientX, clientY: e.clientY });
               }}
             />
+            {isSelected && onMenu && (
+              <button
+                type="button"
+                aria-label={`More actions for this ${fieldTypeLabel(f.type).toLowerCase()}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const at = pointFor(e.currentTarget);
+                  onMenu(f, at.x, at.y);
+                }}
+                className="absolute -right-3.5 -top-3.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-pine bg-white text-pine shadow-[2px_2px_0_0_var(--color-pine)] hover:bg-oat"
+              >
+                <span className="absolute -inset-2" aria-hidden />
+                <MoreHorizontal className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         );
       })}

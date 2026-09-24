@@ -12,6 +12,7 @@
  */
 
 import { useRef, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { MoreHorizontal } from "lucide-react";
 import type { MarkBox, MarkOp } from "../lib/ink";
 
 /** The eight box handles, plus the one above the top edge that turns it. */
@@ -40,8 +41,10 @@ const SLOP = 4;
 const MIN_FACTOR = 0.06;
 
 export default function MarkSelection({
-  box, scale, pageRef, onPreview, onCommit,
+  box, scale, pageRef, onPreview, onCommit, onMenu,
 }: {
+  /** The "…" button: everything the right-click menu offers, for a finger or a mouse that doesn't know to ask. */
+  onMenu?: () => void;
   box: MarkBox;
   scale: number;
   /** The page element, so a pointer position can be read in page units. */
@@ -79,6 +82,8 @@ export default function MarkSelection({
   };
 
   const start = (handle: Handle | "body") => (e: ReactPointerEvent) => {
+    // The right button opens the menu (the page listens for that); it never drags.
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     const p = toPage(e);
     if (!p) return;
     e.preventDefault();
@@ -181,6 +186,22 @@ export default function MarkSelection({
         </svg>
       </div>
       <div className="absolute border-l-2 border-[#3F6C9E]" style={{ left: "50%", top: -10, height: 10 }} />
+
+      {onMenu && (
+        <button
+          type="button"
+          aria-label="More actions for this mark"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onMenu(); }}
+          className="absolute flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#3F6C9E] bg-white text-[#3F6C9E] hover:bg-[#3F6C9E]/10"
+          // Off the top-right corner, clear of the corner handle; a 44px hit
+          // area around the visible 28px dot so a finger finds it.
+          style={{ left: "100%", top: -34, marginLeft: 6, pointerEvents: "auto", touchAction: "manipulation" }}
+        >
+          <span className="absolute -inset-2" aria-hidden />
+          <MoreHorizontal className="h-4 w-4" strokeWidth={2.5} />
+        </button>
+      )}
 
       {(Object.keys(GRIP) as Exclude<Handle, "rotate">[]).map((h) => {
         const { hx, hy, cursor } = GRIP[h];

@@ -13,8 +13,9 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
-  ChevronDown, ChevronRight, CopyPlus, EyeOff, GripVertical, Pencil, RotateCcw, Trash2,
+  CheckSquare, ChevronDown, ChevronRight, CopyPlus, EyeOff, FileText, GripVertical, LibraryBig, MoreHorizontal, Pencil, RotateCcw, Trash2,
 } from "lucide-react";
+import { type ContextEntry, longPressJustFired, openContextMenu, pointFor, watchLongPress } from "./ContextMenu";
 import PageThumb from "./PageThumb";
 import type { LayerData } from "../lib/ink";
 import { pageSource, type PageRec } from "../lib/api";
@@ -43,6 +44,8 @@ interface Props {
   onDelete: (pageId: string) => void;
   /** Copy a page, with its boxes, in behind the original. */
   onDuplicate: (pageId: string) => void;
+  /** Keep a copy in the page library. Absent where the library isn't available. */
+  onSaveToLibrary?: (pageId: string) => void;
   /** The teacher's own markup per page, so a preview shows what's been drawn on. */
   annotations?: Record<string, LayerData>;
   onArrange: (entries: ArrangeEntry[]) => void;
@@ -56,9 +59,32 @@ interface Section {
 
 export default function NotebookPageList({
   notebookId, pages, assignmentCounts, currentPageId, selection,
-  onSelectionChange, onOpenPage, onRename, onArchiveToggle, onDelete, onDuplicate,
+  onSelectionChange, onOpenPage, onRename, onArchiveToggle, onDelete, onDuplicate, onSaveToLibrary,
   onArrange, onRenameGroup, annotations,
 }: Props) {
+  /**
+   * Everything a page row can do, in one menu: right-click, a held finger, or
+   * the "…" a touch screen shows in place of the hover icons. The hover icons
+   * stay for a mouse; on an iPad they were never reachable.
+   */
+  const openRowMenu = (p: ListPage, label: string, x: number, y: number) => {
+    const entries: ContextEntry[] = [];
+    if (!p.archived) entries.push({ label: "Open", icon: <FileText />, onSelect: () => onOpenPage(p.id) });
+    entries.push(
+      { label: "Rename", icon: <Pencil />, onSelect: () => setRenaming(p.id) },
+      { label: "Duplicate", icon: <CopyPlus />, onSelect: () => onDuplicate(p.id) },
+    );
+    if (onSaveToLibrary) entries.push({ label: "Save to library", icon: <LibraryBig />, onSelect: () => onSaveToLibrary(p.id) });
+    entries.push(
+      { label: selection.has(p.id) ? "Deselect" : "Select", icon: <CheckSquare />, onSelect: () => toggleSelect(p.id, false) },
+      { kind: "separator" },
+      p.archived
+        ? { label: "Show to students again", icon: <RotateCcw />, onSelect: () => onArchiveToggle(p.id, false) }
+        : { label: "Hide from students", icon: <EyeOff />, onSelect: () => onArchiveToggle(p.id, true) },
+      { label: "Delete page", icon: <Trash2 />, danger: true, onSelect: () => onDelete(p.id) },
+    );
+    openContextMenu({ x, y, title: label, entries });
+  };
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ id: string; y: number } | null>(null);
@@ -192,12 +218,21 @@ export default function NotebookPageList({
                   {showDropLine && <div className="mx-1 my-0.5 h-0.5 rounded bg-mint" />}
                   <div
                     ref={(node) => { rowRefs.current[p.id] = node; }}
+                    onContextMenu={(e) => {
+                      if ((e.target as HTMLElement).closest("input")) return;
+                      e.preventDefault();
+                      if (!longPressJustFired()) openRowMenu(p, p.label || `Page ${index + 1}`, e.clientX, e.clientY);
+                    }}
+                    onPointerDown={(e) => {
+                      if ((e.target as HTMLElement).closest("button, input")) return;
+                      watchLongPress(e, (x, y) => openRowMenu(p, p.label || `Page ${index + 1}`, x, y));
+                    }}
                     onClick={(e) => {
                       if (e.metaKey || e.ctrlKey || e.shiftKey) toggleSelect(p.id, e.shiftKey);
                       else if (!p.archived) onOpenPage(p.id);
                     }}
                     className={cn(
-                      "group mb-1 flex cursor-pointer items-start gap-1.5 rounded-lg p-1.5 transition-colors",
+                      "group mb-1 flex cursor-pointer select-none items-start gap-1.5 rounded-lg p-1.5 transition-colors [-webkit-touch-callout:none]",
                       currentPageId === p.id && "bg-mint/20 ring-1 ring-mint",
                       selection.has(p.id) && "bg-mint/30",
                       isDragging && "opacity-40",
@@ -271,7 +306,19 @@ export default function NotebookPageList({
                         {count > 0 && <span className="text-pine">· assigned</span>}
                         {!!p.archived && <span className="text-[#5c4611]">· archived</span>}
                       </div>
-                      <div className="mt-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                      <button
+                        type="button"
+                        aria-label={`More actions for ${p.label || `page ${index + 1}`}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const at = pointFor(e.currentTarget);
+                          openRowMenu(p, p.label || `Page ${index + 1}`, at.x, at.y);
+                        }}
+                        className="mt-1 hidden h-11 w-11 items-center justify-center rounded-full text-pine/70 hover:bg-white [@media(pointer:coarse)]:inline-flex"
+                      >
+                        <MoreHorizontal className="h-5 w-5" strokeWidth={2.5} />
+                      </button>
+                      <div className="mt-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:hidden">
                         <button
                           title="Rename page"
                           onClick={(e) => { e.stopPropagation(); setRenaming(p.id); }}

@@ -39,14 +39,19 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  ImageIcon, Loader2, MessageSquare, Mic, Music, RefreshCw, Square, Trash2, X,
+  Copy, CopyPlus, ExternalLink, ImageIcon, Loader2, MessageSquare, MessageSquarePlus, Mic, Music, PenLine,
+  RefreshCw, Square, Trash2, Type as TypeIcon, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { FieldRec } from "../lib/api";
 import {
   type LayerData, type MarkHit, type MarkOp, type MarkRef, type ShapeKind, type Stroke, type TextBox, type ToolKind,
   drawLayer, drawStroke, hitStroke, markAt, markBox, markRefAt, shapePoints, straightenHighlight, transformMark,
+  HIGHLIGHTER_COLORS, PEN_COLORS, TEACHER_COLORS, duplicateMark, markInfo, recolorMark, removeMark, resizeMark,
 } from "../lib/ink";
+import {
+  type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, watchLongPress,
+} from "./ContextMenu";
 import MarkSelection from "./MarkSelection";
 import { renderPageToCanvas } from "../lib/pdf";
 import { isPattern, renderPatternToCanvas, DEFAULT_PATTERN_COLOR } from "../lib/patterns";
@@ -336,6 +341,8 @@ export default function PageCanvas({
 
   const beginMarkDrag = (ref: MarkRef, e: React.PointerEvent) => {
     if (!canWrite || tool.kind !== "select") return false;
+    // A right-click is for the menu; it selects, but never starts a drag.
+    if (e.pointerType === "mouse" && e.button !== 0) { setSelected(ref); return true; }
     setSelected(ref);
     const surface = e.currentTarget as HTMLElement;
     try { surface.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
@@ -386,7 +393,8 @@ export default function PageCanvas({
     // A press that never became a drag is still a tap, and a tap on a typed
     // note means "let me type in it" — the box must not swallow that just
     // because it happens to be lying over the words.
-    if (!op && selected?.kind === "text") { setEditingText(selected.id); return; }
+    // A hold that opened the menu isn't a tap, though it ends the same way.
+    if (!op && selected?.kind === "text" && !longPressJustFired()) { setEditingText(selected.id); return; }
     if (!op || !selected || !onLayerChange) return;
     onLayerChange(transformMark(activeLayer, selected, op));
     justDragged.current = true;
@@ -491,6 +499,15 @@ export default function PageCanvas({
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "pen") lastPenAt.current = Date.now();
     if (!canWrite) return;
+    // Only the main button writes or picks things up; the right one is the menu's.
+    if (e.pointerType === "mouse" && e.button !== 0) {
+      if (tool.kind === "select") {
+        const { x, y } = toPage(e, e.currentTarget);
+        const ref = markRefAt(activeLayer, x, y, 6 / scale);
+        setSelected(ref);
+      }
+      return;
+    }
 
     const surface = e.currentTarget;
     const { x, y } = toPage(e, surface);
@@ -592,14 +609,14 @@ export default function PageCanvas({
    * a pen tap on one keeps drawing, as it always has, rather than being
    * caught by a note that only opens for the other tools.
    */
-  const typeableUnder = (clientX: number, clientY: number): HTMLElement | null => {
+  const typeableUnder = (clientX: number, clientY: number, selector = TAP_TARGETS): HTMLElement | null => {
     const root = pageRef.current;
     if (!root) return null;
     root.classList.add("tap-probe");
     try {
       for (const el of document.elementsFromPoint(clientX, clientY)) {
         if (!root.contains(el)) continue;
-        const target = (el as HTMLElement).closest<HTMLElement>(TAP_TARGETS);
+        const target = (el as HTMLElement).closest<HTMLElement>(selector);
         if (target && root.contains(target)) return target;
       }
       return null;
@@ -875,6 +892,180 @@ export default function PageCanvas({
     setOpenComment(null);
   };
 
+  // ---- the right-click / long-press menu ----
+  /**
+   * The menu acts after it opens — a size nudged three times, a color picked
+   * a second later — so it reads the layer as it is then, not as it was when
+   * the menu was built.
+   */
+  const live = useRef({ layer: activeLayer, onLayerChange });
+  live.current = { layer: activeLayer, onLayerChange };
+  const change = (next: (layer: LayerData) => LayerData | null) => {
+    const { layer, onLayerChange: commit } = live.current;
+    const out = commit ? next(layer) : null;
+    if (out && commit) commit(out);
+  };
+
+  const when = (ts?: number) =>
+    ts ? new Date(ts).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null;
+  const MADE: Record<MarkHit["kind"], string> = {
+    stroke: "Written", highlight: "Highlighted", text: "Typed", stamp: "Stamped", comment: "Commented",
+  };
+  const OWN_TITLE: Record<MarkHit["kind"], string> = {
+    stroke: "Your writing", highlight: "Your highlight", text: "Your note", stamp: "Your stamp", comment: "Your comment",
+  };
+
+  const addCommentAt = (x: number, y: number) => {
+    const id = uid();
+    change((layer) => ({ ...layer, c: [...layer.c, { id, x, y, t: "", a: authorName, ts: Date.now() }] }));
+    setOpenComment(id);
+  };
+
+  /** The entries for one of your own marks — shared by the menu and its keyboard shortcuts. */
+  const deleteMark = (ref: MarkRef) => {
+    change((layer) => removeMark(layer, ref));
+    setSelected(null);
+  };
+  const copyMark = (ref: MarkRef) => {
+    const { layer } = live.current;
+    const dup = duplicateMark(layer, ref);
+    if (!dup) return;
+    live.current.onLayerChange?.(dup.layer);
+    if (draggableMarks) setSelected(dup.ref);
+  };
+
+  const ownMarkEntries = (ref: MarkRef): { title: string; entries: ContextEntry[] } | null => {
+    const info = markInfo(activeLayer, ref);
+    if (!info) return null;
+    const entries: ContextEntry[] = [];
+    const made = when(info.ts);
+    if (made) entries.push({ kind: "note", text: `${MADE[info.kind]} ${made}` });
+    if (ref.kind === "text") {
+      entries.push({ label: "Edit text", icon: <PenLine />, onSelect: () => setEditingText(ref.id) });
+    }
+    if (info.kind !== "stamp") {
+      const colors = info.kind === "highlight" ? HIGHLIGHTER_COLORS : writeTarget === "teacher" ? TEACHER_COLORS : PEN_COLORS;
+      entries.push({ kind: "swatches", label: "Color", colors, current: info.color, onPick: (c) => change((layer) => recolorMark(layer, ref, c)) });
+    }
+    if (ref.kind !== "stroke") {
+      entries.push({
+        kind: "stepper", label: "Size",
+        onSmaller: () => change((layer) => resizeMark(layer, ref, 1 / 1.2)),
+        onBigger: () => change((layer) => resizeMark(layer, ref, 1.2)),
+      });
+    }
+    entries.push(
+      { label: "Duplicate", icon: <CopyPlus />, shortcut: `${MOD}D`, onSelect: () => copyMark(ref) },
+      { kind: "separator" },
+      { label: "Delete", icon: <Trash2 />, danger: true, shortcut: "⌫", onSelect: () => deleteMark(ref) },
+    );
+    return { title: OWN_TITLE[info.kind], entries };
+  };
+
+  /**
+   * Build and open the menu for whatever is under a point.
+   *
+   * In order: a link (open it, copy it); one of your own marks (everything
+   * you can do to it); anyone else's mark (when it was made, and for a teacher
+   * writing on a student's page, a comment right there); bare paper (start a
+   * note, or a comment). Nothing under the point and nothing to offer means
+   * no menu at all.
+   */
+  const openMenuAt = (clientX: number, clientY: number) => {
+    const root = pageRef.current;
+    if (!root) return;
+    const r = root.getBoundingClientRect();
+    const x = (clientX - r.left) / scale;
+    const y = (clientY - r.top) / scale;
+
+    const anchor = typeableUnder(clientX, clientY, 'a[href]') as HTMLAnchorElement | null;
+    if (anchor) {
+      const href = anchor.href;
+      openContextMenu({
+        x: clientX, y: clientY, title: anchor.getAttribute("aria-label")?.replace(/ \(opens in a new tab\)$/, "") || anchor.textContent?.trim() || "Link",
+        entries: [
+          { label: "Open link", icon: <ExternalLink />, onSelect: () => window.open(href, "_blank", "noopener,noreferrer") },
+          { label: "Copy address", icon: <Copy />, onSelect: () => { void navigator.clipboard?.writeText(href); } },
+        ],
+      });
+      return;
+    }
+
+    if (canWrite) {
+      const ref = markRefAt(activeLayer, x, y, 8 / scale);
+      const own = ref ? ownMarkEntries(ref) : null;
+      if (ref && own) {
+        if (draggableMarks) setSelected(ref);
+        openContextMenu({ x: clientX, y: clientY, ...own });
+        return;
+      }
+    }
+
+    const teacherOnStudent = writeTarget === "teacher" && !!onLayerChange;
+    const others = [
+      writeTarget !== "student" ? studentLayer : null,
+      writeTarget !== "teacher" ? teacherLayer : null,
+      masterLayer ?? null,
+    ].filter((l): l is LayerData => !!l);
+    for (const layer of others) {
+      const hit = markAt(layer, x, y, 8 / scale);
+      if (!hit) continue;
+      const made = when(hit.ts);
+      const entries: ContextEntry[] = [
+        { kind: "note", text: made ? `${MADE[hit.kind]} ${made}` : "When this was made wasn't recorded." },
+      ];
+      if (teacherOnStudent) entries.push({ label: "Comment here", icon: <MessageSquarePlus />, onSelect: () => addCommentAt(x, y) });
+      openContextMenu({ x: clientX, y: clientY, title: MARK_LABEL[hit.kind], entries });
+      return;
+    }
+
+    if (canWrite) {
+      const entries: ContextEntry[] = [
+        { label: "Type a note here", icon: <TypeIcon />, onSelect: () => placeNote(x, y, "") },
+      ];
+      if (teacherOnStudent) entries.push({ label: "Comment here", icon: <MessageSquarePlus />, onSelect: () => addCommentAt(x, y) });
+      openContextMenu({ x: clientX, y: clientY, entries });
+    }
+  };
+
+  /** The menu for the selection, from the keyboard or its "…" button: opened under the box. */
+  const openSelectionMenu = () => {
+    const root = pageRef.current;
+    const box = selected ? markBox(activeLayer, selected) : null;
+    if (!root || !box || !selected) return;
+    const own = ownMarkEntries(selected);
+    if (!own) return;
+    const r = root.getBoundingClientRect();
+    openContextMenu({ x: r.left + (box.x + box.w) * scale, y: r.top + (box.y + box.h) * scale, ...own });
+  };
+
+  // Delete, duplicate and the menu key act on the selection, as they would in
+  // any drawing app — never while something is being typed.
+  useEffect(() => {
+    if (!selected || !draggableMarks) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target) || editingText) return;
+      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteMark(selected); }
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") { e.preventDefault(); copyMark(selected); }
+      else if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") { e.preventDefault(); openSelectionMenu(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  /**
+   * A finger held still opens the menu — unless the finger is a pen right now
+   * (finger drawing on, with a tool that draws) or a palm (a pen was used a
+   * moment ago). The pen itself never opens it.
+   */
+  const onPressCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "pen") { lastPenAt.current = Date.now(); return; }
+    if (e.pointerType !== "touch") return;
+    if (fingerDraw && isMarking && canWrite) return;
+    if (Date.now() - lastPenAt.current < 1200) return;
+    watchLongPress(e, (cx, cy) => { cancelGesture(); openMenuAt(cx, cy); });
+  };
+
   /**
    * Hovering a student's mark reports when it was made.
    *
@@ -943,6 +1134,14 @@ export default function PageCanvas({
     <div
       ref={pageRef}
       className={cn("relative bg-white shadow-sm select-none", linksLive && "links-live", className)}
+      onPointerDownCapture={onPressCapture}
+      onContextMenu={(e) => {
+        // A text box keeps the browser's own menu, for copy and paste.
+        if (isEditableTarget(e.target)) return;
+        e.preventDefault();
+        if (longPressJustFired()) return;
+        openMenuAt(e.clientX, e.clientY);
+      }}
       onMouseMove={onHoverMove}
       onMouseLeave={() => setMarkHover(null)}
       onTouchStart={(e) => { if (e.touches.length > 1) cancelGesture(); }}
@@ -1131,6 +1330,7 @@ export default function PageCanvas({
             box={selectedBox}
             scale={scale}
             pageRef={pageRef}
+            onMenu={openSelectionMenu}
             onPreview={(op) => setPending(op && selected ? { ref: selected, op } : null)}
             onCommit={commitSelectionOp}
           />

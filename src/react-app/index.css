@@ -191,3 +191,9 @@ a {
    makes tap targets hit-testable again while their overlay is pointer-transparent. */
 .tap-probe [data-layer="fields"] [data-typeable="1"],
 .tap-probe .rich-text a[href] { pointer-events: auto !important; }
+
+/* The ring that grows under a held finger before the context menu opens. */
+@keyframes nsy-press {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}

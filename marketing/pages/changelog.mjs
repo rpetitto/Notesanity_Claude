@@ -39,8 +39,12 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "September 24, 2026",
-    "Links that work, a page comparing Notesanity with the tools you already know, and what the Free plan will include after the beta.",
+    "Links that work, a menu for everything on a page, a page comparing Notesanity with the tools you already know, and what the Free plan will include after the beta.",
     [
+      ["new", "<b>A menu for everything on a page.</b> Right-click anything, or press and hold it with a finger, for what you can do with it. Your own writing, notes and stamps: change the color or size, duplicate, delete, and see when you wrote them. Anyone else's marks: when they were made, and when you're grading, <b>Comment here</b>. Links: open or copy. Blank paper: start a note. In the editor, every box has <b>Duplicate</b> and <b>Delete</b>, and a selected box or mark gets a <b>…</b> button with the same menu. The pen never opens it, and neither does a finger while <b>Finger draws</b> is on."],
+      ["new", "<b>Page actions on a tablet.</b> Rename, duplicate, save to library, hide and delete a page by pressing and holding it in the page list, or with its <b>…</b> button. They were only on a mouse hover before, so an iPad couldn't reach them."],
+      ["better", "<b>Deleting a box can be undone.</b> Delete a box from the menu, the side panel or the Delete key, and an Undo appears for a few seconds; the box comes back with every answer students typed into it. <b>Delete</b> and <b>Ctrl+D</b> (<b>⌘D</b>) now work on a selected box or mark."],
+      ["fixed", "<b>A press no longer nudges a box.</b> Selecting a box in the editor moved it with the slightest wobble and saved the new spot; now it only moves once you actually drag. A right-click no longer grabs a box or a mark to drag it."],
       ["new", "<b>The links in your worksheets work.</b> Upload a PDF, Word or PowerPoint file and its web and email links stay where they were, ready for a student to tap. They open in a new tab. A notebook made before today kept only the words; pick <b>Link</b> in the <b>Pages</b> tab and it offers to put that page's links back."],
       ["new", "<b>Add a link of your own.</b> <b>Link</b>, next to Text and Picture in the <b>Pages</b> tab, makes anything on the page open a website: drag over the words or picture and paste the address. Text blocks have a link button too."],
       ["fixed", "<b>Students see the notes, stamps and comments you publish on a page.</b> Only your pen and highlighter lines reached them: typed notes, stamps and comment pins added on the <b>Annotate</b> tab were published but never shown. Every student now sees them, and can read them but not move or change them."],

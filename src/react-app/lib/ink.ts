@@ -685,3 +685,66 @@ export function transformMark(layer: LayerData, ref: MarkRef, op: MarkOp): Layer
     }),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Acting on one mark — what the context menu and the keyboard do to a selection
+
+/** What one mark is, for naming it in a menu. */
+export function markInfo(layer: LayerData, ref: MarkRef): { kind: MarkHit["kind"]; color?: string; ts?: number } | null {
+  if (ref.kind === "stroke") {
+    const st = layer.s[ref.index];
+    return st ? { kind: st.t === "h" ? "highlight" : "stroke", color: st.c, ts: st.ts } : null;
+  }
+  if (ref.kind === "text") {
+    const t = layer.x.find((b) => b.id === ref.id);
+    return t ? { kind: "text", color: t.c, ts: t.ts } : null;
+  }
+  const st = layer.e.find((b) => b.id === ref.id);
+  return st ? { kind: "stamp", ts: st.ts } : null;
+}
+
+export function removeMark(layer: LayerData, ref: MarkRef): LayerData {
+  if (ref.kind === "stroke") return { ...layer, s: layer.s.filter((_, i) => i !== ref.index) };
+  if (ref.kind === "text") return { ...layer, x: layer.x.filter((t) => t.id !== ref.id) };
+  return { ...layer, e: layer.e.filter((st) => st.id !== ref.id) };
+}
+
+/**
+ * A copy of one mark, nudged down and right so it is visibly a second one.
+ * It gets a fresh id and a fresh time: the copy was made now, and the
+ * history should say so.
+ */
+export function duplicateMark(layer: LayerData, ref: MarkRef, offset = 12): { layer: LayerData; ref: MarkRef } | null {
+  const ts = Date.now();
+  const id = crypto.randomUUID();
+  if (ref.kind === "stroke") {
+    const st = layer.s[ref.index];
+    if (!st) return null;
+    const p = st.p.slice();
+    for (let j = 0; j + 2 < p.length; j += 3) { p[j] += offset; p[j + 1] += offset; }
+    return { layer: { ...layer, s: [...layer.s, { ...st, p, ts }] }, ref: { kind: "stroke", index: layer.s.length } };
+  }
+  if (ref.kind === "text") {
+    const t = layer.x.find((b) => b.id === ref.id);
+    if (!t) return null;
+    return { layer: { ...layer, x: [...layer.x, { ...t, id, x: t.x + offset, y: t.y + offset, ts }] }, ref: { kind: "text", id } };
+  }
+  const st = layer.e.find((b) => b.id === ref.id);
+  if (!st) return null;
+  return { layer: { ...layer, e: [...layer.e, { ...st, id, x: st.x + offset, y: st.y + offset, ts }] }, ref: { kind: "stamp", id } };
+}
+
+export function recolorMark(layer: LayerData, ref: MarkRef, color: string): LayerData {
+  if (ref.kind === "stroke") return { ...layer, s: layer.s.map((st, i) => (i === ref.index ? { ...st, c: color } : st)) };
+  if (ref.kind === "text") return { ...layer, x: layer.x.map((t) => (t.id === ref.id ? { ...t, c: color } : t)) };
+  return layer;
+}
+
+/** Grow or shrink one mark about its own centre — the size stepper. */
+export function resizeMark(layer: LayerData, ref: MarkRef, factor: number): LayerData {
+  const box = markBox(layer, ref);
+  if (!box) return layer;
+  return transformMark(layer, ref, {
+    kind: "scale", ax: box.x + box.w / 2, ay: box.y + box.h / 2, fx: factor, fy: factor, rot: box.rot,
+  });
+}

@@ -110,6 +110,13 @@ const BODY = () => `
          words: pick <b>Link</b> in the <b>Pages</b> tab and it offers to put that page's links back.`,
       ],
       [
+        "How do I copy or delete a box I've placed?",
+        `Right-click it, or press and hold it on a tablet, for <b>Duplicate</b> and <b>Delete</b>. With
+         a box selected, <b>Delete</b> and <b>Ctrl+D</b> (<b>⌘D</b> on a Mac) do the same. Deleting
+         shows an <b>Undo</b> for a few seconds, and a box you bring back still has every answer
+         students typed into it.`,
+      ],
+      [
         "Can I add a link of my own?",
         `Two ways. <b>Link</b> in the <b>Pages</b> tab makes anything already on the page open a
          website: drag a box over the words or picture, then paste the address. In a <b>Text</b>
@@ -118,8 +125,9 @@ const BODY = () => `
       ],
       [
         "Can I reuse a page in another notebook?",
-        `Yes — that's the page library. Hover a page in the page list and choose <b>Save to your page
-         library</b>, then add it to any other notebook from the <b>Pages</b> tab &rarr; <b>Library</b>.
+        `Yes — that's the page library. Right-click a page in the page list (on a tablet, press and hold
+         it) and choose <b>Save to library</b>, then add it to any other notebook from the <b>Pages</b> tab
+         &rarr; <b>Library</b>.
          Its answer boxes and your own markup come across; nobody's work does. The saved copy stands on
          its own, so changing or deleting the original notebook doesn't touch it.`,
       ],
@@ -287,6 +295,13 @@ const BODY = () => `
         "What does the highlighter do differently?",
         `If it recognizes that you're highlighting along a line of text it snaps the stroke
          straight, so a highlight looks deliberate rather than hand-wobbled.`,
+      ],
+      [
+        "How do I recolor, copy or delete something I wrote?",
+        `Right-click it, or press and hold it with a finger, and a menu offers its color, a copy and
+         <b>Delete</b>, and tells you when it was written. With <b>Scroll only</b> you can also tap it to
+         select it and use the <b>…</b> button, or the Delete key. The pen never opens the menu, and
+         neither does a finger while <b>Finger draws</b> is on: then a held finger is drawing.`,
       ],
       [
         "How do I open a link on a page?",

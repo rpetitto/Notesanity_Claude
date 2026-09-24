@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 import App from "./App";
+import { ContextMenuHost } from "./components/ContextMenu";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -27,6 +28,7 @@ createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <App />
         <Toaster position="top-center" richColors closeButton />
+        <ContextMenuHost />
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,
