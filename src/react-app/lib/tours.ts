@@ -135,7 +135,7 @@ export const TOURS: Record<string, TourStep[]> = {
       body:
         "Pick the pen to write on the notebook itself: a worked example, an arrow, a heading in " +
         "your own hand. It reaches students when you publish. Select (the arrow) moves boxes and " +
-        "marks; press the ▾ beside a tool for its colors and sizes.",
+        "marks. Picking a tool opens its colors and sizes; the ▾ beside it brings them back.",
     },
     {
       target: ["nb-rail", "nb-pages-button"],
@@ -220,8 +220,8 @@ export const TOURS: Record<string, TourStep[]> = {
       target: "ink-tools",
       title: "Pick something to write with",
       body:
-        "Pen, highlighter, eraser, typed text or a stamp. Press the ▾ beside the tool in your hand " +
-        "(or tap the tool again) for its colors and sizes.",
+        "Pen, highlighter, eraser, typed text or a stamp. Picking one opens its colors and sizes; " +
+        "the ▾ beside it, or a second tap on the tool, brings them back.",
     },
     {
       target: "finger-draw",

@@ -288,8 +288,9 @@ const BODY = () => `
     ${group("Writing and drawing", [
       [
         "Where are the pen colors and sizes?",
-        `Tap the pen again, or the small <b>▾</b> beside it, for its colors and sizes; the highlighter,
-         text, stamp and shape tools work the same way. Each tool remembers its own color and size on your device, so
+        `They open as soon as you pick the pen, and close when you start writing. To get them back,
+         tap the pen again or the small <b>▾</b> beside it. The highlighter, text, stamp and shape tools
+         work the same way. Each tool remembers its own color and size on your device, so
          switching to the highlighter and back leaves the pen as you set it. <b>Select</b> puts the pen down so you can
          move and change what's on the page.`,
       ],
@@ -319,7 +320,7 @@ const BODY = () => `
       ],
       [
         "What's the difference between the two erasers?",
-        `Tap the eraser again, or its <b>▾</b>, to choose. <b>Whole strokes</b> removes a stroke wherever
+        `Pick the eraser and both are offered; tap it again, or its <b>▾</b>, to change later. <b>Whole strokes</b> removes a stroke wherever
          you touch it — fastest for clearing a mistake. <b>Just what I rub</b> rubs out only the part you drag over, for fixing one letter
          without redrawing the word.`,
       ],

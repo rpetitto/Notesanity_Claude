@@ -190,9 +190,19 @@ export default function InkToolbar({
     const color = t.palette ? (m.color && palette.includes(m.color) ? m.color : palette[0]) : tool.color;
     const widths = kind === "highlighter" ? HIGHLIGHT_WIDTHS : PEN_WIDTHS;
     const width = m.width && widths.includes(m.width) ? m.width : kind === "highlighter" ? 14 : kind === "eraser" ? 7 : 2.5;
-    setOptionsOpen(false);
+    setOptionsAnchor(null);
+    // A new tool opens its options straight away, once its ▾ exists to hang them from.
+    openOnPick.current = hasOptions(kind);
     onToolChange({ ...tool, kind, color, width, fontSize: kind === "text" ? m.fontSize ?? 14 : tool.fontSize });
   };
+  const openOnPick = useRef(false);
+  useLayoutEffect(() => {
+    if (!openOnPick.current) return;
+    openOnPick.current = false;
+    // A tool from the phone's More menu has no ▾ on screen: hang the panel from More instead.
+    const btn = optionsBtn.current?.offsetParent ? optionsBtn.current : moreBtn.current;
+    setOptionsAnchor(btn ?? rowRef.current);
+  }, [tool.kind]);
 
   const setOption = (patch: Partial<ToolState>) => {
     onToolChange({ ...tool, ...patch });
