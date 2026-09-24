@@ -6,7 +6,7 @@ import {
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
   FolderOpen, LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
-  Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal,
+  Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal, FilePlus2, SquarePlus,
 } from "lucide-react";
 import { type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, pointFor, watchLongPress } from "../components/ContextMenu";
 import { toast } from "sonner";
@@ -22,7 +22,6 @@ import PageCanvas, { type FieldValue, type ToolState } from "../components/PageC
 import NotebookSurface, { type ZoomMode } from "../components/NotebookSurface";
 import NotebookPageList, { type ArrangeEntry } from "../components/NotebookPageList";
 import InkToolbar, { ZoomSelect } from "../components/InkToolbar";
-import { RibbonButton, RibbonDivider, RibbonGroup, RibbonHint, RibbonRow, RibbonTabs, type RibbonTab } from "../components/Ribbon";
 import { usePersistedBool } from "../lib/usePersisted";
 import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
@@ -233,9 +232,17 @@ export default function NotebookEditor() {
   }, [pagesDrawerOpen]);
 
   // ---- master-page annotation mode ----
-  /** Which ribbon tab is up. Pages first: it is where every notebook starts. */
-  const [tabChoice, setTabChoice] = useState<RibbonTab | null>(null);
-  /** The tool row can be tucked away to give the page the height; the tabs stay. */
+  /**
+   * Moving your own annotations with Select. Select otherwise means arranging
+   * boxes; pressing one of your marks switches to moving marks, and a press on
+   * bare paper switches back. See `annotateMode` below.
+   */
+  const [editingMarks, setEditingMarks] = useState(false);
+  /** Where "Add page" puts new pages: after the page on screen, or at the end. */
+  const [addAt, setAddAt] = useState<"after" | "end">("after");
+  /** Which Add menu is open, for its button's aria-expanded. */
+  const [addMenu, setAddMenu] = useState<null | "page" | "element">(null);
+  /** The toolbar can be tucked away to give the page the height. */
   const [ribbonOpen, setRibbonOpen] = usePersistedBool("notesanity:nbRibbon", true);
   /** The page list beside the page, likewise. */
   const [railOpen, setRailOpen] = usePersistedBool("notesanity:nbRail", true);
@@ -254,7 +261,8 @@ export default function NotebookEditor() {
    */
   const [pendingMark, setPendingMark] = useState<MarkRef | null>(null);
   const [inkTool, setInkTool] = useState<ToolState>({
-    kind: "pen", color: TEACHER_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14, erase: "quick",
+    // Select first: a notebook is built before it's written on.
+    kind: "select", color: TEACHER_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14, erase: "quick",
   });
   const [inkFingerDraw, setInkFingerDraw] = useState(false);
   const [annotationLayer, setAnnotationLayer] = useState<LayerData>(emptyLayer());
@@ -296,17 +304,34 @@ export default function NotebookEditor() {
   const allPages = query.data?.pages ?? [];
   const livePages = useMemo(() => allPages.filter((p) => !p.archived), [allPages]);
 
-  const tab: RibbonTab = tabChoice ?? "pages";
-  const annotateMode = tab === "annotate";
-  /** Kept as a verb for the call sites that only know about the mode: off means back to Answer boxes. */
-  const setAnnotateMode = (on: boolean) => setTabChoice(on ? "annotate" : "boxes");
-  const switchTab = (next: RibbonTab) => {
-    setTool("none");
+  /**
+   * There are no tabs: the tool in hand is the mode. Any writing tool means
+   * writing on the page (the teacher's annotation layer); Select means
+   * arranging boxes — or, after a press on one of your marks, moving marks.
+   */
+  const annotateMode = inkTool.kind !== "select" || editingMarks;
+  /** Picking a writing tool puts down whatever box was about to be placed. */
+  const changeInkTool = (next: ToolState) => {
+    setInkTool(next);
+    if (next.kind !== "select") { setTool("none"); setSelectedField(null); }
+    else if (next.kind !== inkTool.kind) setEditingMarks(false);
     setPendingMark(null);
-    setTabChoice(next);
-    // Picking a tab while the tools are tucked away is asking for them back.
-    if (!ribbonOpen) setRibbonOpen(true);
   };
+  /** Add element → something to place: back to Select, arranging boxes, with that box armed. */
+  const armField = (k: Exclude<FieldTool, "none">) => {
+    setInkTool((t) => ({ ...t, kind: "select" }));
+    setEditingMarks(false);
+    setPendingMark(null);
+    setSelectedField(null);
+    setTool(k);
+  };
+  // Escape puts down a box that was about to be placed, from anywhere but a text field.
+  useEffect(() => {
+    if (tool === "none") return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !isEditableTarget(e.target)) setTool("none"); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tool]);
   const page = livePages[Math.min(pageIdx, Math.max(0, livePages.length - 1))];
   const fields = useMemo(
     () => (query.data?.fields ?? []).filter((f) => page && f.page_id === page.id),
@@ -845,7 +870,9 @@ export default function NotebookEditor() {
       const { assetKey } = await api.upload<{ assetKey: string }>(`/api/notebooks/${notebookId}/assets`, form);
       setBusyMessage("Reading pages…");
       const sizes = await readPageSizes(pdf);
-      await api.post(`/api/notebooks/${notebookId}/pages`, { assetKey, pages: sizes });
+      await api.post(`/api/notebooks/${notebookId}/pages`, {
+        assetKey, pages: sizes, insertAfterPageId: addAt === "after" && page ? page.id : null,
+      });
       toast.success(`Added ${sizes.length} page${sizes.length === 1 ? "" : "s"}`);
       invalidate();
     } catch (e) {
@@ -1077,6 +1104,90 @@ export default function NotebookEditor() {
     </>
   );
 
+  // ---- Add page / Add element ----
+  const isStudentBook = notebook.kind === "student" || notebook.kind === "personal";
+
+  const openAddPage = (btn: HTMLElement) => {
+    setAddMenu("page");
+    const busy = !!busyMessage;
+    const entries: ContextEntry[] = [
+      { kind: "heading", text: "Put new pages" },
+      { kind: "radio", group: "at", label: "After this page", checked: addAt === "after", onSelect: () => setAddAt("after") },
+      { kind: "radio", group: "at", label: "At the end", checked: addAt === "end", onSelect: () => setAddAt("end") },
+      { kind: "separator" },
+      { label: "Blank paper…", icon: <Rows3 />, hint: "Lined, graph, dot grid, music staves…", disabled: busy, onSelect: () => setBlankOpen(true) },
+      { label: "From a file…", icon: <Upload />, hint: "PDF, Word or PowerPoint", disabled: busy, onSelect: () => addPagesRef.current?.click() },
+    ];
+    if (hasDrivePicker) entries.push({ label: "From Google Drive…", icon: <FolderOpen />, disabled: busy, onSelect: () => void addPagesFromDrive() });
+    entries.push(
+      { label: "From your library…", icon: <LibraryBig />, hint: "A page you saved", disabled: busy, onSelect: () => setLibraryOpen(true) },
+      { label: "Copy of this page", icon: <CopyPlus />, hint: "With its boxes, not students' work", disabled: busy || !page, onSelect: () => { if (page) duplicatePages.mutate([page.id]); } },
+    );
+    openContextMenu({ ...pointFor(btn), title: "Add page", onClose: () => setAddMenu(null), entries });
+  };
+
+  const openAddElement = (btn: HTMLElement) => {
+    setAddMenu("element");
+    const place = (k: Exclude<FieldTool, "none">) => () => armField(k);
+    const paper = !page || isPattern(page.pattern);
+    const entries: ContextEntry[] = [
+      { kind: "heading", text: isStudentBook ? "Add to the page" : "Yours" },
+      { label: "Text", icon: <PenLine />, hint: "A heading, instructions, a passage", onSelect: place("richtext") },
+      { label: "Picture", icon: <ImageIcon />, hint: "An image of your own", onSelect: place("figure") },
+      { label: "Link", icon: <LinkIcon />, hint: "Words or a picture that opens a website", onSelect: place("link") },
+    ];
+    if (!isStudentBook) {
+      entries.push(
+        { kind: "heading", text: "Students fill in" },
+        { label: "Text box", icon: <TypeIcon />, hint: "They type an answer", onSelect: place("text") },
+        { label: "Checkbox", icon: <CheckSquare />, hint: "They tick it", onSelect: place("checkbox") },
+        { label: "Dropdown", icon: <ListChecks />, hint: "They pick one of your choices", onSelect: place("choice") },
+        { label: "Prompt", icon: <MessageSquareText />, hint: "A question with room to answer", onSelect: place("prompt") },
+        { label: "Image upload", icon: <ImagePlus />, hint: "They add a photo", onSelect: place("image") },
+        { label: "Audio", icon: <Mic />, hint: "They record themselves", onSelect: place("audio") },
+        { kind: "separator" },
+        {
+          label: finding ? "Looking…" : "Find blanks on this page", icon: <Wand2 />,
+          hint: paper ? "Works on an uploaded worksheet, not blank paper" : "A box for every line, empty cell and row of underscores",
+          disabled: finding || paper, onSelect: () => void findFields(),
+        },
+      );
+    }
+    openContextMenu({ ...pointFor(btn), title: isStudentBook ? "Add" : "Add element", onClose: () => setAddMenu(null), entries });
+  };
+
+  /** A menu button: Enter, Space or ↓ opens it and puts focus on its first item. */
+  const addButton = (which: "page" | "element", inToolbar: boolean) => {
+    const open = which === "page" ? openAddPage : openAddElement;
+    const full = which === "page" ? "Add page" : isStudentBook ? "Add" : "Add element";
+    return (
+      <button
+        type="button"
+        {...(inToolbar ? { "data-tb": "", "data-tour": which === "page" ? "nb-add-pages" : "nb-fields" } : {})}
+        aria-label={full}
+        aria-haspopup="menu"
+        aria-expanded={addMenu === which}
+        onClick={(e) => open(e.currentTarget)}
+        onKeyDown={(e) => { if (e.key === "ArrowDown") { e.preventDefault(); open(e.currentTarget); } }}
+        className={cn(
+          "inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full border-[3px] border-pine pl-2.5 pr-2 font-display text-[16px] font-bold text-pine outline-none",
+          "shadow-[3px_3px_0_0_var(--color-pine)] transition-colors focus-visible:ring-[3px] focus-visible:ring-mint",
+          addMenu === which ? "bg-mint" : "bg-white hover:bg-oat",
+        )}
+      >
+        {which === "page"
+          ? <FilePlus2 className="h-[18px] w-[18px]" strokeWidth={2.5} aria-hidden />
+          : <SquarePlus className="h-[18px] w-[18px]" strokeWidth={2.5} aria-hidden />}
+        {/* Short words where they fit, the full name on a laptop; the accessible
+            name is always the full one. Between tablet and laptop widths the
+            row can't spare the words, so the icon and ▾ carry it. */}
+        <span className={inToolbar ? "hidden lg:inline xl:hidden" : "hidden min-[440px]:inline"}>{which === "page" ? "Page" : isStudentBook ? "Add" : "Element"}</span>
+        {inToolbar && <span className="hidden xl:inline">{full}</span>}
+        <ChevronDown className="h-4 w-4 opacity-70" strokeWidth={2.5} aria-hidden />
+      </button>
+    );
+  };
+
   const presentButton = (
     <button
       type="button"
@@ -1102,25 +1213,13 @@ export default function NotebookEditor() {
     </button>
   );
   const zoomSelect = <ZoomSelect zoom={zoom} onZoomChange={setZoom} className="hidden sm:block" />;
-  /** Present · zoom · hide, in that order, at the right end of every row. */
-  const rowTail = (
-    <div className="ml-auto flex items-center gap-2 self-center sm:pb-4">
-      {presentButton}{zoomSelect}{ribbonToggle}
-    </div>
-  );
 
   return (
     <div className="flex h-dvh flex-col bg-oat">
       <div className="h-1 shrink-0" style={{ backgroundColor: notebook.accentColor || "#20302C" }} />
-      {/* Two rows up to a laptop, one from `xl`.
-
-          Below `xl` the first row is Back · Pages · title · "…", and the tab
-          strip and Publish get a full-width row of their own beneath it. From
-          `xl` the wrapper dissolves (`contents`) and its children take their
-          places in the single row by `order`. The break is `xl` rather than
-          `sm` because the strip with its three labels is wide: at 1024 it
-          and Publish pushed each other off the row, and a title that has to
-          shrink to nothing to make room isn't a title. */}
+      {/* One row from md up: Back · title · "…" · Publish. On a phone, Publish
+          and the Add menus get a second row, because the toolbar below has no
+          room for the Add menus there. */}
       <header className="relative flex flex-wrap items-center gap-2 border-b-2 border-pine/12 bg-white px-3 py-2 sm:gap-3">
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
@@ -1156,13 +1255,12 @@ export default function NotebookEditor() {
           </div>
         </div>
 
-        <div className="order-4 flex w-full items-center justify-between gap-2 xl:contents">
-          <RibbonTabs
-            value={tab}
-            onChange={switchTab}
-            tours={{ pages: "nb-add-pages", boxes: "nb-boxes", annotate: "nb-annotate" }}
-            className="xl:order-4 xl:ml-auto"
-          />
+        {/* On a phone a second row: the Add menus (the toolbar has no room for
+            them there) and Publish. From md up, Publish joins the title row
+            and the Add menus lead the toolbar. */}
+        <div className="order-4 flex w-full items-center gap-2 md:ml-auto md:w-auto xl:order-7">
+          <div className="flex items-center gap-2 md:hidden">{addButton("page", false)}{addButton("element", false)}</div>
+          <span className="flex-1 md:hidden" />
           {/* The button is the status.
               A separate chip saying "your writing isn't sent yet" sat beside a
               button saying "Update student notebooks", which is two controls
@@ -1398,6 +1496,7 @@ export default function NotebookEditor() {
       {blankOpen && (
         <BlankPagesModal
           pages={allPages}
+          initialAfter={addAt === "after" && page ? page.id : ""}
           busy={addBlankPages.isPending}
           onClose={() => setBlankOpen(false)}
           onInsert={(body) => addBlankPages.mutate(body)}
@@ -1407,119 +1506,69 @@ export default function NotebookEditor() {
       {libraryOpen && (
         <PageLibraryModal
           pages={allPages}
-          currentPageId={page?.id}
+          currentPageId={addAt === "after" ? page?.id : null}
           busy={insertLibraryPage.isPending}
           onClose={() => setLibraryOpen(false)}
           onInsert={(body) => insertLibraryPage.mutate(body)}
         />
       )}
 
-      {/* The ribbon's tool row: only the current tab's tools, never a scrollbar. */}
-      {tab === "pages" && ribbonOpen && (
-      <RibbonRow>
-        <RibbonGroup caption="Add pages">
-          <RibbonButton icon={Rows3} label="Blank" title="Blank pages — lined, graph, dot grid, staves…" onClick={() => setBlankOpen(true)} disabled={!!busyMessage} />
-          <RibbonButton icon={Upload} label="A file" title="A PDF, Word or PowerPoint file from this device" onClick={() => addPagesRef.current?.click()} disabled={!!busyMessage} busy={!!busyMessage} />
-          {hasDrivePicker && (
-            <RibbonButton icon={FolderOpen} label="Drive" title="Pick a file out of Google Drive" onClick={() => void addPagesFromDrive()} disabled={!!busyMessage} />
-          )}
-          <RibbonButton icon={LibraryBig} label="Library" title="A page you saved from another notebook" onClick={() => setLibraryOpen(true)} disabled={!!busyMessage} />
-        </RibbonGroup>
-        <RibbonDivider />
-        {/* Yours, on the page itself — part of the notebook the way its pages
-            are, so students see it at once. Ink waits for Publish; this doesn't. */}
-        <RibbonGroup caption="On this page">
-          <RibbonButton icon={PenLine} label="Text" title="A block of text you write — a heading, instructions, a passage" active={tool === "richtext"} onClick={() => setTool(tool === "richtext" ? "none" : "richtext")} />
-          <RibbonButton icon={ImageIcon} label="Picture" title="A picture of your own on the page" active={tool === "figure"} onClick={() => setTool(tool === "figure" ? "none" : "figure")} />
-          <RibbonButton icon={LinkIcon} label="Link" title="Make words or a picture on the page open a website" active={tool === "link"} onClick={() => setTool(tool === "link" ? "none" : "link")} />
-        </RibbonGroup>
-        {tool === "link" && !!fileLinks?.length && (
-          <>
-            <RibbonDivider />
-            <RibbonGroup caption="From the file">
-              <RibbonButton
-                icon={Wand2}
-                label={addFileLinks.isPending ? "Adding…" : `Add ${fileLinks.length} link${fileLinks.length === 1 ? "" : "s"}`}
-                title="This page's original file has links that aren't on the page yet — put them back where they were"
-                busy={addFileLinks.isPending}
-                disabled={addFileLinks.isPending}
-                onClick={() => addFileLinks.mutate(fileLinks)}
-              />
-            </RibbonGroup>
-          </>
-        )}
-        <RibbonDivider />
-        <RibbonGroup caption="Check">
-          <RibbonButton icon={Eye} label="Preview" title="See this notebook the way a student will, including writing you haven't sent yet" onClick={openPreview} />
-        </RibbonGroup>
-        {tool !== "none" && (
-          <RibbonHint>
+      {/* One row for everything: Add page and Add element, then the writing
+          tools, Undo, and View. The tool in hand is the mode — see annotateMode. */}
+      {ribbonOpen && (
+        <InkToolbar
+          tool={inkTool}
+          onToolChange={changeInkTool}
+          fingerDraw={inkFingerDraw}
+          onFingerDrawChange={setInkFingerDraw}
+          onUndo={undoAnnotation}
+          onRedo={redoAnnotation}
+          canUndo={canUndoAnnotation}
+          canRedo={canRedoAnnotation}
+          status={saveStatus}
+          teacherPalette={!isStudentBook}
+          allowComments={!isStudentBook}
+          zoom={zoom}
+          onZoomChange={setZoom}
+          onClearPage={clearAnnotationPage}
+          leading={<>{addButton("page", true)}{addButton("element", true)}</>}
+          viewItems={[
+            { label: "Preview as a student", icon: <Eye />, onSelect: openPreview },
+            { label: "Present", icon: <Presentation />, disabled: livePages.length === 0, onSelect: () => setPresenting({ mode: "pages", idx: pageIdx }) },
+            { label: "Hide toolbar", icon: <ChevronUp />, onSelect: () => setRibbonOpen(false) },
+          ]}
+        />
+      )}
+
+      {/* What placing a box takes, while one is about to be placed. Tapping is
+          enough — dragging only sizes it (WCAG 2.5.7) — and Escape cancels. */}
+      {tool !== "none" && (
+        <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b-2 border-pine/12 bg-mint/20 px-3 py-1.5 text-[16px] text-pine">
+          <span>
+            <b className="font-display">{fieldTypeLabel(tool)}.</b>{" "}
             {tool === "link"
-              ? "Drag over the words or picture that should open the link"
-              : `Drag on the page to place ${tool === "figure" ? "the picture" : "the text"}`}
-          </RibbonHint>
-        )}
-        {rowTail}
-      </RibbonRow>
-      )}
-
-      {tab === "boxes" && ribbonOpen && (
-      <RibbonRow tour="nb-fields">
-        <RibbonGroup caption="Student fills in">
-          {([
-            { k: "text", label: "Text box", icon: TypeIcon, hint: "A box the student types in" },
-            { k: "checkbox", label: "Checkbox", icon: CheckSquare, hint: "A box the student ticks" },
-            { k: "choice", label: "Dropdown", icon: ListChecks, hint: "Choices you write; the student picks one" },
-            { k: "prompt", label: "Prompt", icon: MessageSquareText, hint: "A question, with a box for the answer under it" },
-            { k: "image", label: "Image", icon: ImagePlus, hint: "The student uploads a picture" },
-            { k: "audio", label: "Audio", icon: Mic, hint: "The student records themselves" },
-          ] as const).map(({ k, label, icon, hint }) => (
-            <RibbonButton key={k} icon={icon} label={label} title={hint} active={tool === k} onClick={() => setTool(tool === k ? "none" : k)} />
-          ))}
-        </RibbonGroup>
-        <RibbonDivider />
-        {/* Its own group: this one doesn't arm a tool, it reads the page. */}
-        <RibbonGroup caption="This page">
-          <RibbonButton
-            icon={Wand2}
-            label={finding ? "Looking…" : "Find blanks"}
-            tour="nb-find-fields"
-            busy={finding}
-            disabled={finding || !page || isPattern(page.pattern)}
-            title={page && isPattern(page.pattern)
-              ? "Blank paper has no document to read — this looks for the blanks in an uploaded worksheet"
-              : "Look for the lines, empty table cells and rows of underscores on this page, and offer an answer box for each"}
-            onClick={() => void findFields()}
-          />
-        </RibbonGroup>
-        {tool !== "none" && (
-          <RibbonHint>
-            Drag on the page to place {({ text: "a text box", checkbox: "a checkbox", choice: "a dropdown", prompt: "a prompt", image: "an image box", audio: "an audio box" } as Record<string, string>)[tool] ?? "it"}
-          </RibbonHint>
-        )}
-        {rowTail}
-      </RibbonRow>
-      )}
-
-      {annotateMode && ribbonOpen && (
-        <div>
-          <InkToolbar
-            tool={inkTool}
-            onToolChange={setInkTool}
-            fingerDraw={inkFingerDraw}
-            onFingerDrawChange={setInkFingerDraw}
-            onUndo={undoAnnotation}
-            onRedo={redoAnnotation}
-            canUndo={canUndoAnnotation}
-            canRedo={canRedoAnnotation}
-            status={saveStatus}
-            teacherPalette
-            allowComments
-            zoom={zoom}
-            onZoomChange={setZoom}
-            onClearPage={clearAnnotationPage}
-            trailing={<>{presentButton}{ribbonToggle}</>}
-          />
+              ? "Drag over the words or picture that should open the link."
+              : "Tap the page to place it, or drag to give it a size."}
+          </span>
+          {tool === "link" && !!fileLinks?.length && (
+            <button
+              type="button"
+              disabled={addFileLinks.isPending}
+              onClick={() => addFileLinks.mutate(fileLinks)}
+              title="This page's original file has links that aren't on the page yet — put them back where they were"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border-2 border-pine bg-white px-3 font-display font-bold hover:bg-oat disabled:opacity-50"
+            >
+              <Wand2 className="h-4 w-4" strokeWidth={2.5} />
+              {addFileLinks.isPending ? "Adding…" : `Add ${fileLinks.length} link${fileLinks.length === 1 ? "" : "s"} from the file`}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setTool("none")}
+            className="ml-auto inline-flex min-h-[44px] items-center rounded-full px-3 font-display font-bold hover:bg-white/70"
+          >
+            Cancel <span className="ml-1.5 hidden text-pine/55 sm:inline">Esc</span>
+          </button>
         </div>
       )}
       {/* Tucked away: a slim strip that keeps the three controls reachable. */}
@@ -1613,6 +1662,7 @@ export default function NotebookEditor() {
                     fingerDraw={inkFingerDraw}
                     fieldsEditable={false}
                     initialSelection={pendingMark}
+                    onPressPaper={() => { if (inkTool.kind === "select") { setEditingMarks(false); setPendingMark(null); } }}
                   />
                 ) : (
                   <>
@@ -1663,7 +1713,7 @@ export default function NotebookEditor() {
                         setSelectedField(null);
                         setInkTool((t) => ({ ...t, kind: "select" }));
                         setPendingMark(ref);
-                        setAnnotateMode(true);
+                        setEditingMarks(true);
                         return true;
                       }}
                     />
@@ -1928,8 +1978,10 @@ function PatternPreview({
  * is the only thing that keeps a notebook printable.
  */
 function BlankPagesModal({
-  pages, busy, onClose, onInsert,
+  pages, busy, onClose, onInsert, initialAfter = "",
 }: {
+  /** Where the Add page menu said new pages go: a page id, or "" for the end. */
+  initialAfter?: string;
   pages: PageRec[];
   busy: boolean;
   onClose: () => void;
@@ -1938,7 +1990,7 @@ function BlankPagesModal({
   const [pattern, setPattern] = useState<PatternKey>(DEFAULT_PATTERN);
   const [color, setColor] = useState(DEFAULT_PATTERN_COLOR);
   const [count, setCount] = useState(1);
-  const [after, setAfter] = useState<string>("");
+  const [after, setAfter] = useState<string>(initialAfter);
 
   const live = pages.filter((p) => !p.archived);
   // Preview at the notebook's own proportions, so what's shown is the shape

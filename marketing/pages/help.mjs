@@ -107,7 +107,7 @@ const BODY = () => `
         `Yes. Web and email links in a PDF, Word or PowerPoint file stay where they were, and open
          in a new tab when a student taps them. Links from one page of the file to another (a
          contents page, say) aren't kept. A notebook made before September 24, 2026 kept only the
-         words: pick <b>Link</b> in the <b>Pages</b> tab and it offers to put that page's links back.`,
+         words: choose <b>Add element</b> &rarr; <b>Link</b> and it offers to put that page's links back.`,
       ],
       [
         "How do I copy or delete a box I've placed?",
@@ -118,7 +118,7 @@ const BODY = () => `
       ],
       [
         "Can I add a link of my own?",
-        `Two ways. <b>Link</b> in the <b>Pages</b> tab makes anything already on the page open a
+        `Two ways. <b>Add element</b> &rarr; <b>Link</b> makes anything already on the page open a
          website: drag a box over the words or picture, then paste the address. In a <b>Text</b>
          block, select words and press the link button. Addresses have to be web or email
          addresses.`,
@@ -126,8 +126,8 @@ const BODY = () => `
       [
         "Can I reuse a page in another notebook?",
         `Yes — that's the page library. Right-click a page in the page list (on a tablet, press and hold
-         it) and choose <b>Save to library</b>, then add it to any other notebook from the <b>Pages</b> tab
-         &rarr; <b>Library</b>.
+         it) and choose <b>Save to library</b>, then add it to any other notebook with <b>Add page</b>
+         &rarr; <b>From your library</b>.
          Its answer boxes and your own markup come across; nobody's work does. The saved copy stands on
          its own, so changing or deleting the original notebook doesn't touch it.`,
       ],
@@ -149,7 +149,7 @@ const BODY = () => `
       ],
       [
         "Can I show a notebook on the projector?",
-        `Press <b>Present</b>, next to the zoom menu in a notebook. It goes full screen with only the
+        `Choose <b>View</b> &rarr; <b>Present</b> in a notebook. It goes full screen with only the
          pages showing \u2014 one at a time with the arrow keys, or the whole notebook scrolling \u2014 and
          includes writing you haven't sent to students yet. Nothing you do while presenting is saved.
          Escape brings the editor back.`,
@@ -163,8 +163,9 @@ const BODY = () => `
       [
         "What can I put on a page?",
         `Text boxes, checkboxes, dropdowns, prompts with an answer area, image uploads and audio
-         recordings for students to fill in — plus rich text and pictures of your own that are
-         part of the page rather than something to answer.`,
+         recordings for students to fill in — plus text, pictures and links of your own that are
+         part of the page rather than something to answer. They're all under <b>Add element</b>: pick
+         one, then tap the page to place it, or drag to give it a size.`,
       ],
       [
         "How does a notebook reach my students?",
@@ -286,10 +287,17 @@ const BODY = () => `
 
     ${group("Writing and drawing", [
       [
+        "Where are the pen colors and sizes?",
+        `Tap the pen again, or the small <b>▾</b> beside it, for its colors and sizes; the highlighter,
+         text, stamp and shape tools work the same way. Each tool remembers its own color and size on your device, so
+         switching to the highlighter and back leaves the pen as you set it. <b>Select</b> puts the pen down so you can
+         move and change what's on the page.`,
+      ],
+      [
         "Does it work with a stylus?",
         `It's built for one. Ink is pressure-sensitive, and a hand resting on the screen won't
-         draw while a stylus is in use. There's a toggle for whether a finger scrolls the page
-         or draws on it — scrolling is the default.`,
+         draw while a stylus is in use. A finger scrolls the page unless you turn on
+         <b>View</b> &rarr; <b>Draw with my finger</b> (on a phone it's under <b>More</b>).`,
       ],
       [
         "What does the highlighter do differently?",
@@ -299,20 +307,20 @@ const BODY = () => `
       [
         "How do I recolor, copy or delete something I wrote?",
         `Right-click it, or press and hold it with a finger, and a menu offers its color, a copy and
-         <b>Delete</b>, and tells you when it was written. With <b>Scroll only</b> you can also tap it to
+         <b>Delete</b>, and tells you when it was written. With <b>Select</b> you can also tap it to
          select it and use the <b>…</b> button, or the Delete key. The pen never opens the menu, and
-         neither does a finger while <b>Finger draws</b> is on: then a held finger is drawing.`,
+         neither does a finger while <b>Draw with my finger</b> is on: then a held finger is drawing.`,
       ],
       [
         "How do I open a link on a page?",
-        `Tap it with <b>Scroll only</b>, the pen or the highlighter, and it opens in a new tab. With
+        `Tap it with <b>Select</b>, the pen or the highlighter, and it opens in a new tab. With
          the pen, a tap opens the link and a stroke that starts on it still writes, so you can
          underline linked words. The text, stamp and eraser tools do their own job where you tap.`,
       ],
       [
         "What's the difference between the two erasers?",
-        `<b>Quick</b> removes a whole stroke wherever you touch it — fastest for clearing a
-         mistake. <b>Manual</b> rubs out only the part you drag over, for fixing one letter
+        `Tap the eraser again, or its <b>▾</b>, to choose. <b>Whole strokes</b> removes a stroke wherever
+         you touch it — fastest for clearing a mistake. <b>Just what I rub</b> rubs out only the part you drag over, for fixing one letter
          without redrawing the word.`,
       ],
       [

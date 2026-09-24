@@ -144,6 +144,8 @@ interface Props {
    * carries its target into the editor that opens because of it.
    */
   initialSelection?: MarkRef | null;
+  /** A Select press that landed on nothing of yours — the editor uses it to go back to arranging boxes. */
+  onPressPaper?: () => void;
 }
 
 /** How each kind of mark is named in the history tooltip. */
@@ -183,7 +185,7 @@ export default function PageCanvas({
   fields, fieldValues, onFieldChange,
   studentLayer, teacherLayer, masterLayer, onLayerChange,
   writeTarget, tool, fingerDraw, fieldsEditable, authorName, className,
-  notebookId = "", studentId, onResponseUploaded, showMarkHistory, preview, initialSelection = null,
+  notebookId = "", studentId, onResponseUploaded, showMarkHistory, preview, initialSelection = null, onPressPaper,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const masterRef = useRef<HTMLCanvasElement>(null);
@@ -520,7 +522,7 @@ export default function PageCanvas({
     if (tool.kind === "select") {
       const ref = markRefAt(activeLayer, x, y, 6 / scale);
       if (ref) beginMarkDrag(ref, e);
-      else { setSelected(null); typeAt.current = { x, y }; }
+      else { setSelected(null); typeAt.current = { x, y }; onPressPaper?.(); }
       return;
     }
 

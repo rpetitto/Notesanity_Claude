@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Minus, Plus } from "lucide-react";
+import { Check, Minus, Plus } from "lucide-react";
 import { cn } from "../lib/utils";
 
 export type ContextEntry =
@@ -31,7 +31,15 @@ export type ContextEntry =
       disabled?: boolean;
       /** Shown quietly at the right, e.g. "⌘D". Decoration: the keys work anyway. */
       shortcut?: string;
+      /** A second, quieter line under the label. */
+      hint?: string;
+      /** A setting that is on or off: drawn with a check, announced as a checkbox. */
+      checked?: boolean;
     }
+  /** One of a set of choices that stays open, e.g. where new pages go. */
+  | { kind: "radio"; group: string; label: string; checked: boolean; onSelect: () => void }
+  /** A small heading over the entries that follow. */
+  | { kind: "heading"; text: string }
   | { kind: "separator" }
   /** A quiet line of information, such as when a mark was made. */
   | { kind: "note"; text: string }
@@ -46,6 +54,8 @@ export interface ContextMenuSpec {
   /** Names the thing the menu is about: "Text box", "Your note". */
   title?: string;
   entries: ContextEntry[];
+  /** Told when the menu goes away however it goes — for a menu button's aria-expanded. */
+  onClose?: () => void;
 }
 
 type Listener = (spec: ContextMenuSpec | null) => void;
@@ -159,14 +169,17 @@ export function ContextMenuHost() {
       if (next) returnFocus.current = document.activeElement as HTMLElement | null;
       setPos(null);
       setSheet(window.innerWidth < 640);
-      setSpec(next);
+      setRadios({});
+      setSpec((prev) => { if (prev && prev !== next) prev.onClose?.(); return next; });
     };
     ringListener = setRing;
     return () => { listener = null; ringListener = null; };
   }, []);
 
+  /** Radio choices made while the menu is open, by group — the menu stays up for them. */
+  const [radios, setRadios] = useState<Record<string, string>>({});
   const close = useCallback(() => {
-    setSpec(null);
+    setSpec((prev) => { prev?.onClose?.(); return null; });
     const back = returnFocus.current;
     returnFocus.current = null;
     if (back && document.contains(back)) back.focus?.({ preventScroll: true });
@@ -228,6 +241,26 @@ export function ContextMenuHost() {
       )}
       {spec.entries.map((entry, i) => {
         if (entry.kind === "separator") return <div key={i} className="my-1 border-t-2 border-pine/10" role="separator" />;
+        if (entry.kind === "heading") {
+          return <p key={i} className="px-4 pb-0.5 pt-2.5 font-display text-[14px] font-bold uppercase tracking-[0.06em] text-pine/55">{entry.text}</p>;
+        }
+        if (entry.kind === "radio") {
+          const on = radios[entry.group] !== undefined ? radios[entry.group] === entry.label : entry.checked;
+          return (
+            <button
+              key={i}
+              type="button"
+              role="menuitemradio"
+              aria-checked={on}
+              data-menu-focus
+              onClick={() => { setRadios((r) => ({ ...r, [entry.group]: entry.label })); entry.onSelect(); }}
+              className="flex min-h-[44px] w-full items-center gap-2.5 px-4 py-2 text-left text-pine outline-none hover:bg-oat focus-visible:bg-oat"
+            >
+              <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-pine", on && "after:h-2.5 after:w-2.5 after:rounded-full after:bg-pine after:content-['']")} aria-hidden />
+              <span className="font-display text-[17px] font-bold">{entry.label}</span>
+            </button>
+          );
+        }
         if (entry.kind === "note") {
           return <p key={i} className="px-4 py-2 text-[16px] leading-snug text-pine/65">{entry.text}</p>;
         }
@@ -277,7 +310,8 @@ export function ContextMenuHost() {
           <button
             key={i}
             type="button"
-            role="menuitem"
+            role={entry.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={entry.checked}
             data-menu-focus
             disabled={entry.disabled}
             onClick={run(entry.onSelect)}
@@ -290,7 +324,13 @@ export function ContextMenuHost() {
             )}
           >
             {entry.icon && <span className="shrink-0 [&>svg]:h-5 [&>svg]:w-5">{entry.icon}</span>}
-            <span className="min-w-0 flex-1 font-display text-[17px] font-bold">{entry.label}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-display text-[17px] font-bold">{entry.label}</span>
+              {entry.hint && <span className="block text-[15px] leading-snug text-pine/60">{entry.hint}</span>}
+            </span>
+            {entry.checked !== undefined && (
+              <Check className={cn("h-5 w-5 shrink-0", entry.checked ? "opacity-100" : "opacity-0")} strokeWidth={3} aria-hidden />
+            )}
             {entry.shortcut && <span className="shrink-0 text-[15px] text-pine/45">{entry.shortcut}</span>}
           </button>
         );

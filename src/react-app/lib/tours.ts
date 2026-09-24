@@ -116,27 +116,26 @@ export const TOURS: Record<string, TourStep[]> = {
 
   "teacher.notebook": [
     {
-      // The row itself when the Answer boxes tab is up; otherwise its tab,
-      // which is where a notebook that opened on Pages will find it.
-      target: ["nb-fields", "nb-boxes"],
-      title: "Ask for an answer",
+      target: "nb-add-pages",
+      title: "Add pages",
       body:
-        "Pick a box and drag it onto the page where you want it — typing, a checkbox, a " +
-        "dropdown, a picture or a recording.",
+        "Blank paper in the ruling you want, a document off your machine, a file out of Google " +
+        "Drive, or a page from your library — after the page you're on, or at the end.",
     },
     {
-      target: "nb-annotate",
+      target: "nb-fields",
+      title: "Add what students fill in",
+      body:
+        "Text boxes, checkboxes, dropdowns, prompts, photo and audio answers — and your own text, " +
+        "pictures and links. Pick one, then tap the page where it goes.",
+    },
+    {
+      target: "ink-tools",
       title: "Write on the page yourself",
       body:
-        "The Annotate tab gives you a pen for the notebook itself: a worked example, an arrow, a " +
-        "heading in your own handwriting. It reaches students when you publish.",
-    },
-    {
-      target: "nb-add-pages",
-      title: "Pages, and your own text and pictures",
-      body:
-        "The Pages tab adds paper — blank in the ruling you want, a document off your machine, or a " +
-        "file out of Google Drive — and puts a block of text or a picture of yours on any page.",
+        "Pick the pen to write on the notebook itself: a worked example, an arrow, a heading in " +
+        "your own hand. It reaches students when you publish. Select (the arrow) moves boxes and " +
+        "marks; press the ▾ beside a tool for its colors and sizes.",
     },
     {
       target: ["nb-rail", "nb-pages-button"],
@@ -221,15 +220,15 @@ export const TOURS: Record<string, TourStep[]> = {
       target: "ink-tools",
       title: "Pick something to write with",
       body:
-        "Pen, highlighter, eraser, typed text or a stamp. The eraser can take a whole stroke, " +
-        "or rub out only the bit you drag across.",
+        "Pen, highlighter, eraser, typed text or a stamp. Press the ▾ beside the tool in your hand " +
+        "(or tap the tool again) for its colors and sizes.",
     },
     {
       target: "finger-draw",
       title: "Finger or stylus",
       body:
-        "With a stylus, leave this on \"Finger scrolls\" and you can rest your hand on the " +
-        "screen. Without one, switch it so your finger draws.",
+        "View has zoom, and \"Draw with my finger\". With a stylus, leave it off and you can rest " +
+        "your hand on the screen. Without one, turn it on so your finger draws.",
     },
     {
       target: ["nb-rail", "nb-pages-button"],
