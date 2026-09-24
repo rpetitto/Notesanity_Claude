@@ -228,23 +228,27 @@ ${HERO_CSS}
     ${lessonLoop([
       {
         title: "1 · Build it",
+        caption: "Bring in a worksheet, a Drive file or blank paper. Add answer boxes where you want them.",
         body: `Bring in a worksheet or start from blank paper. Add prompts and answer boxes where you
          want them. Group pages into sections so "the practice set" means something.`,
       },
       {
         title: "2 · Push it",
+        caption: "One press gives every student their own copy. Add a page later, and the same press updates them all.",
         body: `One press sends it to the class, and every student gets their own copy. Fix a typo or
          add a page next week and the same press updates every copy — their writing stays
          exactly where they put it.`,
       },
       {
         title: "3 · Assign it",
+        caption: "Not every notebook is homework. When one is, pick its pages and set a due date.",
         body: `Not every notebook is homework. When one is, pick the pages that make up the task and
          set a due date — those pages come back to you to be graded. A student who joins late
          gets caught up automatically.`,
       },
       {
         title: "4 · Grade it",
+        caption: "Move through the class, write on each student's page, and return it with a grade.",
         body: `Open the roster, move between students, and write on their page. Return it with a
          grade and a comment — or reopen it if they need another go.`,
       },
