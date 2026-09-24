@@ -62,7 +62,7 @@ app.get("/api/status", handler(async (c) => {
   });
 
   checks.push(
-    await probe("database", "Notebooks and grades", "Where work, classes and marking are stored", async () => {
+    await probe("database", "Notebooks and grades", "Where work, classes and grades are stored", async () => {
       await db.prepare(`SELECT 1`).first();
     }),
   );

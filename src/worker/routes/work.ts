@@ -323,7 +323,7 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
       throw new HttpError(
         423,
         lock.returned
-          ? `This page is locked — you handed it in for "${lock.title}" and it's been marked. Ask your teacher to reopen it.`
+          ? `This page is locked — you handed it in for "${lock.title}" and it's been graded. Ask your teacher to reopen it.`
           : `This page is locked — you handed it in for "${lock.title}".`,
       );
     }
