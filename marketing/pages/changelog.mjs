@@ -39,8 +39,11 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "September 24, 2026",
-    "A page comparing Notesanity with the tools you already know, and what the Free plan will include after the beta.",
+    "Links that work, a page comparing Notesanity with the tools you already know, and what the Free plan will include after the beta.",
     [
+      ["new", "<b>The links in your worksheets work.</b> Upload a PDF, Word or PowerPoint file and its web and email links stay where they were, ready for a student to tap. They open in a new tab. A notebook made before today kept only the words; pick <b>Link</b> in the <b>Pages</b> tab and it offers to put that page's links back."],
+      ["new", "<b>Add a link of your own.</b> <b>Link</b>, next to Text and Picture in the <b>Pages</b> tab, makes anything on the page open a website: drag over the words or picture and paste the address. Text blocks have a link button too."],
+      ["fixed", "<b>With the pen picked up, tapping an answer box puts the cursor in it.</b> The tap drew a dot on the page instead, so typing an answer meant switching tools first. A tap now opens a link, too, and a stroke that starts on a box or a link still writes."],
       ["new", "<b>How Notesanity compares.</b> A new <a href=\"/compare\">comparison page</a> sets Notesanity beside Kami, OneNote Class Notebook, Google Classroom and Notability — what each does, where each is stronger than we are, and which to choose — with every claim about another product checked against that company's own site and dated."],
       ["better", "<b>The Free plan's limits, set out ahead of time.</b> When paid plans arrive, the Free plan will include five class notebooks at a time and up to 35 students in each class. Nothing changes during the beta: every class and notebook stays open, and you'll get a full semester's notice before any limit applies. Archived notebooks never count, nothing is ever deleted, and Pro has no limit on either. See <a href=\"/pricing\">pricing</a>."],
     ],

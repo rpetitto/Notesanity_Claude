@@ -174,3 +174,20 @@ a {
   opacity: 0.85;
 }
 .rich-text a { color: var(--color-pine); text-decoration: underline; }
+
+/* A link in a rich text block reads as a link — the brand's thick mint
+   underline — rather than as the plain underline `u` already draws. */
+.rich-text a[href] {
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--color-mint);
+  text-underline-offset: 2px;
+}
+/* Rich text blocks never take the pointer (ink crosses them), but their links
+   do whenever the page is in a mode where a press reads rather than writes.
+   PageCanvas sets `links-live` on the page for exactly that. */
+.links-live .rich-text a[href] { pointer-events: auto; cursor: pointer; }
+.links-live .rich-text a[href]:hover { background: rgb(127 209 174 / 0.25); }
+/* The one-lookup probe behind the pen's tap-through (PageCanvas `typeableUnder`):
+   makes tap targets hit-testable again while their overlay is pointer-transparent. */
+.tap-probe [data-layer="fields"] [data-typeable="1"],
+.tap-probe .rich-text a[href] { pointer-events: auto !important; }

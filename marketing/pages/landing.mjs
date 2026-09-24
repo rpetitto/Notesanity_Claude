@@ -196,7 +196,7 @@ ${HERO_CSS}
   <div class="wrap">
     <div class="grid grid-3">
       ${feature("Start from anything", `
-        Upload a PDF, a Word file or a slide deck and it becomes a notebook. Or start from
+        Upload a PDF, a Word file or a slide deck and it becomes a notebook, links and all. Or start from
         blank paper — lined, graph, dot grid, music staves, isometric — and choose how many
         pages you want.`)}
       ${feature("Built for a stylus", `

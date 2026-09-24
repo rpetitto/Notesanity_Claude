@@ -51,6 +51,7 @@ import MarkSelection from "./MarkSelection";
 import { renderPageToCanvas } from "../lib/pdf";
 import { isPattern, renderPatternToCanvas, DEFAULT_PATTERN_COLOR } from "../lib/patterns";
 import { cn, relativeTime } from "../lib/utils";
+import { linkHost, normalizeLink } from "../../shared/links.mjs";
 
 /**
  * `FieldRec` doesn't (yet) declare the `prompt`/`image`/`audio` field types or
@@ -58,7 +59,7 @@ import { cn, relativeTime } from "../lib/utils";
  * a plain `text`/`checkbox`/`choice` field from the server still satisfies this.
  */
 export type FieldLike = Omit<FieldRec, "type"> & {
-  type: FieldRec["type"] | "prompt" | "image" | "audio" | "richtext" | "figure";
+  type: FieldRec["type"] | "prompt" | "image" | "audio" | "richtext" | "figure" | "link";
   prompt?: string;
   /** Sanitised markup for a `richtext` block. Safe to render as-is: the server
    * cleans it on write, so nothing unclean is ever stored. */
@@ -168,6 +169,9 @@ const PLACEMENT_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "s
  * and a comment pin has to be openable, while its own tool is still selected.
  */
 const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "shape"];
+
+/** What a pen tap can land on instead of drawing — see `typeableUnder`, and `.tap-probe` in index.css. */
+const TAP_TARGETS = '[data-layer="fields"] [data-typeable="1"], .rich-text a[href]';
 
 export default function PageCanvas({
   pdfUrl, sourceIndex, pageWidth, pageHeight, pattern, patternColor, scale,
@@ -575,13 +579,33 @@ export default function PageCanvas({
   /**
    * The interactive overlay sits above the pointer surface but is made
    * pointer-transparent while marking, so we hit-test it by hand.
+   *
+   * By hand with a probe, because pointer-transparent also means invisible to
+   * hit-testing: `elementsFromPoint` skips anything with `pointer-events:
+   * none`, so asking it about the overlay as it stands finds nothing, and a
+   * tap on a box drew a dot instead. For the length of this one synchronous
+   * lookup the `tap-probe` class (index.css) makes the tap targets — and only
+   * those — hit-testable again; nothing is painted in between.
+   *
+   * The targets are the teacher's fields (boxes and links) and the links in
+   * rich text. Your own notes carry the typeable mark too but are left out:
+   * a pen tap on one keeps drawing, as it always has, rather than being
+   * caught by a note that only opens for the other tools.
    */
   const typeableUnder = (clientX: number, clientY: number): HTMLElement | null => {
-    for (const el of document.elementsFromPoint(clientX, clientY)) {
-      const node = el as HTMLElement;
-      if (node.dataset?.typeable === "1") return node;
+    const root = pageRef.current;
+    if (!root) return null;
+    root.classList.add("tap-probe");
+    try {
+      for (const el of document.elementsFromPoint(clientX, clientY)) {
+        if (!root.contains(el)) continue;
+        const target = (el as HTMLElement).closest<HTMLElement>(TAP_TARGETS);
+        if (target && root.contains(target)) return target;
+      }
+      return null;
+    } finally {
+      root.classList.remove("tap-probe");
     }
-    return null;
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -879,6 +903,11 @@ export default function PageCanvas({
   // The page's own objects only stand aside for freehand marks, so that the
   // text box or comment a tool just created stays usable.
   const objectPointerEvents = isMarking && canWrite ? "none" : "auto";
+  // Links — a link field, or an anchor in a rich text block — open on a press
+  // whenever pressing reads the page rather than writes on it, which includes
+  // every read-only view. With a placing tool they stand aside like the fields
+  // do, and a tap reaches them through the pen's tap-through instead.
+  const linksLive = !(isPlacing && canWrite);
 
   const textOwners = [
     ...shownStudentLayer.x.map((t) => ({ t, own: writeTarget === "student" })),
@@ -905,7 +934,7 @@ export default function PageCanvas({
   return (
     <div
       ref={pageRef}
-      className={cn("relative bg-white shadow-sm select-none", className)}
+      className={cn("relative bg-white shadow-sm select-none", linksLive && "links-live", className)}
       onMouseMove={onHoverMove}
       onMouseLeave={() => setMarkHover(null)}
       onTouchStart={(e) => { if (e.touches.length > 1) cancelGesture(); }}
@@ -960,6 +989,7 @@ export default function PageCanvas({
           field, which is fine while nothing below needs them and wrong the
           moment something does — the select tool has to reach the ink. */}
       <div
+        data-layer="fields"
         className={cn(
           "absolute inset-0",
           fieldsEditable && fieldPointerEvents === "auto" && "[&>*]:pointer-events-auto",
@@ -970,6 +1000,7 @@ export default function PageCanvas({
           <FieldControl
             key={f.id}
             typeable
+            linksLive={linksLive}
             field={f}
             scale={scale}
             value={fieldValues[f.id]}
@@ -1334,7 +1365,7 @@ function CommentPin({
 }
 
 function FieldControl({
-  field, scale, value, editable, onChange, typeable, notebookId, studentId, onResponseUploaded, preview,
+  field, scale, value, editable, onChange, typeable, linksLive = true, notebookId, studentId, onResponseUploaded, preview,
 }: {
   field: FieldLike;
   scale: number;
@@ -1348,6 +1379,8 @@ function FieldControl({
   typeable?: boolean;
   /** Preview: everything else behaves, but nothing uploads. */
   preview?: boolean;
+  /** Whether a press on a link opens it directly — see `linksLive` in PageCanvas. */
+  linksLive?: boolean;
 }) {
   const style = {
     left: field.x * scale,
@@ -1410,6 +1443,29 @@ function FieldControl({
           dangerouslySetInnerHTML={{ __html: field.content ?? "" }}
         />
       </div>
+    );
+  }
+
+  if (field.type === "link") {
+    // Checked again here though the server only stores what passes: this is
+    // the last step before an address is put under a pupil's finger.
+    const href = normalizeLink(field.content ?? "");
+    // A link whose address hasn't been typed yet is nothing to press.
+    if (!href) return null;
+    const name = field.label || linkHost(href);
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        // A tap target for the pen, like a box: a tap opens it, a stroke
+        // that starts on it still writes.
+        {...(typeable ? { "data-typeable": "1" } : {})}
+        aria-label={`${name} (opens in a new tab)`}
+        title={href}
+        className="absolute rounded-[4px] transition-colors hover:bg-mint/25 focus-visible:bg-mint/25 focus-visible:outline-[3px] focus-visible:outline-mint"
+        style={{ ...style, pointerEvents: linksLive ? "auto" : "none" }}
+      />
     );
   }
 

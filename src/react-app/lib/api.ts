@@ -110,9 +110,10 @@ export interface FieldRec {
    * `prompt` pairs a teacher instruction (and optional image) with an answer box;
    * `image` and `audio` take a student upload inside the teacher-defined box.
    * `richtext` and `figure` are the teacher's own content — prose and pictures
-   * that belong to the page and take no answer.
+   * that belong to the page and take no answer. `link` makes a region of the
+   * page open an address: `content` is the address, `label` the words it covers.
    */
-  type: "text" | "checkbox" | "choice" | "prompt" | "image" | "audio" | "richtext" | "figure";
+  type: "text" | "checkbox" | "choice" | "prompt" | "image" | "audio" | "richtext" | "figure" | "link";
   x: number;
   y: number;
   w: number;
@@ -121,7 +122,7 @@ export interface FieldRec {
   options: string;
   /** Teacher instruction, used by `prompt` fields. */
   prompt?: string;
-  /** Sanitised markup for a `richtext` block — cleaned server-side on write. */
+  /** Sanitised markup for a `richtext` block, or a `link`'s checked address — cleaned server-side on write. */
   content?: string;
   /**
    * Truthy when the teacher attached an illustration to a `prompt` field.

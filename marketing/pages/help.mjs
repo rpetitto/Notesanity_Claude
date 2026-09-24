@@ -103,6 +103,20 @@ const BODY = () => `
          also pick a file straight out of Drive, or start from blank paper.`,
       ],
       [
+        "Do the links in my worksheet still work?",
+        `Yes. Web and email links in a PDF, Word or PowerPoint file stay where they were, and open
+         in a new tab when a student taps them. Links from one page of the file to another (a
+         contents page, say) aren't kept. A notebook made before September 24, 2026 kept only the
+         words: pick <b>Link</b> in the <b>Pages</b> tab and it offers to put that page's links back.`,
+      ],
+      [
+        "Can I add a link of my own?",
+        `Two ways. <b>Link</b> in the <b>Pages</b> tab makes anything already on the page open a
+         website: drag a box over the words or picture, then paste the address. In a <b>Text</b>
+         block, select words and press the link button. Addresses have to be web or email
+         addresses.`,
+      ],
+      [
         "Can I reuse a page in another notebook?",
         `Yes — that's the page library. Hover a page in the page list and choose <b>Save to your page
          library</b>, then add it to any other notebook from the <b>Pages</b> tab &rarr; <b>Library</b>.
@@ -273,6 +287,12 @@ const BODY = () => `
         "What does the highlighter do differently?",
         `If it recognizes that you're highlighting along a line of text it snaps the stroke
          straight, so a highlight looks deliberate rather than hand-wobbled.`,
+      ],
+      [
+        "How do I open a link on a page?",
+        `Tap it with <b>Scroll only</b>, the pen or the highlighter, and it opens in a new tab. With
+         the pen, a tap opens the link and a stroke that starts on it still writes, so you can
+         underline linked words. The text, stamp and eraser tools do their own job where you tap.`,
       ],
       [
         "What's the difference between the two erasers?",

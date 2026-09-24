@@ -6,10 +6,12 @@ import {
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
   FolderOpen, LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
+  Link2 as LinkIcon, ExternalLink, Unlink2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, assetUrl, pageSource, type FieldRec, type PageRec } from "../lib/api";
-import { loadPdf, readPageSizes } from "../lib/pdf";
+import { loadPdf, readPageLinks, readPageSizes, type PdfLink } from "../lib/pdf";
+import { linkHost, normalizeLink } from "../../shared/links.mjs";
 import { convertToPdf, driveFileAsPdf, hasDrivePicker, needsConversion, pickDriveFile } from "../lib/google";
 import {
   PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
@@ -37,7 +39,7 @@ import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
 /** The header's three actions: a size that fits three across a phone, the full size from `sm`. */
 const COMPACT = "h-11 px-2.5 text-[16px] sm:h-12 sm:px-5 sm:text-[17px]";
 
-type FieldTool = "none" | "text" | "checkbox" | "choice" | "prompt" | "image" | "audio" | "richtext" | "figure";
+type FieldTool = "none" | "text" | "checkbox" | "choice" | "prompt" | "image" | "audio" | "richtext" | "figure" | "link";
 
 /** Alias kept for readability at the call sites below — `FieldRec` already
  * covers the new prompt/image/audio types and the `prompt`/`has_media` columns. */
@@ -100,8 +102,18 @@ const FIELD_TYPE_LABEL: Record<string, string> = {
   audio: "Audio recording",
   richtext: "Rich text",
   figure: "Picture",
+  link: "Link",
 };
 const fieldTypeLabel = (t: string) => FIELD_TYPE_LABEL[t] ?? t;
+
+/** What a field's box says on the page in the editor: its type, and what tells it apart. */
+function fieldChip(f: FieldRow): string {
+  if (f.type === "link") {
+    const href = normalizeLink(f.content ?? "");
+    return `Link · ${f.label || (href ? linkHost(href) : "no address yet")}`;
+  }
+  return `${fieldTypeLabel(f.type)}${f.label ? ` · ${f.label}` : ""}`;
+}
 
 interface FieldDraft { label: string; options: string; prompt: string; content: string }
 
@@ -112,15 +124,24 @@ function fieldPatch(f: FieldRow, d: FieldDraft): Record<string, unknown> {
   if (f.type === "choice") out.options = d.options.split("\n").map((v) => v.trim()).filter(Boolean);
   if (f.type === "prompt") out.prompt = d.prompt;
   if (f.type === "richtext") out.content = d.content;
+  // A link's address, as typed: the server stores its checked form, and the
+  // inspector refuses Save on anything that wouldn't pass.
+  if (f.type === "link") out.content = d.content.trim();
   return out;
 }
 
 function fieldIsDirty(f: FieldRow, d: FieldDraft): boolean {
   const p = fieldPatch(f, d);
-  if ("label" in p && d.label !== (f.label ?? "")) return true;
+  // A link is compared as the server will store it — the address checked and
+  // completed, the words on one line — or "khanacademy.org" would still read
+  // as unsaved after saving as "https://khanacademy.org/".
+  const isLink = f.type === "link";
+  const label = isLink ? d.label.replace(/\s+/g, " ").trim() : d.label;
+  const content = isLink ? normalizeLink(d.content) ?? d.content.trim() : d.content;
+  if ("label" in p && label !== (f.label ?? "")) return true;
   if ("options" in p && JSON.stringify(p.options) !== JSON.stringify(safeOptions(f.options))) return true;
   if ("prompt" in p && d.prompt !== (f.prompt ?? "")) return true;
-  if ("content" in p && d.content !== (f.content ?? "")) return true;
+  if ("content" in p && content !== (f.content ?? "")) return true;
   return false;
 }
 
@@ -141,6 +162,8 @@ const DEFAULT_FIELD_SIZE: Record<Exclude<FieldTool, "none">, { w: number; h: num
   audio: { w: 220, h: 56 },
   richtext: { w: 300, h: 110 },
   figure: { w: 220, h: 165 },
+  // About one line of body text — the commonest thing to link.
+  link: { w: 160, h: 22 },
 };
 
 export default function NotebookEditor() {
@@ -530,6 +553,56 @@ export default function NotebookEditor() {
       setDropped(new Set());
       invalidate();
       toast.success(`Added ${picked.length} field${picked.length === 1 ? "" : "s"}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  /**
+   * Links the page's own file has that aren't on the page yet.
+   *
+   * A file uploaded now brings its links in as its pages are read. Pages that
+   * arrived before links were kept have them only in the file, so picking the
+   * Link tool looks — the moment a teacher is thinking about links — and
+   * offers to bring them across. Nothing is added without the press, which
+   * also means a link deleted on purpose (a publisher's store, an answer key)
+   * only comes back if asked for.
+   */
+  const [fileLinks, setFileLinks] = useState<PdfLink[] | null>(null);
+  useEffect(() => {
+    setFileLinks(null);
+    if (tool !== "link" || !page || isPattern(page.pattern) || !page.asset_key) return;
+    let live = true;
+    const onPage = fields.filter((f) => f.type === "link");
+    const near = (a: number, b: number) => Math.abs(a - b) < 3;
+    readPageLinks(assetUrl(notebookId, page.asset_key), page.source_index)
+      .then((found) => {
+        if (!live) return;
+        setFileLinks(found.filter((l) => !onPage.some((f) => f.content === l.url && near(f.x, l.x) && near(f.y, l.y))));
+      })
+      .catch(() => { if (live) setFileLinks([]); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, page?.id, fields]);
+
+  const addFileLinks = useMutation({
+    mutationFn: (links: PdfLink[]) => {
+      const pw = page!.width;
+      const ph = page!.height;
+      return api.post<{ ids: string[] }>(`/api/notebooks/${notebookId}/fields/bulk`, {
+        pageId: page!.id,
+        // Clamped to the page: a file's link boxes can overhang its edge by a
+        // point, and the bulk route refuses anything off the page.
+        fields: links.map((l) => {
+          const x = Math.max(0, l.x);
+          const y = Math.max(0, l.y);
+          return { type: "link", x, y, w: Math.min(pw, l.x + l.w) - x, h: Math.min(ph, l.y + l.h) - y, label: l.label, content: l.url };
+        }).filter((f) => f.w > 1 && f.h > 1),
+      });
+    },
+    onSuccess: (_res, links) => {
+      invalidate();
+      toast.success(`Added ${links.length} link${links.length === 1 ? "" : "s"} from the file`);
+      setTool("none");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -1290,12 +1363,34 @@ export default function NotebookEditor() {
         <RibbonGroup caption="On this page">
           <RibbonButton icon={PenLine} label="Text" title="A block of text you write — a heading, instructions, a passage" active={tool === "richtext"} onClick={() => setTool(tool === "richtext" ? "none" : "richtext")} />
           <RibbonButton icon={ImageIcon} label="Picture" title="A picture of your own on the page" active={tool === "figure"} onClick={() => setTool(tool === "figure" ? "none" : "figure")} />
+          <RibbonButton icon={LinkIcon} label="Link" title="Make words or a picture on the page open a website" active={tool === "link"} onClick={() => setTool(tool === "link" ? "none" : "link")} />
         </RibbonGroup>
+        {tool === "link" && !!fileLinks?.length && (
+          <>
+            <RibbonDivider />
+            <RibbonGroup caption="From the file">
+              <RibbonButton
+                icon={Wand2}
+                label={addFileLinks.isPending ? "Adding…" : `Add ${fileLinks.length} link${fileLinks.length === 1 ? "" : "s"}`}
+                title="This page's original file has links that aren't on the page yet — put them back where they were"
+                busy={addFileLinks.isPending}
+                disabled={addFileLinks.isPending}
+                onClick={() => addFileLinks.mutate(fileLinks)}
+              />
+            </RibbonGroup>
+          </>
+        )}
         <RibbonDivider />
         <RibbonGroup caption="Check">
           <RibbonButton icon={Eye} label="Preview" title="See this notebook the way a student will, including writing you haven't sent yet" onClick={openPreview} />
         </RibbonGroup>
-        {tool !== "none" && <RibbonHint>Drag on the page to place {tool === "figure" ? "the picture" : "the text"}</RibbonHint>}
+        {tool !== "none" && (
+          <RibbonHint>
+            {tool === "link"
+              ? "Drag over the words or picture that should open the link"
+              : `Drag on the page to place ${tool === "figure" ? "the picture" : "the text"}`}
+          </RibbonHint>
+        )}
         {rowTail}
       </RibbonRow>
       )}
@@ -2116,7 +2211,7 @@ function FieldLayer({
           <div
             key={f.id}
             className={cn(
-              "absolute rounded border-2 bg-mint/20",
+              "group absolute rounded border-2 bg-mint/20",
               isSelected ? "border-pine" : "border-pine/50 hover:border-pine",
             )}
             style={{ left: rect.x * scale, top: rect.y * scale, width: rect.w * scale, height: rect.h * scale, cursor: "move" }}
@@ -2130,8 +2225,16 @@ function FieldLayer({
               setDrag({ id: f.id, mode: "move", startX: p.x, startY: p.y, orig: f });
             }}
           >
-            <span className="pointer-events-none absolute -top-5 left-0 whitespace-nowrap rounded bg-pine px-1.5 py-0.5 text-[16px] font-bold text-oat">
-              {fieldTypeLabel(f.type)}{f.label ? ` · ${f.label}` : ""}
+            <span
+              className={cn(
+                "pointer-events-none absolute -top-5 left-0 whitespace-nowrap rounded bg-pine px-1.5 py-0.5 text-[16px] font-bold text-oat",
+                // Links sit inside running text, often a line apart; a label
+                // on every one would cover the lines they're in. They name
+                // themselves on hover and when selected.
+                f.type === "link" && !isSelected && "opacity-0 transition-opacity group-hover:opacity-100",
+              )}
+            >
+              {fieldChip(f)}
             </span>
             <div
               className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-full border-2 border-white bg-pine"
@@ -2191,6 +2294,88 @@ function RichTextEditor({
     onChange(ref.current?.innerHTML ?? "");
   };
 
+  /**
+   * Linking words.
+   *
+   * Typing the address means leaving the text, which loses the selection the
+   * link is for, so the selection is kept aside when the link row opens and put
+   * back to apply it. With nothing selected the address goes in as new linked
+   * words. Every anchor is then given exactly the attributes the server's
+   * sanitiser writes, in its order — otherwise the saved block would differ
+   * from what's on screen and the inspector would call it unsaved forever.
+   */
+  const [linking, setLinking] = useState<{ href: string; editing: HTMLAnchorElement | null } | null>(null);
+  const savedRange = useRef<Range | null>(null);
+  const linkHref = linking ? normalizeLink(linking.href) : null;
+
+  const anchorAtSelection = (): HTMLAnchorElement | null => {
+    const sel = window.getSelection();
+    const node = sel?.anchorNode ?? null;
+    const el = node instanceof Element ? node : node?.parentElement ?? null;
+    const a = el?.closest("a");
+    return a && ref.current?.contains(a) ? a : null;
+  };
+
+  const openLinking = () => {
+    const sel = window.getSelection();
+    savedRange.current = sel && sel.rangeCount && ref.current?.contains(sel.anchorNode)
+      ? sel.getRangeAt(0).cloneRange()
+      : null;
+    const editing = anchorAtSelection();
+    setLinking({ href: editing?.getAttribute("href") ?? "", editing });
+  };
+
+  const tidyAnchors = () => {
+    for (const a of Array.from(ref.current?.querySelectorAll("a") ?? [])) {
+      const href = normalizeLink(a.getAttribute("href") ?? "");
+      if (!href) { a.replaceWith(...Array.from(a.childNodes)); continue; }
+      for (const name of a.getAttributeNames()) a.removeAttribute(name);
+      a.setAttribute("href", href);
+      a.setAttribute("target", "_blank");
+      a.setAttribute("rel", "noopener noreferrer nofollow");
+    }
+    onChange(ref.current?.innerHTML ?? "");
+  };
+
+  const applyLink = () => {
+    if (!linking || !linkHref || !ref.current) return;
+    if (linking.editing && ref.current.contains(linking.editing)) {
+      linking.editing.setAttribute("href", linkHref);
+    } else {
+      ref.current.focus();
+      const sel = window.getSelection();
+      if (sel && savedRange.current) {
+        sel.removeAllRanges();
+        sel.addRange(savedRange.current);
+      }
+      if (!sel || !sel.rangeCount || sel.isCollapsed || !ref.current.contains(sel.anchorNode)) {
+        // Nothing chosen to link: put the address in as words of its own.
+        const a = document.createElement("a");
+        a.setAttribute("href", linkHref);
+        a.textContent = linkHost(linkHref);
+        if (sel && sel.rangeCount && ref.current.contains(sel.anchorNode)) {
+          const range = sel.getRangeAt(0);
+          range.insertNode(a);
+          range.setStartAfter(a);
+          range.collapse(true);
+        } else {
+          ref.current.appendChild(a);
+        }
+      } else {
+        document.execCommand("createLink", false, linkHref);
+      }
+    }
+    setLinking(null);
+    tidyAnchors();
+  };
+
+  const removeLink = () => {
+    const a = linking?.editing;
+    if (a && ref.current?.contains(a)) a.replaceWith(...Array.from(a.childNodes));
+    setLinking(null);
+    tidyAnchors();
+  };
+
   const BUTTONS: { cmd: string; arg?: string; label: string; className?: string }[] = [
     { cmd: "bold", label: "B", className: "font-bold" },
     { cmd: "italic", label: "I", className: "italic" },
@@ -2204,6 +2389,20 @@ function RichTextEditor({
   return (
     <div className="mt-1.5">
       <div className="mb-1.5 flex flex-wrap gap-1">
+        <button
+          type="button"
+          aria-label="Link words"
+          title="Link words — select them first, or add an address as new words"
+          aria-pressed={!!linking}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => (linking ? setLinking(null) : openLinking())}
+          className={cn(
+            "inline-flex h-9 min-w-9 items-center justify-center rounded-[8px] border-2 border-pine/20 px-2 text-pine hover:bg-oat",
+            linking && "border-pine bg-mint/30",
+          )}
+        >
+          <LinkIcon className="h-4 w-4" strokeWidth={2.5} />
+        </button>
         {BUTTONS.map((b) => (
           <button
             key={b.label}
@@ -2221,6 +2420,40 @@ function RichTextEditor({
           </button>
         ))}
       </div>
+      {linking && (
+        <div className="mb-1.5 rounded-[12px] border-2 border-pine/25 bg-oat p-2">
+          <Input
+            value={linking.href}
+            onChange={(e) => setLinking({ ...linking, href: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); applyLink(); }
+              // Escape here closes the link row, not the whole inspector.
+              if (e.key === "Escape") { e.stopPropagation(); setLinking(null); }
+            }}
+            placeholder="Paste a web address"
+            aria-label="Web address"
+            inputMode="url"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            autoFocus
+            className="text-[16px]"
+          />
+          {linking.href.trim() && !linkHref && (
+            <p className="mt-1 text-[16px] font-bold text-[#a3341f]">That isn't a web address.</p>
+          )}
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <Button variant="primary" disabled={!linkHref} onClick={applyLink}>
+              {linking.editing ? "Change link" : "Add link"}
+            </Button>
+            {linking.editing && (
+              <Button variant="secondary" onClick={removeLink}>
+                <Unlink2 className="h-4 w-4" strokeWidth={2.5} /> Remove
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
       <div
         ref={ref}
         contentEditable
@@ -2229,7 +2462,7 @@ function RichTextEditor({
         className="rich-text max-h-64 min-h-24 overflow-y-auto rounded-[12px] border-2 border-pine/25 bg-white p-2 outline-none focus:border-pine"
       />
       <p className="mt-1 text-[14px] text-pine/55">
-        Headings, emphasis and lists are kept. Anything else is stripped when it saves.
+        Headings, emphasis, lists and links are kept. Anything else is stripped when it saves.
       </p>
     </div>
   );
@@ -2361,7 +2594,7 @@ function FieldInspector({
       </div>
       <p className="mt-1 text-[16px] text-pine/70">{fieldTypeLabel(field.type)}</p>
 
-      {!["image", "audio", "richtext", "figure"].includes(field.type) && (
+      {!["image", "audio", "richtext", "figure", "link"].includes(field.type) && (
         <>
           <label className="label-caps mt-4 block text-pine/70">Label / placeholder</label>
           <Input
@@ -2396,6 +2629,56 @@ function FieldInspector({
           />
         </>
       )}
+
+      {field.type === "link" && (() => {
+        const href = normalizeLink(content);
+        const unusable = !!content.trim() && !href;
+        return (
+          <>
+            <label className="label-caps mt-4 block text-pine/70" htmlFor="link-href">Opens</label>
+            <Input
+              id="link-href"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Paste a web address"
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoFocus={!content}
+              aria-invalid={unusable || undefined}
+              className="mt-1 text-[16px]"
+            />
+            {unusable ? (
+              <p className="mt-1.5 text-[16px] font-bold text-[#a3341f]">
+                That isn't a web address. Copy it from the browser's address bar, or start an email address with mailto:
+              </p>
+            ) : href ? (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1.5 inline-flex min-h-[44px] items-center gap-1.5 text-[16px] font-bold text-pine underline decoration-mint decoration-2 underline-offset-2"
+              >
+                <ExternalLink className="h-4 w-4" strokeWidth={2.5} /> Try it
+              </a>
+            ) : null}
+
+            <label className="label-caps mt-4 block text-pine/70" htmlFor="link-words">What it says</label>
+            <Input
+              id="link-words"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. Watch the video"
+              className="mt-1 text-[16px]"
+            />
+            <p className="mt-1.5 text-[16px] leading-snug text-pine/60">
+              The words a screen reader says for it. Size the box over the words or picture on the page that
+              students should tap.
+            </p>
+          </>
+        );
+      })()}
 
       {field.type === "figure" && (
         <>
@@ -2530,7 +2813,7 @@ function FieldInspector({
           <Button
             variant="primary"
             className="flex-1"
-            disabled={!dirty || saving}
+            disabled={!dirty || saving || (field.type === "link" && !!content.trim() && !normalizeLink(content))}
             onClick={() => field && onSave(fieldPatch(field, draft))}
           >
             <Check className="h-4 w-4" strokeWidth={2.5} /> {saving ? "Saving…" : "Save"}
@@ -2541,9 +2824,12 @@ function FieldInspector({
         </div>
       </div>
 
-      <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[16px] leading-relaxed text-pine/70">
-        Moving or resizing a field keeps every answer students have already typed into it.
-      </p>
+      {/* Only things that take an answer have answers to keep. */}
+      {!["richtext", "figure", "link"].includes(field.type) && (
+        <p className="mt-4 rounded-[12px] border-2 border-pine/20 bg-oat px-2.5 py-2 text-[16px] leading-relaxed text-pine/70">
+          Moving or resizing a field keeps every answer students have already typed into it.
+        </p>
+      )}
 
       <button
         onClick={onDelete}

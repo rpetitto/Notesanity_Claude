@@ -1,7 +1,7 @@
 import { app, db, storage } from "../platform";
 import {
   handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
-import { sanitizeRichText } from "../lib/richtext";
+import { fieldContent, importedLinks, linkLabel } from "../lib/links";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import type { LibraryField } from "../lib/page-library";
 import { requireNotebookRoom, requirePlan } from "../lib/plans";
@@ -17,6 +17,8 @@ export const FIELD_TYPES = [
   "text", "checkbox", "choice", "prompt", "image", "audio",
   // Things the teacher writes or shows, which take no answer.
   "richtext", "figure",
+  // A region of the page that opens an address — see lib/links.ts.
+  "link",
 ];
 
 /**
@@ -235,7 +237,8 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const body = await c.req.json<{
     assetKey?: string;
-    pages: { sourceIndex: number; width: number; height: number }[];
+    /** `links`: the file's own links on that page, read by the browser — see lib/links.ts. */
+    pages: { sourceIndex: number; width: number; height: number; links?: unknown }[];
     insertAfterPageId?: string | null;
   }>();
   const assetKey = body.assetKey || nb.asset_key;
@@ -244,16 +247,28 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
   const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, body.pages?.length ?? 1);
 
   // A hundred-page PDF is a hundred rows; they go in batches, not one by one.
+  // A page's links travel with it, so a worksheet's links work the moment it
+  // exists rather than after some second pass.
   const created: string[] = [];
-  const inserts = (body.pages ?? []).map((p, k) => {
+  const inserts = (body.pages ?? []).flatMap((p, k) => {
     const id = uid();
     created.push(id);
-    return db
-      .prepare(
-        `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, group_name, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(id, nb.id, start + step * (k + 1), assetKey, p.sourceIndex, p.width, p.height, groupName, now());
+    return [
+      db
+        .prepare(
+          `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, group_name, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(id, nb.id, start + step * (k + 1), assetKey, p.sourceIndex, p.width, p.height, groupName, now()),
+      ...importedLinks(p).map((l) =>
+        db
+          .prepare(
+            `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, created_at, updated_at)
+             VALUES (?, ?, ?, 'link', ?, ?, ?, ?, ?, '[]', '', ?, ?, ?)`,
+          )
+          .bind(uid(), nb.id, id, l.x, l.y, l.w, l.h, l.label, l.content, now(), now()),
+      ),
+    ];
   });
   for (const part of chunked(inserts, 80)) await db.batch(part);
   await syncPageCount(nb.id);
@@ -767,8 +782,9 @@ app.post("/api/notebooks/:id/fields", handler(async (c) => {
     )
     .bind(
       id, nb.id, body.pageId, body.type, body.x, body.y, body.w, body.h,
-      body.label ?? "", JSON.stringify(body.options ?? []), body.prompt ?? "",
-      sanitizeRichText(body.content ?? ""), now(), now(),
+      body.type === "link" ? linkLabel(body.label) : body.label ?? "",
+      JSON.stringify(body.options ?? []), body.prompt ?? "",
+      fieldContent(body.type, body.content), now(), now(),
     )
     .run();
   await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
@@ -792,7 +808,8 @@ app.post("/api/notebooks/:id/fields/bulk", handler(async (c) => {
   const { nb } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const body = await c.req.json<{
     pageId: string;
-    fields: { type: string; x: number; y: number; w: number; h: number; label?: string }[];
+    /** `content` is read only for links — "Add the file's links" places them through here. */
+    fields: { type: string; x: number; y: number; w: number; h: number; label?: string; content?: string }[];
   }>();
   const wanted = Array.isArray(body.fields) ? body.fields : [];
   if (!wanted.length) throw new HttpError(400, "No fields to add");
@@ -821,7 +838,11 @@ app.post("/api/notebooks/:id/fields/bulk", handler(async (c) => {
         `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(ids[i], nb.id, page.id, f.type, f.x, f.y, f.w, f.h, f.label ?? "", "[]", "", "", now(), now()),
+      .bind(
+        ids[i], nb.id, page.id, f.type, f.x, f.y, f.w, f.h,
+        f.type === "link" ? linkLabel(f.label) : f.label ?? "", "[]", "",
+        f.type === "link" ? fieldContent("link", f.content) : "", now(), now(),
+      ),
   );
   statements.push(db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id));
   await db.batch(statements);
@@ -844,10 +865,12 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
     )
     .bind(
       b.x ?? field.x, b.y ?? field.y, b.w ?? field.w, b.h ?? field.h,
-      b.label ?? field.label, b.options ? JSON.stringify(b.options) : field.options,
+      b.label == null ? field.label : field.type === "link" ? linkLabel(b.label) : b.label,
+      b.options ? JSON.stringify(b.options) : field.options,
       b.prompt ?? field.prompt ?? "",
-      // Sanitised on the way in, so what is stored is already safe to render.
-      b.content === undefined ? field.content ?? "" : sanitizeRichText(b.content),
+      // Cleaned on the way in — markup sanitised, a link's address checked —
+      // so what is stored is already safe to render.
+      b.content === undefined ? field.content ?? "" : fieldContent(field.type, b.content),
       b.archived === undefined ? field.archived : b.archived ? 1 : 0, now(), field.id,
     )
     .run();

@@ -23,6 +23,13 @@ import {
   MAX_LIBRARY_PAGES, libraryAssetKey, libraryMediaKey, type LibraryField,
 } from "../lib/page-library";
 import { requirePlan } from "../lib/plans";
+import { importedLinks } from "../lib/links";
+
+/** A page's own links, in the shape a library entry keeps its fields. */
+const libraryLinks = (page: { width: number; height: number; links?: unknown }): LibraryField[] =>
+  importedLinks(page).map((l) => ({
+    type: "link", x: l.x, y: l.y, w: l.w, h: l.h, label: l.label, options: "[]", prompt: "", content: l.content, media_key: null,
+  }));
 
 async function ownedEntry(userId: string, id: string) {
   const row = await db
@@ -243,7 +250,8 @@ app.post("/api/my/page-library/from-upload", handler(async (c) => {
   const body = await c.req.json<{
     assetKey?: string;
     title?: string;
-    pages?: { sourceIndex: number; width: number; height: number; title?: string }[];
+    /** `links`: the file's own links on that page, kept as link fields — see lib/links.ts. */
+    pages?: { sourceIndex: number; width: number; height: number; title?: string; links?: unknown }[];
   }>();
   const assetKey = ownedAssetKey(user.id, String(body.assetKey ?? ""));
   const pages = (body.pages ?? []).filter((p) =>
@@ -270,9 +278,9 @@ app.post("/api/my/page-library/from-upload", handler(async (c) => {
       .prepare(
         `INSERT INTO library_pages (id, owner_id, title, asset_key, source_index, width, height,
                                     pattern, pattern_color, fields, annotation, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '[]', '', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, '', ?)`,
       )
-      .bind(id, user.id, title, assetKey, p.sourceIndex, p.width, p.height, now())
+      .bind(id, user.id, title, assetKey, p.sourceIndex, p.width, p.height, JSON.stringify(libraryLinks(p)), now())
       .run();
     ids.push(id);
   }
