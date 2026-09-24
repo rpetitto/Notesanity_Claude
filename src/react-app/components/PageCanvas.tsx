@@ -909,13 +909,20 @@ export default function PageCanvas({
   // do, and a tap reaches them through the pen's tap-through instead.
   const linksLive = !(isPlacing && canWrite);
 
+  // The published template markup comes first so it sits under everyone's
+  // own marks, and is never anyone's to move: the canvas below already paints
+  // its strokes, and these are its notes and stamps, which aren't strokes and
+  // so were never painted at all.
+  const master = masterLayer ?? null;
   const textOwners = [
-    ...shownStudentLayer.x.map((t) => ({ t, own: writeTarget === "student" })),
-    ...shownTeacherLayer.x.map((t) => ({ t, own: writeTarget === "teacher" })),
+    ...(master?.x ?? []).map((t) => ({ t, own: false, src: "master" })),
+    ...shownStudentLayer.x.map((t) => ({ t, own: writeTarget === "student", src: "student" })),
+    ...shownTeacherLayer.x.map((t) => ({ t, own: writeTarget === "teacher", src: "teacher" })),
   ];
   const stampOwners = [
-    ...shownStudentLayer.e.map((t) => ({ t, own: writeTarget === "student" })),
-    ...shownTeacherLayer.e.map((t) => ({ t, own: writeTarget === "teacher" })),
+    ...(master?.e ?? []).map((t) => ({ t, own: false, src: "master" })),
+    ...shownStudentLayer.e.map((t) => ({ t, own: writeTarget === "student", src: "student" })),
+    ...shownTeacherLayer.e.map((t) => ({ t, own: writeTarget === "teacher", src: "teacher" })),
   ];
   // Read off the *shown* layer, so the box tracks the mark through a drag
   // rather than sitting where the mark used to be until the release.
@@ -927,8 +934,9 @@ export default function PageCanvas({
       : null;
 
   const comments = [
-    ...studentLayer.c.map((k) => ({ k, own: writeTarget === "student", teacher: false })),
-    ...teacherLayer.c.map((k) => ({ k, own: writeTarget === "teacher", teacher: true })),
+    ...(master?.c ?? []).map((k) => ({ k, own: false, teacher: true, src: "master" })),
+    ...studentLayer.c.map((k) => ({ k, own: writeTarget === "student", teacher: false, src: "student" })),
+    ...teacherLayer.c.map((k) => ({ k, own: writeTarget === "teacher", teacher: true, src: "teacher" })),
   ];
 
   return (
@@ -1039,9 +1047,9 @@ export default function PageCanvas({
 
       {/* Text boxes, stamps and comment pins */}
       <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
-        {textOwners.map(({ t, own }) => (
+        {textOwners.map(({ t, own, src }) => (
           <div
-            key={t.id}
+            key={`${src}:${t.id}`}
             className="absolute"
             data-typeable={own ? "1" : undefined}
             onPointerDown={(e) => {
@@ -1092,9 +1100,9 @@ export default function PageCanvas({
           </div>
         ))}
 
-        {stampOwners.map(({ t: s, own }) => (
+        {stampOwners.map(({ t: s, own, src }) => (
           <div
-            key={s.id}
+            key={`${src}:${s.id}`}
             className="absolute leading-none"
             onPointerDown={(e) => { if (beginMarkDrag({ kind: "stamp", id: s.id }, e)) e.stopPropagation(); }}
             onPointerMove={moveMarkDrag}
@@ -1128,9 +1136,9 @@ export default function PageCanvas({
           />
         )}
 
-        {comments.map(({ k, own, teacher }, i) => (
+        {comments.map(({ k, own, teacher, src }, i) => (
           <CommentPin
-            key={k.id}
+            key={`${src}:${k.id}`}
             index={i + 1}
             comment={k}
             scale={scale}
