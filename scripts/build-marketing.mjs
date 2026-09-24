@@ -22,6 +22,7 @@ import privacy from "../marketing/pages/privacy.mjs";
 import status from "../marketing/pages/status.mjs";
 import changelog from "../marketing/pages/changelog.mjs";
 import contact from "../marketing/pages/contact.mjs";
+import compare from "../marketing/pages/compare.mjs";
 
 const OUT = "dist/client";
 
@@ -34,6 +35,7 @@ const PAGES = [
   ["status.html", status],
   ["changelog.html", changelog],
   ["contact.html", contact],
+  ["compare.html", compare],
 ];
 
 let total = 0;
@@ -51,7 +53,7 @@ for (const [file, render] of PAGES) {
  * generated from the same list so a new page can't be added and then quietly
  * left out of the index.
  */
-const urls = ["/", "/help", "/pricing", "/privacy", "/terms", "/status", "/changelog", "/contact"];
+const urls = ["/", "/help", "/pricing", "/compare", "/privacy", "/terms", "/status", "/changelog", "/contact"];
 const TODAY = new Date().toISOString().slice(0, 10);
 // Priority is a hint about relative importance within this site, not a ranking
 // lever: the front page and the help center earn more of a crawler's attention

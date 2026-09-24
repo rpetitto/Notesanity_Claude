@@ -286,6 +286,7 @@ ${body}
         <ul>
           <li><a href="/">Overview</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/compare">Compare</a></li>
           <li><a href="/status">Status</a></li>
         </ul>
       </div>
