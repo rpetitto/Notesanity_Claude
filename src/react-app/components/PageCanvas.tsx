@@ -1,0 +1,2171 @@
+/**
+ * The three-layer render surface.
+ *
+ *   Layer 1  <canvas>  the PDF page, rendered by pdf.js
+ *   Layer 2  <div>     teacher-authored form fields (real HTML inputs)
+ *   Layer 3  <canvas>  student ink, teacher ink, plus text, stamps and comments
+ *
+ * Everything above Layer 1 is positioned in page units and scaled at paint time,
+ * so the same annotation data renders identically at any zoom or pixel density.
+ *
+ * Hit-testing rule: the pointer surface sits *below* the overlays, so form
+ * fields, text boxes and comment pins stay clickable without switching tools.
+ * Neither overlay is ever a full-page hit target — only the things on them
+ * take the pointer — so a press that misses everything still reaches the page.
+ * Beyond that, two sets stand aside, and they are not the same set:
+ *
+ *  - The form-field overlay's fields go transparent for any tool that *places*
+ *    something (pen/highlighter/eraser/stamp/text/comment), so the gesture
+ *    reaches the page rather than the field sitting over it.
+ *  - The page's own objects go transparent only for the freehand tools
+ *    (pen/highlighter/eraser), so a stroke can cross them — but a text box
+ *    stays typeable and a comment pin stays openable while their own tool is
+ *    selected, which is the whole point of picking that tool.
+ *
+ * `select` adds no marks but is not inert: it picks up marks on the layer you
+ * write to and moves them. Teacher-placed fields are never draggable — they
+ * are the page itself, not something written on it — and neither is anyone
+ * else's ink, because the hit test only ever looks at your own layer.
+ *
+ * iOS Safari / Apple Pencil notes:
+ *  - Apple Pencil arrives as `pointerType === 'pen'` and carries real `pressure`.
+ *  - Fingers are ignored for drawing unless the user opts in, which is what makes
+ *    palm-resting work on an iPad; a pen seen recently also suppresses touch.
+ *  - `touch-action` is only set to `none` while finger-drawing is enabled, so
+ *    ordinary scrolling and pinch-zoom keep working the rest of the time.
+ *  - `getCoalescedEvents` is used when available to capture the full 120Hz
+ *    ProMotion sample rate instead of one point per frame.
+ */
+
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  Copy, CopyPlus, ExternalLink, ImageIcon, Loader2, MessageSquare, MessageSquarePlus, Mic, Music, PenLine,
+  RefreshCw, Square, Trash2, Type as TypeIcon, X,
+} from "lucide-react";
+import { toast } from "sonner";
+import type { FieldRec } from "../lib/api";
+import {
+  type LayerData, type MarkHit, type MarkOp, type MarkRef, type ShapeKind, type Stroke, type TextBox, type ToolKind,
+  drawLayer, drawStroke, hitStroke, markAt, markBox, markRefAt, shapePoints, straightenHighlight, transformMark,
+  HIGHLIGHTER_COLORS, PEN_COLORS, TEACHER_COLORS, duplicateMark, markInfo, recolorMark, removeMark, resizeMark,
+} from "../lib/ink";
+import {
+  type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, watchLongPress,
+} from "./ContextMenu";
+import MarkSelection from "./MarkSelection";
+import { renderPageToCanvas } from "../lib/pdf";
+import { isPattern, renderPatternToCanvas, DEFAULT_PATTERN_COLOR } from "../lib/patterns";
+import { cn, relativeTime } from "../lib/utils";
+import { linkHost, normalizeLink } from "../../shared/links.mjs";
+
+/**
+ * `FieldRec` doesn't (yet) declare the `prompt`/`image`/`audio` field types or
+ * their extra columns — widen locally rather than editing the shared type, since
+ * a plain `text`/`checkbox`/`choice` field from the server still satisfies this.
+ */
+export type FieldLike = Omit<FieldRec, "type"> & {
+  type: FieldRec["type"] | "prompt" | "image" | "audio" | "richtext" | "figure" | "link";
+  prompt?: string;
+  /** Sanitised markup for a `richtext` block. Safe to render as-is: the server
+   * cleans it on write, so nothing unclean is ever stored. */
+  content?: string;
+  has_media?: number | boolean;
+};
+
+/**
+ * A field value entry is normally just the typed text, but `image`/`audio`
+ * fields report an uploaded file via `asset_key`/`content_type` instead.
+ * Widening this stays backward compatible: a plain string map (what every
+ * existing caller passes today) is still assignable here.
+ */
+export type FieldValue = string | { value?: string; asset_key?: string; content_type?: string };
+
+const fieldText = (v: FieldValue | undefined): string => (typeof v === "string" ? v : v?.value ?? "");
+
+export interface ToolState {
+  kind: ToolKind;
+  color: string;
+  width: number;
+  stamp: string;
+  /** Which shape the shape tool draws. Absent means a plain line. */
+  shape?: ShapeKind;
+  fontSize: number;
+  /**
+   * How the eraser bites. "quick" takes the whole stroke the moment you touch
+   * any part of it — the fast way to clear a mistake. "manual" rubs out only
+   * the length actually dragged over, which is what you want to fix one letter
+   * in a word without redrawing the rest.
+   */
+  erase?: "quick" | "manual";
+}
+
+interface Props {
+  pdfUrl: string;
+  sourceIndex: number;
+  pageWidth: number;
+  pageHeight: number;
+  /** Set on a teacher-inserted blank page: draw this ruling instead of a PDF. */
+  pattern?: string;
+  patternColor?: string;
+  scale: number;
+  fields: FieldRec[];
+  fieldValues: Record<string, FieldValue>;
+  onFieldChange?: (fieldId: string, value: string) => void;
+  studentLayer: LayerData;
+  teacherLayer: LayerData;
+  /** Published teacher template annotations, painted below student ink and never editable. */
+  masterLayer?: LayerData;
+  onLayerChange?: (layer: LayerData) => void;
+  /** Which layer new marks go to. `null` makes the page read-only. */
+  writeTarget: "student" | "teacher" | null;
+  tool: ToolState;
+  fingerDraw: boolean;
+  fieldsEditable: boolean;
+  /** Display name stamped onto new comments. */
+  authorName?: string;
+  className?: string;
+  /** Needed to build asset/response URLs for `prompt`, `image` and `audio` fields. */
+  notebookId?: string;
+  /** Whose response is being shown/edited — omitted means "the signed-in student". */
+  studentId?: string;
+  /** Called after a student uploads or removes an `image`/`audio` response, so the parent can refresh. */
+  onResponseUploaded?: (fieldId: string) => void;
+  /** Teacher view: hovering a student's mark reveals when it was made. */
+  showMarkHistory?: boolean;
+  /**
+   * A teacher looking at their own notebook as a student would. Fields still
+   * take typing, because that is the thing being checked, but an image or
+   * audio field must not actually upload — a preview that wrote a response
+   * would be inventing a student's work.
+   */
+  preview?: boolean;
+  /**
+   * A mark to have selected on arrival — how a tap made outside annotate mode
+   * carries its target into the editor that opens because of it.
+   */
+  initialSelection?: MarkRef | null;
+  /** A Select press that landed on nothing of yours — the editor uses it to go back to arranging boxes. */
+  onPressPaper?: () => void;
+}
+
+/** How each kind of mark is named in the history tooltip. */
+const MARK_LABEL: Record<MarkHit["kind"], string> = {
+  stroke: "Pen mark",
+  highlight: "Highlight",
+  text: "Typed note",
+  stamp: "Stamp",
+  comment: "Comment",
+};
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
+
+/**
+ * Tools that put something on the page — as opposed to `select`, which just
+ * reads it. A tap with one of these has to reach the page underneath the form
+ * fields overlay rather than being swallowed by it.
+ */
+const PLACEMENT_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "stamp", "shape", "text", "comment"];
+
+/**
+ * The subset that paints freehand. These also make the page's own objects —
+ * text boxes, comment pins — pointer-transparent, so a stroke can cross one
+ * instead of being caught by it.
+ *
+ * The others must NOT do that: a text box you just placed has to be typeable,
+ * and a comment pin has to be openable, while its own tool is still selected.
+ */
+const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "shape"];
+
+/** What a pen tap can land on instead of drawing — see `typeableUnder`, and `.tap-probe` in index.css. */
+const TAP_TARGETS = '[data-layer="fields"] [data-typeable="1"], .rich-text a[href]';
+
+export default function PageCanvas({
+  pdfUrl, sourceIndex, pageWidth, pageHeight, pattern, patternColor, scale,
+  fields, fieldValues, onFieldChange,
+  studentLayer, teacherLayer, masterLayer, onLayerChange,
+  writeTarget, tool, fingerDraw, fieldsEditable, authorName, className,
+  notebookId = "", studentId, onResponseUploaded, showMarkHistory, preview, initialSelection = null, onPressPaper,
+}: Props) {
+  const baseRef = useRef<HTMLCanvasElement>(null);
+  const masterRef = useRef<HTMLCanvasElement>(null);
+  const studentRef = useRef<HTMLCanvasElement>(null);
+  const teacherRef = useRef<HTMLCanvasElement>(null);
+  const liveRef = useRef<HTMLCanvasElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+
+  const [baseReady, setBaseReady] = useState(false);
+  const [editingText, setEditingText] = useState<string | null>(null);
+  const [openComment, setOpenComment] = useState<string | null>(null);
+  const [markHover, setMarkHover] = useState<{ x: number; y: number; hit: MarkHit } | null>(null);
+
+  const cssW = pageWidth * scale;
+  const cssH = pageHeight * scale;
+
+  // ---- Layer 1: the page itself, from a PDF or drawn ----
+  useEffect(() => {
+    const canvas = baseRef.current;
+    if (!canvas) return;
+    const signal = { canceled: false };
+    setBaseReady(false);
+    if (isPattern(pattern)) {
+      renderPatternToCanvas(
+        pattern, patternColor || DEFAULT_PATTERN_COLOR,
+        pageWidth, pageHeight, canvas, scale, DPR(),
+      );
+      setBaseReady(true);
+      return;
+    }
+    renderPageToCanvas(pdfUrl, sourceIndex, canvas, scale, DPR(), signal)
+      .then(() => { if (!signal.canceled) setBaseReady(true); })
+      .catch((err) => console.error("PDF render failed", err));
+    return () => { signal.canceled = true; };
+  }, [pdfUrl, sourceIndex, scale, pattern, patternColor, pageWidth, pageHeight]);
+
+  // ---- Layer 3: committed ink ----
+  const paint = useCallback((canvas: HTMLCanvasElement | null, layer: LayerData) => {
+    if (!canvas) return;
+    const dpr = DPR();
+    canvas.width = Math.floor(cssW * dpr);
+    canvas.height = Math.floor(cssH * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    drawLayer(ctx, layer, scale);
+  }, [cssW, cssH, scale]);
+
+  useLayoutEffect(() => {
+    if (masterLayer) paint(masterRef.current, masterLayer);
+  }, [paint, masterLayer]);
+
+  useLayoutEffect(() => {
+    const canvas = liveRef.current;
+    if (!canvas) return;
+    const dpr = DPR();
+    canvas.width = Math.floor(cssW * dpr);
+    canvas.height = Math.floor(cssH * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }, [cssW, cssH]);
+
+  // ---- pointer input ----
+  const drawing = useRef(false);
+  const points = useRef<number[]>([]);
+  /**
+   * A press that lands on a text box or a field while a pen is selected is
+   * ambiguous: the user may be starting a stroke across it, or reaching for the
+   * box to type in. We hold the gesture until it declares itself — movement
+   * means draw, release without movement means select.
+   */
+  const pendingTap = useRef<{ x: number; y: number; clientX: number; clientY: number; target: HTMLElement } | null>(null);
+  const DRAG_SLOP = 5;
+  const drawnUpTo = useRef(0);
+  const lastPenAt = useRef(0);
+  const activePointer = useRef<number | null>(null);
+
+  const isMarking = MARKING_TOOLS.includes(tool.kind);
+  const isPlacing = PLACEMENT_TOOLS.includes(tool.kind);
+  const isDrawTool = tool.kind === "pen" || tool.kind === "highlighter";
+  const canWrite = writeTarget !== null && !!onLayerChange;
+
+  const activeLayer = writeTarget === "teacher" ? teacherLayer : studentLayer;
+
+  // ---- moving your own marks with the select tool ----
+  /**
+   * Only marks on the layer you write to can be moved: a student rearranges
+   * their own work, a teacher their own marking, and neither touches the
+   * other's. Teacher-placed fields are not marks at all and never move — they
+   * are the page, not something written on it.
+   */
+  const markDrag = useRef<{
+    ref: MarkRef;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    pointerId: number;
+  } | null>(null);
+  /**
+   * The one mark the handles are on. Distinct from a drag: a selection outlives
+   * the gesture that made it, which is the whole point — you press once to say
+   * "this one", then reach for a handle.
+   */
+  const [selected, setSelected] = useState<MarkRef | null>(initialSelection);
+  /** The reshaping in progress, shown but not yet committed. */
+  const [pending, setPending] = useState<{ ref: MarkRef; op: MarkOp } | null>(null);
+  /** Set for the length of a click after a drag, so releasing doesn't also "tap". */
+  const justDragged = useRef(false);
+  const draggableMarks = canWrite && tool.kind === "select";
+
+  // ---- typing ----
+  /**
+   * A press with the Text tool, held until it declares itself: released in
+   * place it's a tap and puts down a note that sizes to its text; dragged past
+   * the slop it draws a box of a chosen width. Same gesture split as the pen's
+   * pending tap, for the same reason — a press alone doesn't say which.
+   */
+  /** A shape being dragged out: the two corners, until the pointer is lifted. */
+  const shapeDraft = useRef<{ x0: number; y0: number; x1: number; y1: number; pointerId: number } | null>(null);
+
+  const textPress = useRef<{
+    x: number; y: number; clientX: number; clientY: number; pointerId: number;
+    /** The rectangle so far, kept here as well as in state so the release reads what was drawn, not what was last rendered. */
+    rect: { x: number; y: number; w: number; h: number } | null;
+  } | null>(null);
+  /** The rectangle being drawn with the Text tool, in page units, while it is. */
+  const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  /**
+   * Where a Scroll-only tap landed on bare paper. The next printable key
+   * starts a note there — so a student who just wants to jot something never
+   * has to find the Text tool first. Cleared by any later press, and when the
+   * tool changes.
+   */
+  const typeAt = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => { if (!draggableMarks) typeAt.current = null; }, [draggableMarks]);
+
+  // A selection means nothing once the tool that acts on it is put down, and a
+  // stroke index means nothing on a different page.
+  useEffect(() => { if (!draggableMarks) setSelected(null); }, [draggableMarks]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSelected(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** The layer as it looks mid-drag — the committed layer with one mark reshaped. */
+  const previewOf = useCallback((layer: LayerData, target: "student" | "teacher") => {
+    if (!pending || writeTarget !== target) return layer;
+    return transformMark(layer, pending.ref, pending.op);
+  }, [pending, writeTarget]);
+
+  const shownStudentLayer = previewOf(studentLayer, "student");
+  const shownTeacherLayer = previewOf(teacherLayer, "teacher");
+
+  const beginMarkDrag = (ref: MarkRef, e: React.PointerEvent) => {
+    if (!canWrite || tool.kind !== "select") return false;
+    // A right-click is for the menu; it selects, but never starts a drag.
+    if (e.pointerType === "mouse" && e.button !== 0) { setSelected(ref); return true; }
+    setSelected(ref);
+    const surface = e.currentTarget as HTMLElement;
+    try { surface.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    const rect = pageRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    markDrag.current = {
+      ref,
+      startX: (e.clientX - rect.left) / scale,
+      startY: (e.clientY - rect.top) / scale,
+      moved: false,
+      pointerId: e.pointerId,
+    };
+    return true;
+  };
+
+  const moveMarkDrag = (e: React.PointerEvent) => {
+    const d = markDrag.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    const rect = pageRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const dx = (e.clientX - rect.left) / scale - d.startX;
+    const dy = (e.clientY - rect.top) / scale - d.startY;
+    // Below the slop this is still a tap — which is how a text box is opened
+    // for editing rather than shoved half a pixel across the page.
+    if (!d.moved && Math.abs(dx) < DRAG_SLOP / scale && Math.abs(dy) < DRAG_SLOP / scale) return;
+    d.moved = true;
+    e.preventDefault();
+    setPending({ ref: d.ref, op: { kind: "move", dx, dy } });
+  };
+
+  /** Commit once, on release, so a drag is a single undo step rather than one per frame. */
+  const endMarkDrag = (e: React.PointerEvent) => {
+    const d = markDrag.current;
+    if (!d || d.pointerId !== e.pointerId) return false;
+    markDrag.current = null;
+    const op = pending;
+    setPending(null);
+    if (!d.moved || !op || !onLayerChange) return false;
+    onLayerChange(transformMark(activeLayer, op.ref, op.op));
+    justDragged.current = true;
+    setTimeout(() => { justDragged.current = false; }, 0);
+    return true;
+  };
+
+  /** A handle drag on the selection box: previewed while it runs, committed once. */
+  const commitSelectionOp = (op: MarkOp | null) => {
+    setPending(null);
+    // A press that never became a drag is still a tap, and a tap on a typed
+    // note means "let me type in it" — the box must not swallow that just
+    // because it happens to be lying over the words.
+    // A hold that opened the menu isn't a tap, though it ends the same way.
+    if (!op && selected?.kind === "text" && !longPressJustFired()) { setEditingText(selected.id); return; }
+    if (!op || !selected || !onLayerChange) return;
+    onLayerChange(transformMark(activeLayer, selected, op));
+    justDragged.current = true;
+    setTimeout(() => { justDragged.current = false; }, 0);
+  };
+
+  useLayoutEffect(() => { paint(studentRef.current, shownStudentLayer); }, [paint, shownStudentLayer]);
+  useLayoutEffect(() => { paint(teacherRef.current, shownTeacherLayer); }, [paint, shownTeacherLayer]);
+
+  const toPage = (e: PointerEvent | React.PointerEvent, el: HTMLElement) => {
+    const rect = el.getBoundingClientRect();
+    return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
+  };
+
+  const shouldAcceptPointer = (e: React.PointerEvent | PointerEvent) => {
+    if (e.pointerType === "pen") return true;
+    if (e.pointerType === "mouse") return (e as PointerEvent).buttons !== 2;
+    if (!fingerDraw) return false;
+    // Suppress the palm: a pen used in the last moment wins over touch contacts.
+    return Date.now() - lastPenAt.current > 1200;
+  };
+
+  const commitStroke = useCallback(() => {
+    if (points.current.length < 3 || !onLayerChange) {
+      points.current = [];
+      return;
+    }
+    const highlighter = tool.kind === "highlighter";
+    const path = highlighter ? straightenHighlight(points.current, tool.width) : points.current;
+    const stroke: Stroke = {
+      t: highlighter ? "h" : "p",
+      c: tool.color,
+      w: tool.width,
+      p: path.slice(),
+      ts: Date.now(),
+    };
+    onLayerChange({ ...activeLayer, s: [...activeLayer.s, stroke] });
+    points.current = [];
+    const ctx = liveRef.current?.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, cssW, cssH);
+  }, [activeLayer, onLayerChange, tool, cssW, cssH]);
+
+  /**
+   * A second finger means a pinch, not a stroke. With finger drawing on, the
+   * first finger has already started a mark by the time the second lands;
+   * that mark is discarded rather than left as a dot where the pinch began.
+   */
+  const cancelGesture = () => {
+    drawing.current = false;
+    pendingTap.current = null;
+    points.current = [];
+    activePointer.current = null;
+    markDrag.current = null;
+    textPress.current = null;
+    shapeDraft.current = null;
+    setPending(null);
+    setDraft(null);
+    const ctx = liveRef.current?.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, cssW, cssH);
+  };
+
+  /** The shape as it stands mid-drag, repainted whole each frame. */
+  const drawShapePreview = () => {
+    const d = shapeDraft.current;
+    const ctx = liveRef.current?.getContext("2d");
+    if (!d || !ctx) return;
+    ctx.clearRect(0, 0, cssW, cssH);
+    const p = shapePoints(tool.shape ?? "line", d.x0, d.y0, d.x1, d.y1);
+    if (p.length >= 6) drawStroke(ctx, { t: "p", c: tool.color, w: tool.width, p }, scale);
+  };
+
+  const drawLive = useCallback(() => {
+    const ctx = liveRef.current?.getContext("2d");
+    if (!ctx) return;
+    const p = points.current;
+
+    // Highlighters repaint whole. The stroke can snap straight at any moment as
+    // the gesture develops, so the preview has to be able to un-draw itself —
+    // and translucent segments painted over each other would darken at the
+    // joins anyway. A highlight is a few hundred points at most.
+    if (tool.kind === "highlighter") {
+      ctx.clearRect(0, 0, cssW, cssH);
+      const path = straightenHighlight(p, tool.width);
+      if (path.length >= 6) drawStroke(ctx, { t: "h", c: tool.color, w: tool.width, p: path }, scale);
+      return;
+    }
+
+    // Pen paints only what's new — repainting the whole stroke each frame gets
+    // expensive on low-powered Chromebooks once a stroke is long.
+    const partial: Stroke = {
+      t: "p",
+      c: tool.color,
+      w: tool.width,
+      p: p.slice(Math.max(0, drawnUpTo.current)),
+    };
+    if (partial.p.length >= 6) {
+      drawStroke(ctx, partial, scale);
+      drawnUpTo.current = p.length - 3;
+    }
+  }, [tool, scale, cssW, cssH]);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "pen") lastPenAt.current = Date.now();
+    if (!canWrite) return;
+    // Only the main button writes or picks things up; the right one is the menu's.
+    if (e.pointerType === "mouse" && e.button !== 0) {
+      if (tool.kind === "select") {
+        const { x, y } = toPage(e, e.currentTarget);
+        const ref = markRefAt(activeLayer, x, y, 6 / scale);
+        setSelected(ref);
+      }
+      return;
+    }
+
+    const surface = e.currentTarget;
+    const { x, y } = toPage(e, surface);
+    typeAt.current = null;
+
+    // Select: pick up your own mark if the press landed on one, otherwise let
+    // go of whatever was held and do nothing at all, so the page scrolls as it
+    // always has — except remember the spot, in case the next thing that
+    // happens is typing.
+    if (tool.kind === "select") {
+      const ref = markRefAt(activeLayer, x, y, 6 / scale);
+      if (ref) beginMarkDrag(ref, e);
+      else { setSelected(null); typeAt.current = { x, y }; onPressPaper?.(); }
+      return;
+    }
+
+    if (!shouldAcceptPointer(e)) return;
+
+    if (tool.kind === "eraser") {
+      e.preventDefault();
+      activePointer.current = e.pointerId;
+      surface.setPointerCapture(e.pointerId);
+      eraseAt(x, y);
+      return;
+    }
+
+    if (tool.kind === "text") {
+      // Without this the browser's own mousedown focus lands on the page and
+      // clobbers the new box's autoFocus, leaving the student typing into
+      // nothing.
+      e.preventDefault();
+      activePointer.current = e.pointerId;
+      surface.setPointerCapture(e.pointerId);
+      textPress.current = { x, y, clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId, rect: null };
+      return;
+    }
+
+    if (tool.kind === "stamp") {
+      e.preventDefault();
+      onLayerChange?.({
+        ...activeLayer,
+        e: [...activeLayer.e, { id: uid(), x, y, s: tool.fontSize * 1.8, e: tool.stamp, ts: Date.now() }],
+      });
+      return;
+    }
+
+    if (tool.kind === "shape") {
+      e.preventDefault();
+      activePointer.current = e.pointerId;
+      surface.setPointerCapture(e.pointerId);
+      shapeDraft.current = { x0: x, y0: y, x1: x, y1: y, pointerId: e.pointerId };
+      return;
+    }
+
+    if (tool.kind === "comment") {
+      // Same reason as text: the pin opens straight into an editable note.
+      e.preventDefault();
+      const id = uid();
+      onLayerChange?.({
+        ...activeLayer,
+        c: [...activeLayer.c, { id, x, y, t: "", a: authorName, ts: Date.now() }],
+      });
+      setOpenComment(id);
+      return;
+    }
+
+    if (!isDrawTool) return;
+
+    e.preventDefault();
+    activePointer.current = e.pointerId;
+    surface.setPointerCapture(e.pointerId);
+    points.current = [x, y, e.pressure > 0 ? e.pressure : 0.5];
+    drawnUpTo.current = 0;
+
+    // Did this press land on something typeable? If so, wait to see whether it
+    // becomes a stroke before stealing the tap from it.
+    const under = typeableUnder(e.clientX, e.clientY);
+    if (under) {
+      pendingTap.current = { x, y, clientX: e.clientX, clientY: e.clientY, target: under };
+      drawing.current = false;
+      return;
+    }
+    drawing.current = true;
+  };
+
+  /**
+   * The interactive overlay sits above the pointer surface but is made
+   * pointer-transparent while marking, so we hit-test it by hand.
+   *
+   * By hand with a probe, because pointer-transparent also means invisible to
+   * hit-testing: `elementsFromPoint` skips anything with `pointer-events:
+   * none`, so asking it about the overlay as it stands finds nothing, and a
+   * tap on a box drew a dot instead. For the length of this one synchronous
+   * lookup the `tap-probe` class (index.css) makes the tap targets — and only
+   * those — hit-testable again; nothing is painted in between.
+   *
+   * The targets are the teacher's fields (boxes and links) and the links in
+   * rich text. Your own notes carry the typeable mark too but are left out:
+   * a pen tap on one keeps drawing, as it always has, rather than being
+   * caught by a note that only opens for the other tools.
+   */
+  const typeableUnder = (clientX: number, clientY: number, selector = TAP_TARGETS): HTMLElement | null => {
+    const root = pageRef.current;
+    if (!root) return null;
+    root.classList.add("tap-probe");
+    try {
+      for (const el of document.elementsFromPoint(clientX, clientY)) {
+        if (!root.contains(el)) continue;
+        const target = (el as HTMLElement).closest<HTMLElement>(selector);
+        if (target && root.contains(target)) return target;
+      }
+      return null;
+    } finally {
+      root.classList.remove("tap-probe");
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "pen") lastPenAt.current = Date.now();
+    if (markDrag.current) { moveMarkDrag(e); return; }
+    if (activePointer.current !== e.pointerId) return;
+    const surface = e.currentTarget;
+
+    if (tool.kind === "eraser") {
+      const { x, y } = toPage(e, surface);
+      eraseAt(x, y);
+      return;
+    }
+
+    const tp = textPress.current;
+    if (tp) {
+      if (!tp.rect) {
+        const dx = e.clientX - tp.clientX;
+        const dy = e.clientY - tp.clientY;
+        if (dx * dx + dy * dy < DRAG_SLOP * DRAG_SLOP) return;
+      }
+      e.preventDefault();
+      const { x, y } = toPage(e, surface);
+      tp.rect = { x: Math.min(tp.x, x), y: Math.min(tp.y, y), w: Math.abs(x - tp.x), h: Math.abs(y - tp.y) };
+      setDraft(tp.rect);
+      return;
+    }
+
+    const sd = shapeDraft.current;
+    if (sd && sd.pointerId === e.pointerId) {
+      e.preventDefault();
+      const { x, y } = toPage(e, surface);
+      sd.x1 = x;
+      sd.y1 = y;
+      drawShapePreview();
+      return;
+    }
+
+    // Movement past the slop turns a held tap into a stroke, starting from where
+    // the press actually began so no ink is lost.
+    if (pendingTap.current) {
+      const dx = e.clientX - pendingTap.current.clientX;
+      const dy = e.clientY - pendingTap.current.clientY;
+      if (dx * dx + dy * dy < DRAG_SLOP * DRAG_SLOP) return;
+      pendingTap.current = null;
+      drawing.current = true;
+    }
+
+    if (!drawing.current) return;
+    e.preventDefault();
+
+    const native = e.nativeEvent as PointerEvent;
+    const samples =
+      typeof native.getCoalescedEvents === "function" ? native.getCoalescedEvents() : [native];
+    for (const s of samples.length ? samples : [native]) {
+      const { x, y } = toPage(s, surface);
+      const p = points.current;
+      // Drop sub-pixel jitter; keeps payloads small without visible loss.
+      const n = p.length;
+      if (n >= 3) {
+        const dx = x - p[n - 3];
+        const dy = y - p[n - 2];
+        if (dx * dx + dy * dy < 0.25) continue;
+      }
+      p.push(x, y, s.pressure > 0 ? s.pressure : 0.5);
+    }
+    drawLive();
+  };
+
+  const endStroke = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (markDrag.current) { endMarkDrag(e); return; }
+    if (activePointer.current !== e.pointerId) return;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    activePointer.current = null;
+
+    const tp = textPress.current;
+    if (tp) {
+      textPress.current = null;
+      setDraft(null);
+      if (tp.rect) placeNote(tp.rect.x, tp.rect.y, "", Math.max(24, tp.rect.w));
+      else placeNote(tp.x, tp.y, "");
+      return;
+    }
+
+    const shape = shapeDraft.current;
+    if (shape) {
+      shapeDraft.current = null;
+      const live = liveRef.current?.getContext("2d");
+      if (live) live.clearRect(0, 0, cssW, cssH);
+      // A tap with the shape tool is a slip, not a zero-sized rectangle.
+      if (onLayerChange && Math.hypot(shape.x1 - shape.x0, shape.y1 - shape.y0) > 2) {
+        onLayerChange({
+          ...activeLayer,
+          s: [...activeLayer.s, {
+            t: "p", c: tool.color, w: tool.width, ts: Date.now(),
+            p: shapePoints(tool.shape ?? "line", shape.x0, shape.y0, shape.x1, shape.y1),
+          }],
+        });
+      }
+      return;
+    }
+
+    // Released without moving, over something typeable — that was a tap to type,
+    // not a stroke. Hand the gesture to the element the user aimed at.
+    if (pendingTap.current) {
+      const target = pendingTap.current.target;
+      pendingTap.current = null;
+      points.current = [];
+      const focusable = target.matches("textarea, input, select")
+        ? target
+        : target.querySelector<HTMLElement>("textarea, input, select");
+      if (focusable) focusable.focus();
+      else target.click();
+      return;
+    }
+
+    if (drawing.current) {
+      drawing.current = false;
+      commitStroke();
+    }
+  };
+
+  /**
+   * Rub out the part of each stroke under the eraser, splitting what is left.
+   *
+   * A stroke is a flat run of points, so removing a bite from the middle
+   * leaves two strokes rather than one with a hole. Fragments shorter than two
+   * points can't be drawn and are dropped.
+   */
+  const erasePartial = (x: number, y: number, radius: number) => {
+    let changed = false;
+    const out: typeof activeLayer.s = [];
+    for (const st of activeLayer.s) {
+      const reach = radius + (st.w ?? 1) / 2;
+      const r2 = reach * reach;
+      const pts = st.p;
+      let run: number[] = [];
+      const kept: number[][] = [];
+      let bitten = false;
+      for (let i = 0; i + 2 < pts.length; i += 3) {
+        const dx = pts[i] - x;
+        const dy = pts[i + 1] - y;
+        if (dx * dx + dy * dy <= r2) {
+          bitten = true;
+          if (run.length >= 6) kept.push(run);
+          run = [];
+        } else {
+          run.push(pts[i], pts[i + 1], pts[i + 2]);
+        }
+      }
+      if (run.length >= 6) kept.push(run);
+      if (!bitten) { out.push(st); continue; }
+      changed = true;
+      for (const seg of kept) out.push({ ...st, p: seg });
+    }
+    return changed ? out : null;
+  };
+
+  const eraseAt = (x: number, y: number) => {
+    if (!onLayerChange) return;
+    const radius = Math.max(4, tool.width * 1.5);
+
+    if (tool.erase === "manual") {
+      const next = erasePartial(x, y, radius);
+      if (next) {
+        onLayerChange({ ...activeLayer, s: next });
+        return;
+      }
+    } else {
+      const idx = hitStroke(activeLayer.s, x, y, radius);
+      if (idx >= 0) {
+        const next = activeLayer.s.slice();
+        next.splice(idx, 1);
+        onLayerChange({ ...activeLayer, s: next });
+        return;
+      }
+    }
+
+    // Stamps have no length to rub along, so either eraser takes the whole thing.
+    const stamp = activeLayer.e.find((s) => Math.abs(s.x - x) < s.s && Math.abs(s.y - y) < s.s);
+    if (stamp) onLayerChange({ ...activeLayer, e: activeLayer.e.filter((s) => s.id !== stamp.id) });
+  };
+
+  /**
+   * Put down a typed note and open it for typing.
+   *
+   * With no width given the note sizes itself to its text (`a`), from a
+   * three-em start so the caret has somewhere to be, up to the page's right
+   * edge. With a width — drawn with the Text tool — it's a box of that width
+   * and wraps inside it, as boxes always have.
+   */
+  const placeNote = (x: number, y: number, v: string, w?: number) => {
+    if (!onLayerChange) return;
+    const id = uid();
+    const auto = w === undefined;
+    const width = auto ? Math.min(tool.fontSize * 3, pageWidth - x - 8) : Math.min(w, pageWidth - x - 8);
+    onLayerChange({
+      ...activeLayer,
+      x: [...activeLayer.x, { id, x, y, w: width, s: tool.fontSize, c: tool.color, v, ts: Date.now(), ...(auto ? { a: 1 as const } : {}) }],
+    });
+    setEditingText(id);
+  };
+
+  /**
+   * How wide a self-sizing note needs to be to hold its text on one line per
+   * paragraph, in page units — measured in the textarea's own font, so the
+   * stored width and the rendered width can't disagree. Capped at the page's
+   * right edge, after which the note wraps like any box would.
+   */
+  const measureNote = (t: TextBox, v: string, el: HTMLTextAreaElement | null) => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return t.w;
+    const cs = el ? getComputedStyle(el) : null;
+    ctx.font = cs
+      ? `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+      : `${t.s * scale}px sans-serif`;
+    let widest = 0;
+    for (const line of v.split("\n")) widest = Math.max(widest, ctx.measureText(line).width);
+    // Padding and border of the box, plus room for the caret at the line's end.
+    const px = widest + 8 + 2 + t.s * scale * 0.6;
+    return Math.max(t.s * 3, Math.min(px / scale, pageWidth - t.x - 8));
+  };
+
+  const updateText = (id: string, v: string, el?: HTMLTextAreaElement | null) => {
+    if (!onLayerChange) return;
+    onLayerChange({
+      ...activeLayer,
+      x: activeLayer.x.map((t) => (t.id === id ? { ...t, v, ...(t.a ? { w: measureNote(t, v, el ?? null) } : {}) } : t)),
+    });
+  };
+
+  // Scroll only, tap on paper, type: the first printable key becomes the
+  // note's first letter, so nothing typed is lost to the note appearing.
+  useEffect(() => {
+    if (!draggableMarks) return;
+    const onKey = (e: KeyboardEvent) => {
+      const at = typeAt.current;
+      if (!at || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+      const focus = document.activeElement as HTMLElement | null;
+      if (focus && (/^(INPUT|TEXTAREA|SELECT)$/.test(focus.tagName) || focus.isContentEditable)) return;
+      e.preventDefault();
+      typeAt.current = null;
+      placeNote(at.x, at.y, e.key);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  const removeText = (id: string) => {
+    if (!onLayerChange) return;
+    onLayerChange({ ...activeLayer, x: activeLayer.x.filter((t) => t.id !== id) });
+    setEditingText(null);
+  };
+  /** Attach or drop a recording on one comment. */
+  const setCommentAudio = (id: string, k?: string) => {
+    if (!onLayerChange) return;
+    onLayerChange({ ...activeLayer, c: activeLayer.c.map((x) => (x.id === id ? { ...x, k } : x)) });
+  };
+
+  const updateComment = (id: string, t: string) => {
+    if (!onLayerChange) return;
+    onLayerChange({ ...activeLayer, c: activeLayer.c.map((k) => (k.id === id ? { ...k, t } : k)) });
+  };
+  const removeComment = (id: string) => {
+    if (!onLayerChange) return;
+    onLayerChange({ ...activeLayer, c: activeLayer.c.filter((k) => k.id !== id) });
+    setOpenComment(null);
+  };
+
+  // ---- the right-click / long-press menu ----
+  /**
+   * The menu acts after it opens — a size nudged three times, a color picked
+   * a second later — so it reads the layer as it is then, not as it was when
+   * the menu was built.
+   */
+  const live = useRef({ layer: activeLayer, onLayerChange });
+  live.current = { layer: activeLayer, onLayerChange };
+  const change = (next: (layer: LayerData) => LayerData | null) => {
+    const { layer, onLayerChange: commit } = live.current;
+    const out = commit ? next(layer) : null;
+    if (out && commit) commit(out);
+  };
+
+  const when = (ts?: number) =>
+    ts ? new Date(ts).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null;
+  const MADE: Record<MarkHit["kind"], string> = {
+    stroke: "Written", highlight: "Highlighted", text: "Typed", stamp: "Stamped", comment: "Commented",
+  };
+  const OWN_TITLE: Record<MarkHit["kind"], string> = {
+    stroke: "Your writing", highlight: "Your highlight", text: "Your note", stamp: "Your stamp", comment: "Your comment",
+  };
+
+  const addCommentAt = (x: number, y: number) => {
+    const id = uid();
+    change((layer) => ({ ...layer, c: [...layer.c, { id, x, y, t: "", a: authorName, ts: Date.now() }] }));
+    setOpenComment(id);
+  };
+
+  /** The entries for one of your own marks — shared by the menu and its keyboard shortcuts. */
+  const deleteMark = (ref: MarkRef) => {
+    change((layer) => removeMark(layer, ref));
+    setSelected(null);
+  };
+  const copyMark = (ref: MarkRef) => {
+    const { layer } = live.current;
+    const dup = duplicateMark(layer, ref);
+    if (!dup) return;
+    live.current.onLayerChange?.(dup.layer);
+    if (draggableMarks) setSelected(dup.ref);
+  };
+
+  const ownMarkEntries = (ref: MarkRef): { title: string; entries: ContextEntry[] } | null => {
+    const info = markInfo(activeLayer, ref);
+    if (!info) return null;
+    const entries: ContextEntry[] = [];
+    const made = when(info.ts);
+    if (made) entries.push({ kind: "note", text: `${MADE[info.kind]} ${made}` });
+    if (ref.kind === "text") {
+      entries.push({ label: "Edit text", icon: <PenLine />, onSelect: () => setEditingText(ref.id) });
+    }
+    if (info.kind !== "stamp") {
+      const colors = info.kind === "highlight" ? HIGHLIGHTER_COLORS : writeTarget === "teacher" ? TEACHER_COLORS : PEN_COLORS;
+      entries.push({ kind: "swatches", label: "Color", colors, current: info.color, onPick: (c) => change((layer) => recolorMark(layer, ref, c)) });
+    }
+    if (ref.kind !== "stroke") {
+      entries.push({
+        kind: "stepper", label: "Size",
+        onSmaller: () => change((layer) => resizeMark(layer, ref, 1 / 1.2)),
+        onBigger: () => change((layer) => resizeMark(layer, ref, 1.2)),
+      });
+    }
+    entries.push(
+      { label: "Duplicate", icon: <CopyPlus />, shortcut: `${MOD}D`, onSelect: () => copyMark(ref) },
+      { kind: "separator" },
+      { label: "Delete", icon: <Trash2 />, danger: true, shortcut: "⌫", onSelect: () => deleteMark(ref) },
+    );
+    return { title: OWN_TITLE[info.kind], entries };
+  };
+
+  /**
+   * Build and open the menu for whatever is under a point.
+   *
+   * In order: a link (open it, copy it); one of your own marks (everything
+   * you can do to it); anyone else's mark (when it was made, and for a teacher
+   * writing on a student's page, a comment right there); bare paper (start a
+   * note, or a comment). Nothing under the point and nothing to offer means
+   * no menu at all.
+   */
+  const openMenuAt = (clientX: number, clientY: number) => {
+    const root = pageRef.current;
+    if (!root) return;
+    const r = root.getBoundingClientRect();
+    const x = (clientX - r.left) / scale;
+    const y = (clientY - r.top) / scale;
+
+    const anchor = typeableUnder(clientX, clientY, 'a[href]') as HTMLAnchorElement | null;
+    if (anchor) {
+      const href = anchor.href;
+      openContextMenu({
+        x: clientX, y: clientY, title: anchor.getAttribute("aria-label")?.replace(/ \(opens in a new tab\)$/, "") || anchor.textContent?.trim() || "Link",
+        entries: [
+          { label: "Open link", icon: <ExternalLink />, onSelect: () => window.open(href, "_blank", "noopener,noreferrer") },
+          { label: "Copy address", icon: <Copy />, onSelect: () => { void navigator.clipboard?.writeText(href); } },
+        ],
+      });
+      return;
+    }
+
+    if (canWrite) {
+      const ref = markRefAt(activeLayer, x, y, 8 / scale);
+      const own = ref ? ownMarkEntries(ref) : null;
+      if (ref && own) {
+        if (draggableMarks) setSelected(ref);
+        openContextMenu({ x: clientX, y: clientY, ...own });
+        return;
+      }
+    }
+
+    const teacherOnStudent = writeTarget === "teacher" && !!onLayerChange;
+    const others = [
+      writeTarget !== "student" ? studentLayer : null,
+      writeTarget !== "teacher" ? teacherLayer : null,
+      masterLayer ?? null,
+    ].filter((l): l is LayerData => !!l);
+    for (const layer of others) {
+      const hit = markAt(layer, x, y, 8 / scale);
+      if (!hit) continue;
+      const made = when(hit.ts);
+      const entries: ContextEntry[] = [
+        { kind: "note", text: made ? `${MADE[hit.kind]} ${made}` : "When this was made wasn't recorded." },
+      ];
+      if (teacherOnStudent) entries.push({ label: "Comment here", icon: <MessageSquarePlus />, onSelect: () => addCommentAt(x, y) });
+      openContextMenu({ x: clientX, y: clientY, title: MARK_LABEL[hit.kind], entries });
+      return;
+    }
+
+    if (canWrite) {
+      const entries: ContextEntry[] = [
+        { label: "Type a note here", icon: <TypeIcon />, onSelect: () => placeNote(x, y, "") },
+      ];
+      if (teacherOnStudent) entries.push({ label: "Comment here", icon: <MessageSquarePlus />, onSelect: () => addCommentAt(x, y) });
+      openContextMenu({ x: clientX, y: clientY, entries });
+    }
+  };
+
+  /** The menu for the selection, from the keyboard or its "…" button: opened under the box. */
+  const openSelectionMenu = () => {
+    const root = pageRef.current;
+    const box = selected ? markBox(activeLayer, selected) : null;
+    if (!root || !box || !selected) return;
+    const own = ownMarkEntries(selected);
+    if (!own) return;
+    const r = root.getBoundingClientRect();
+    openContextMenu({ x: r.left + (box.x + box.w) * scale, y: r.top + (box.y + box.h) * scale, ...own });
+  };
+
+  // Delete, duplicate and the menu key act on the selection, as they would in
+  // any drawing app — never while something is being typed.
+  useEffect(() => {
+    if (!selected || !draggableMarks) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target) || editingText) return;
+      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteMark(selected); }
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") { e.preventDefault(); copyMark(selected); }
+      else if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") { e.preventDefault(); openSelectionMenu(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  /**
+   * A finger held still opens the menu — unless the finger is a pen right now
+   * (finger drawing on, with a tool that draws) or a palm (a pen was used a
+   * moment ago). The pen itself never opens it.
+   */
+  const onPressCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "pen") { lastPenAt.current = Date.now(); return; }
+    if (e.pointerType !== "touch") return;
+    if (fingerDraw && isMarking && canWrite) return;
+    if (Date.now() - lastPenAt.current < 1200) return;
+    watchLongPress(e, (cx, cy) => { cancelGesture(); openMenuAt(cx, cy); });
+  };
+
+  /**
+   * Hovering a student's mark reports when it was made.
+   *
+   * Hit-testing runs against the student layer only: a teacher wants the
+   * provenance of the work being marked, not of their own marking. Marks made
+   * before timestamps were recorded say so rather than guessing.
+   */
+  const onHoverMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!showMarkHistory) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const hit = markAt(studentLayer, px / scale, py / scale, 5 / scale);
+    setMarkHover(hit ? { x: px, y: py, hit } : null);
+  };
+
+  // The surface is present for `select` as well, purely so a press that lands on
+  // the student's own ink can pick it up. It claims nothing otherwise, which is
+  // what keeps "scroll only" scrolling.
+  const interactive = canWrite && (tool.kind !== "select" || draggableMarks);
+  const blockTouchScroll = interactive && fingerDraw && isMarking;
+
+  // Placing anything needs the gesture to reach the page, so the form-field
+  // overlay stands aside for every placement tool.
+  const fieldPointerEvents = isPlacing && canWrite ? "none" : "auto";
+  // The page's own objects only stand aside for freehand marks, so that the
+  // text box or comment a tool just created stays usable.
+  const objectPointerEvents = isMarking && canWrite ? "none" : "auto";
+  // Links — a link field, or an anchor in a rich text block — open on a press
+  // whenever pressing reads the page rather than writes on it, which includes
+  // every read-only view. With a placing tool they stand aside like the fields
+  // do, and a tap reaches them through the pen's tap-through instead.
+  const linksLive = !(isPlacing && canWrite);
+
+  // The published template markup comes first so it sits under everyone's
+  // own marks, and is never anyone's to move: the canvas below already paints
+  // its strokes, and these are its notes and stamps, which aren't strokes and
+  // so were never painted at all.
+  const master = masterLayer ?? null;
+  const textOwners = [
+    ...(master?.x ?? []).map((t) => ({ t, own: false, src: "master" })),
+    ...shownStudentLayer.x.map((t) => ({ t, own: writeTarget === "student", src: "student" })),
+    ...shownTeacherLayer.x.map((t) => ({ t, own: writeTarget === "teacher", src: "teacher" })),
+  ];
+  const stampOwners = [
+    ...(master?.e ?? []).map((t) => ({ t, own: false, src: "master" })),
+    ...shownStudentLayer.e.map((t) => ({ t, own: writeTarget === "student", src: "student" })),
+    ...shownTeacherLayer.e.map((t) => ({ t, own: writeTarget === "teacher", src: "teacher" })),
+  ];
+  // Read off the *shown* layer, so the box tracks the mark through a drag
+  // rather than sitting where the mark used to be until the release.
+  const shownActiveLayer = writeTarget === "teacher" ? shownTeacherLayer : shownStudentLayer;
+  // Hidden while the note it holds is being typed in, for the same reason.
+  const selectedBox =
+    selected && draggableMarks && !(selected.kind === "text" && editingText === selected.id)
+      ? markBox(shownActiveLayer, selected)
+      : null;
+
+  const comments = [
+    ...(master?.c ?? []).map((k) => ({ k, own: false, teacher: true, src: "master" })),
+    ...studentLayer.c.map((k) => ({ k, own: writeTarget === "student", teacher: false, src: "student" })),
+    ...teacherLayer.c.map((k) => ({ k, own: writeTarget === "teacher", teacher: true, src: "teacher" })),
+  ];
+
+  return (
+    <div
+      ref={pageRef}
+      className={cn("relative bg-white shadow-sm select-none", linksLive && "links-live", className)}
+      onPointerDownCapture={onPressCapture}
+      onContextMenu={(e) => {
+        // A text box keeps the browser's own menu, for copy and paste.
+        if (isEditableTarget(e.target)) return;
+        e.preventDefault();
+        if (longPressJustFired()) return;
+        openMenuAt(e.clientX, e.clientY);
+      }}
+      onMouseMove={onHoverMove}
+      onMouseLeave={() => setMarkHover(null)}
+      onTouchStart={(e) => { if (e.touches.length > 1) cancelGesture(); }}
+      style={{
+        width: cssW,
+        height: cssH,
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
+        WebkitTapHighlightColor: "transparent",
+      }}
+    >
+      <canvas ref={baseRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block" />
+      {!baseReady && <div className="absolute inset-0 animate-pulse bg-oat" />}
+
+      {masterLayer && (
+        <canvas ref={masterRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
+      )}
+      <canvas ref={studentRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
+      <canvas ref={teacherRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
+      <canvas ref={liveRef} style={{ width: cssW, height: cssH }} className="absolute inset-0 block pointer-events-none" />
+
+      {/* Pointer surface — sits under the interactive overlay so fields and pins
+          stay clickable; only marking tools take over the full page. */}
+      {interactive && (
+        <div
+          className="absolute inset-0"
+          style={{
+            touchAction: blockTouchScroll ? "none" : "auto",
+            cursor: tool.kind === "select" ? "default" : tool.kind === "eraser" ? "cell" : isDrawTool ? "crosshair" : "copy",
+          }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endStroke}
+          onPointerCancel={endStroke}
+          onPointerLeave={endStroke}
+          onContextMenu={(e) => e.preventDefault()}
+        />
+      )}
+
+      {/* The box being drawn with the Text tool — the same dashed draft the
+          field editor draws, so drawing a box means one thing everywhere. */}
+      {draft && (
+        <div
+          className="pointer-events-none absolute rounded border-2 border-dashed border-pine bg-mint/20"
+          style={{ left: draft.x * scale, top: draft.y * scale, width: draft.w * scale, height: draft.h * scale }}
+        />
+      )}
+
+      {/* Layer 2 — form fields.
+          The overlay itself never takes the pointer; only the fields on it do.
+          As one full-page hit target it swallowed every press that missed a
+          field, which is fine while nothing below needs them and wrong the
+          moment something does — the select tool has to reach the ink. */}
+      <div
+        data-layer="fields"
+        className={cn(
+          "absolute inset-0",
+          fieldsEditable && fieldPointerEvents === "auto" && "[&>*]:pointer-events-auto",
+        )}
+        style={{ pointerEvents: "none" }}
+      >
+        {fields.map((f) => (
+          <FieldControl
+            key={f.id}
+            typeable
+            linksLive={linksLive}
+            field={f}
+            scale={scale}
+            value={fieldValues[f.id]}
+            editable={fieldsEditable}
+            preview={preview}
+            onChange={(v) => onFieldChange?.(f.id, v)}
+            notebookId={notebookId}
+            studentId={studentId}
+            onResponseUploaded={onResponseUploaded}
+          />
+        ))}
+      </div>
+
+      {markHover && (
+        <div
+          className="pointer-events-none absolute z-40 max-w-[240px] rounded-[10px] border-2 border-pine bg-white px-2.5 py-1.5 text-[14px] leading-snug text-pine shadow-[3px_3px_0_0_var(--color-pine)]"
+          style={{
+            // Nudged up and right of the cursor, and kept inside the page.
+            left: Math.min(markHover.x + 12, cssW - 250),
+            top: Math.max(4, markHover.y - 52),
+          }}
+        >
+          <span className="font-display font-bold">{MARK_LABEL[markHover.hit.kind]}</span>
+          <span className="block text-pine/75">
+            {markHover.hit.ts
+              ? `${relativeTime(new Date(markHover.hit.ts).toISOString())} · ${new Date(markHover.hit.ts).toLocaleString(undefined, {
+                  day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+                })}`
+              : "Time not recorded"}
+          </span>
+          {markHover.hit.detail && (
+            <span className="mt-0.5 block truncate text-pine/60">{markHover.hit.detail}</span>
+          )}
+        </div>
+      )}
+
+      {/* Text boxes, stamps and comment pins */}
+      <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
+        {textOwners.map(({ t, own, src }) => (
+          <div
+            key={`${src}:${t.id}`}
+            className="absolute"
+            data-typeable={own ? "1" : undefined}
+            onPointerDown={(e) => {
+              if (editingText === t.id) return; // typing, not rearranging
+              if (beginMarkDrag({ kind: "text", id: t.id }, e)) e.stopPropagation();
+            }}
+            onPointerMove={moveMarkDrag}
+            onPointerUp={endMarkDrag}
+            onPointerCancel={endMarkDrag}
+            style={{
+              left: t.x * scale,
+              top: t.y * scale,
+              width: t.w * scale,
+              transform: t.r ? `rotate(${t.r}deg)` : undefined,
+              transformOrigin: "center",
+              pointerEvents: own ? objectPointerEvents : "none",
+              cursor: own && draggableMarks ? "grab" : undefined,
+              touchAction: own && draggableMarks ? "none" : undefined,
+            }}
+          >
+            {own && editingText === t.id ? (
+              <textarea
+                autoFocus
+                // The caret belongs after what's there: a note seeded with its
+                // first letter would otherwise take the rest in front of it.
+                onFocus={(e) => { const n = e.target.value.length; e.target.setSelectionRange(n, n); }}
+                value={t.v}
+                onChange={(e) => updateText(t.id, e.target.value, e.target)}
+                onBlur={() => { if (!t.v.trim()) removeText(t.id); else setEditingText(null); }}
+                className="w-full resize-none rounded border border-pine bg-white/95 px-1 py-0.5 outline-none"
+                style={{ fontSize: t.s * scale, lineHeight: 1.25, color: t.c }}
+                rows={Math.max(t.a ? 1 : 2, (t.v.match(/\n/g)?.length ?? 0) + 1)}
+              />
+            ) : (
+              <div
+                // With the select tool up, the first tap selects and the second
+                // — on the selection box, which now covers this — opens typing.
+                // Opening on the first tap would hide the handles behind the
+                // textarea before anyone could reach them. With any other tool
+                // that isn't a pen, a tap still opens the note straight away.
+                onClick={() => { if (own && !justDragged.current && !draggableMarks) setEditingText(t.id); }}
+                className={cn("whitespace-pre-wrap break-words", own && "cursor-text rounded hover:bg-mint/20/50")}
+                style={{ fontSize: t.s * scale, lineHeight: 1.25, color: t.c }}
+              >
+                {t.v}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {stampOwners.map(({ t: s, own, src }) => (
+          <div
+            key={`${src}:${s.id}`}
+            className="absolute leading-none"
+            onPointerDown={(e) => { if (beginMarkDrag({ kind: "stamp", id: s.id }, e)) e.stopPropagation(); }}
+            onPointerMove={moveMarkDrag}
+            onPointerUp={endMarkDrag}
+            onPointerCancel={endMarkDrag}
+            style={{
+              left: s.x * scale,
+              top: s.y * scale,
+              fontSize: s.s * scale,
+              // Centred on its point, then turned — one transform, because a
+              // second would replace the first rather than add to it.
+              transform: `translate(-50%, -50%)${s.r ? ` rotate(${s.r}deg)` : ""}`,
+              // Only your own stamps take the pointer, and only when the select
+              // tool is up — otherwise they stay out of the way of drawing.
+              pointerEvents: own && draggableMarks ? "auto" : "none",
+              cursor: own && draggableMarks ? "grab" : undefined,
+              touchAction: own && draggableMarks ? "none" : undefined,
+            }}
+          >
+            {s.e}
+          </div>
+        ))}
+
+        {selectedBox && (
+          <MarkSelection
+            box={selectedBox}
+            scale={scale}
+            pageRef={pageRef}
+            onMenu={openSelectionMenu}
+            onPreview={(op) => setPending(op && selected ? { ref: selected, op } : null)}
+            onCommit={commitSelectionOp}
+          />
+        )}
+
+        {comments.map(({ k, own, teacher, src }, i) => (
+          <CommentPin
+            key={`${src}:${k.id}`}
+            index={i + 1}
+            comment={k}
+            scale={scale}
+            teacher={teacher}
+            editable={own}
+            open={openComment === k.id}
+            pointerEvents={objectPointerEvents}
+            onOpen={() => setOpenComment(openComment === k.id ? null : k.id)}
+            notebookId={notebookId}
+            onChange={(v) => updateComment(k.id, v)}
+            onAudio={(key) => setCommentAudio(k.id, key)}
+            onDelete={() => removeComment(k.id)}
+            onClose={() => { if (!k.t.trim() && own) removeComment(k.id); else setOpenComment(null); }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CommentPin({
+  index, comment, scale, teacher, editable, open, pointerEvents, notebookId,
+  onOpen, onChange, onAudio, onDelete, onClose,
+}: {
+  index: number;
+  comment: { id: string; x: number; y: number; t: string; a?: string; k?: string };
+  scale: number;
+  teacher: boolean;
+  editable: boolean;
+  open: boolean;
+  pointerEvents: "auto" | "none";
+  notebookId: string;
+  onOpen: () => void;
+  onChange: (v: string) => void;
+  onAudio: (key?: string) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [sending, setSending] = useState(false);
+  const recorder = useRef<MediaRecorder | null>(null);
+
+  /**
+   * Phrases this teacher has written before.
+   *
+   * Fetched the first time a comment is actually opened rather than with the
+   * page, because most pages never open one. A refusal is not an error here:
+   * a student has no bank, and after the beta it's a Pro feature, so either
+   * way the row of phrases simply isn't there.
+   */
+  const [phrases, setPhrases] = useState<{ id: string; text: string }[] | null>(null);
+  useEffect(() => {
+    if (!open || !editable || phrases) return;
+    let live = true;
+    fetch("/api/my/comment-bank", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : { phrases: [] }))
+      .then((d) => { if (live) setPhrases(d.phrases ?? []); })
+      .catch(() => { if (live) setPhrases([]); });
+    return () => { live = false; };
+  }, [open, editable, phrases]);
+
+  const usePhrase = (ph: { id: string; text: string }) => {
+    const body = comment.t.trim();
+    onChange(body ? `${body} ${ph.text}` : ph.text);
+    // Reaching for one is what floats it to the top next time.
+    fetch(`/api/my/comment-bank/${ph.id}/used`, { method: "POST", credentials: "same-origin" }).catch(() => {});
+  };
+
+  const savePhrase = async () => {
+    const text = comment.t.trim();
+    if (!text) return;
+    try {
+      const res = await fetch("/api/my/comment-bank", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't save that phrase");
+      const { phrase } = await res.json();
+      setPhrases((p) => [phrase, ...(p ?? []).filter((x) => x.text !== text)]);
+      toast.success("Saved for next time");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Chrome records webm/opus, Safari mp4. Ask for what this browser has
+      // rather than assuming, or the recorder throws on start.
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+        .find((t) => MediaRecorder.isTypeSupported?.(t));
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const chunks: BlobPart[] = [];
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        if (!blob.size) return;
+        setSending(true);
+        try {
+          const form = new FormData();
+          form.append("file", new File([blob], "comment", { type: blob.type }));
+          const res = await fetch(`/api/notebooks/${notebookId}/comment-audio`, {
+            method: "POST", body: form, credentials: "same-origin",
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't save that recording");
+          onAudio((await res.json()).key);
+        } catch (err) {
+          toast.error((err as Error).message);
+        } finally {
+          setSending(false);
+        }
+      };
+      recorder.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch {
+      toast.error("Couldn't reach the microphone. Check this site's permission in your browser.");
+    }
+  };
+
+  const stopRecording = () => recorder.current?.stop();
+
+  return (
+    <div
+      className="absolute"
+      style={{ left: comment.x * scale, top: comment.y * scale, pointerEvents }}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        title={comment.k ? `Voice comment${comment.t ? `: ${comment.t}` : ""}` : comment.t || "Comment"}
+        className={cn(
+          "flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-pine font-display text-[16px] text-pine shadow-md",
+          teacher ? "bg-mint" : "bg-white",
+        )}
+      >
+        {index}
+      </button>
+
+      {open && (
+        <div className="absolute left-3 top-3 z-20 w-56 rounded-lg border border-pine/20 bg-white p-2 shadow-lg">
+          <div className="mb-1 flex items-center gap-1.5 text-[16px] text-pine/70">
+            <MessageSquare className="h-3 w-3" />
+            {comment.a || (teacher ? "Teacher" : "Student")}
+            <button onClick={onClose} className="ml-auto rounded p-0.5 hover:bg-oat">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          {editable ? (
+            <>
+              <textarea
+                autoFocus
+                value={comment.t}
+                onChange={(e) => onChange(e.target.value)}
+                rows={3}
+                placeholder="Add a comment…"
+                className="w-full resize-none rounded border border-pine/35 px-1.5 py-1 text-[16px] outline-none focus:border-pine"
+              />
+              {!!phrases?.length && (
+                <div className="mt-1.5 max-h-24 overflow-y-auto border-t border-pine/15 pt-1">
+                  {phrases.slice(0, 8).map((ph) => (
+                    <button
+                      key={ph.id}
+                      onClick={() => usePhrase(ph)}
+                      title={ph.text}
+                      className="block w-full truncate rounded px-1 py-0.5 text-left text-[15px] text-pine/80 hover:bg-oat"
+                    >
+                      {ph.text}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!!comment.t.trim() && !phrases?.some((ph) => ph.text === comment.t.trim()) && (
+                <button onClick={savePhrase} className="mt-1 text-[15px] text-pine/60 hover:underline">
+                  Save this phrase
+                </button>
+              )}
+
+              {comment.k ? (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <audio controls preload="none" className="h-8 w-full"
+                    src={`/api/notebooks/${notebookId}/comment-audio?key=${encodeURIComponent(comment.k)}`} />
+                  <button
+                    onClick={() => onAudio(undefined)}
+                    title="Remove the recording"
+                    className="shrink-0 rounded p-1 text-[#a3341f] hover:bg-oat"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={recording ? stopRecording : startRecording}
+                  disabled={sending}
+                  className={cn(
+                    "mt-1.5 flex w-full items-center justify-center gap-1.5 rounded border-2 py-1 text-[16px] font-bold transition-colors",
+                    recording
+                      ? "border-[#a3341f] bg-[#a3341f]/8 text-[#a3341f]"
+                      : "border-pine/30 text-pine hover:bg-oat disabled:opacity-50",
+                  )}
+                >
+                  {recording
+                    ? <><Square className="h-3 w-3" /> Stop</>
+                    : sending
+                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+                      : <><Mic className="h-3.5 w-3.5" /> Say it instead</>}
+                </button>
+              )}
+              <div className="mt-1 flex justify-between">
+                <button onClick={onDelete} className="text-[16px] text-[#a3341f] hover:underline">Delete</button>
+                <button onClick={onClose} className="text-[16px] text-pine hover:underline">Done</button>
+              </div>
+            </>
+          ) : (
+            <>
+              {comment.k && (
+                <audio controls preload="none" className="mb-1.5 h-8 w-full"
+                  src={`/api/notebooks/${notebookId}/comment-audio?key=${encodeURIComponent(comment.k)}`} />
+              )}
+              {comment.t && <p className="whitespace-pre-wrap break-words text-[16px] text-pine">{comment.t}</p>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FieldControl({
+  field, scale, value, editable, onChange, typeable, linksLive = true, notebookId, studentId, onResponseUploaded, preview,
+}: {
+  field: FieldLike;
+  scale: number;
+  value: FieldValue | undefined;
+  editable: boolean;
+  onChange: (v: string) => void;
+  notebookId: string;
+  studentId?: string;
+  onResponseUploaded?: (fieldId: string) => void;
+  /** Marks the control as a tap target while a marking tool is active. */
+  typeable?: boolean;
+  /** Preview: everything else behaves, but nothing uploads. */
+  preview?: boolean;
+  /** Whether a press on a link opens it directly — see `linksLive` in PageCanvas. */
+  linksLive?: boolean;
+}) {
+  const style = {
+    left: field.x * scale,
+    top: field.y * scale,
+    width: field.w * scale,
+    height: field.h * scale,
+  } as const;
+
+  if (field.type === "prompt") {
+    return (
+      <div
+        className="absolute flex flex-col overflow-hidden rounded border-2 border-pine/45 bg-white/70"
+        style={style}
+        title={field.label}
+      >
+        {field.prompt && (
+          <div
+            className="shrink-0 px-1.5 pt-1 text-[16px] font-semibold text-pine"
+            style={{ fontSize: Math.max(10, Math.min(13, field.h * scale * 0.14)) }}
+          >
+            {field.prompt}
+          </div>
+        )}
+        {!!field.has_media && (
+          <img
+            src={`/api/notebooks/${notebookId}/fields/${field.id}/media`}
+            alt=""
+            className="min-h-0 flex-1 object-contain px-1"
+          />
+        )}
+        <textarea
+          {...(typeable ? { "data-typeable": "1" } : {})}
+          disabled={!editable}
+          value={fieldText(value)}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Your answer"
+          className={cn(
+            "min-h-0 flex-1 resize-none bg-transparent px-1.5 py-0.5 outline-none",
+            editable ? "focus:bg-white/60" : "",
+          )}
+          style={{ fontSize: Math.max(11, Math.min(16, field.h * scale * 0.16)), lineHeight: 1.2 }}
+        />
+      </div>
+    );
+  }
+
+  // ---- teacher-authored page content: shown to everyone, answered by no one ----
+
+  if (field.type === "richtext") {
+    return (
+      <div
+        className="pointer-events-none absolute overflow-hidden"
+        style={style}
+        title={field.label}
+      >
+        <div
+          className="rich-text h-full w-full overflow-hidden text-pine"
+          // Already sanitised server-side against a strict allowlist; see
+          // worker/lib/richtext.ts for what survives and why.
+          dangerouslySetInnerHTML={{ __html: field.content ?? "" }}
+        />
+      </div>
+    );
+  }
+
+  if (field.type === "link") {
+    // Checked again here though the server only stores what passes: this is
+    // the last step before an address is put under a pupil's finger.
+    const href = normalizeLink(field.content ?? "");
+    // A link whose address hasn't been typed yet is nothing to press.
+    if (!href) return null;
+    const name = field.label || linkHost(href);
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        // A tap target for the pen, like a box: a tap opens it, a stroke
+        // that starts on it still writes.
+        {...(typeable ? { "data-typeable": "1" } : {})}
+        aria-label={`${name} (opens in a new tab)`}
+        title={href}
+        className="absolute rounded-[4px] transition-colors hover:bg-mint/25 focus-visible:bg-mint/25 focus-visible:outline-[3px] focus-visible:outline-mint"
+        style={{ ...style, pointerEvents: linksLive ? "auto" : "none" }}
+      />
+    );
+  }
+
+  if (field.type === "figure") {
+    if (!field.has_media) {
+      return (
+        <div
+          className="pointer-events-none absolute flex items-center justify-center rounded border-2 border-dashed border-pine/30 bg-oat/60 text-[14px] text-pine/50"
+          style={style}
+        >
+          {editable ? "Add a picture" : ""}
+        </div>
+      );
+    }
+    return (
+      <img
+        src={`/api/notebooks/${notebookId}/fields/${field.id}/media`}
+        alt={field.label || ""}
+        className="pointer-events-none absolute object-contain"
+        style={style}
+      />
+    );
+  }
+
+  if (field.type === "image") {
+    return (
+      <ResponseImageField
+        field={field}
+        style={style}
+        editable={editable && !preview}
+        notebookId={notebookId}
+        studentId={studentId}
+        onResponseUploaded={onResponseUploaded}
+        typeable={typeable}
+      />
+    );
+  }
+
+  if (field.type === "audio") {
+    return (
+      <ResponseAudioField
+        field={field}
+        style={style}
+        editable={editable && !preview}
+        notebookId={notebookId}
+        studentId={studentId}
+        onResponseUploaded={onResponseUploaded}
+        typeable={typeable}
+      />
+    );
+  }
+
+  const text = fieldText(value);
+
+  const tap = typeable ? { "data-typeable": "1" } : {};
+
+  if (field.type === "checkbox") {
+    return (
+      <button
+        {...tap}
+        type="button"
+        disabled={!editable}
+        onClick={() => onChange(text === "1" ? "" : "1")}
+        title={field.label}
+        className={cn(
+          "absolute flex items-center justify-center rounded border-2 transition-colors",
+          text === "1" ? "border-pine bg-mint/20 text-pine" : "border-pine/45 bg-white/60",
+          editable ? "cursor-pointer hover:border-pine" : "cursor-default",
+        )}
+        style={style}
+      >
+        {text === "1" && (
+          <svg viewBox="0 0 24 24" className="h-4/5 w-4/5" fill="none" stroke="currentColor" strokeWidth={3}>
+            <path d="M4 12l5 5L20 6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </button>
+    );
+  }
+
+  if (field.type === "choice") {
+    let options: string[] = [];
+    try { options = JSON.parse(field.options || "[]"); } catch { options = []; }
+    return (
+      <select
+        {...tap}
+        disabled={!editable}
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+        title={field.label}
+        className="absolute rounded border-2 border-pine/45 bg-white/80 pl-1 outline-none focus:border-pine"
+        style={{
+          ...style,
+          fontSize: Math.max(11, field.h * scale * 0.5),
+          // The caret scales with the page, so it is set in em rather than px.
+          paddingRight: "1.6em",
+          backgroundPosition: "right 0.35em center",
+          backgroundSize: "0.9em 0.9em",
+        }}
+      >
+        <option value="">—</option>
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  }
+
+  return (
+    <textarea
+      {...tap}
+      disabled={!editable}
+      value={text}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={field.label}
+      className={cn(
+        "absolute resize-none rounded border-2 bg-white/70 px-1 py-0.5 outline-none",
+        editable ? "border-pine/45 focus:border-pine focus:bg-white" : "border-transparent bg-transparent",
+      )}
+      style={{ ...style, fontSize: Math.max(11, Math.min(16, field.h * scale * 0.42)), lineHeight: 1.2 }}
+    />
+  );
+}
+
+/** Builds the URL for a student's uploaded image/audio response, with an optional cache-buster. */
+function responseUrl(notebookId: string, fieldId: string, studentId: string | undefined, v: number) {
+  const params = new URLSearchParams();
+  if (studentId) params.set("student", studentId);
+  if (v) params.set("v", String(v));
+  const qs = params.toString();
+  return `/api/notebooks/${notebookId}/responses/${fieldId}${qs ? `?${qs}` : ""}`;
+}
+
+/**
+ * Probe whether a student response exists yet, via a lightweight HEAD request.
+ * Only run on mount / after `nonce` changes — after an upload or delete we
+ * already know the answer, so callers set state directly instead of re-probing.
+ */
+function useResponseProbe(url: string, nonce: number) {
+  const [exists, setExists] = useState<boolean | null>(null);
+  useEffect(() => {
+    let canceled = false;
+    setExists(null);
+    fetch(url, { method: "HEAD", credentials: "same-origin" })
+      .then((res) => { if (!canceled) setExists(res.ok); })
+      .catch(() => { if (!canceled) setExists(false); });
+    return () => { canceled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, nonce]);
+  return [exists, setExists] as const;
+}
+
+function ResponseImageField({
+  field, style, editable, notebookId, studentId, onResponseUploaded, typeable,
+}: {
+  field: FieldLike;
+  style: { left: number; top: number; width: number; height: number };
+  editable: boolean;
+  notebookId: string;
+  studentId?: string;
+  onResponseUploaded?: (fieldId: string) => void;
+  typeable?: boolean;
+}) {
+  const tap = typeable ? { "data-typeable": "1" } : {};
+  const [cacheBust, setCacheBust] = useState(0);
+  const url = responseUrl(notebookId, field.id, studentId, cacheBust);
+  const [exists, setExists] = useResponseProbe(url, 0);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const qs = studentId ? `?student=${encodeURIComponent(studentId)}` : "";
+      const res = await fetch(`/api/notebooks/${notebookId}/responses/${field.id}${qs}`, {
+        method: "POST",
+        credentials: "same-origin",
+        body: form,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        let reason = "";
+        try { reason = JSON.parse(body)?.error ?? ""; } catch { reason = body.slice(0, 140); }
+        throw new Error(reason || `Upload failed (${res.status})`);
+      }
+      setExists(true);
+      setCacheBust((n) => n + 1);
+      onResponseUploaded?.(field.id);
+    } catch (err) {
+      toast.error((err as Error).message || "Couldn't upload that image");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = async () => {
+    try {
+      const qs = studentId ? `?student=${encodeURIComponent(studentId)}` : "";
+      const res = await fetch(`/api/notebooks/${notebookId}/responses/${field.id}${qs}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error();
+      setExists(false);
+      onResponseUploaded?.(field.id);
+    } catch {
+      toast.error("Couldn't remove that image");
+    }
+  };
+
+  return (
+    <div
+      className="absolute overflow-hidden rounded border-2 border-pine/45 bg-white/60"
+      style={style}
+      title={field.label}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }}
+      />
+
+      {uploading ? (
+        <div className="flex h-full w-full items-center justify-center">
+          <Loader2 className="h-5 w-5 animate-spin text-pine" />
+        </div>
+      ) : exists ? (
+        <div className="group relative h-full w-full">
+          <img src={url} alt={field.label} className="h-full w-full object-contain" />
+          {editable && (
+            <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-black/40 to-transparent p-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <button
+                {...tap}
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                title="Replace image"
+                className="flex h-6 w-6 items-center justify-center rounded bg-white/90 text-pine hover:bg-white"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+              <button
+                {...tap}
+                type="button"
+                onClick={() => void remove()}
+                title="Remove image"
+                className="flex h-6 w-6 items-center justify-center rounded bg-white/90 text-[#a3341f] hover:bg-white"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      ) : editable ? (
+        <button
+          {...tap}
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="flex h-full min-h-10 w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-pine/35 bg-oat/70 text-pine/70 hover:border-pine hover:text-pine"
+        >
+          <ImageIcon className="h-5 w-5" />
+          <span className="text-[16px] font-medium">Add image</span>
+        </button>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-[16px] text-pine/55">No image</div>
+      )}
+    </div>
+  );
+}
+
+const MAX_RECORDING_SECONDS = 180;
+
+function ResponseAudioField({
+  field, style, editable, notebookId, studentId, onResponseUploaded, typeable,
+}: {
+  field: FieldLike;
+  style: { left: number; top: number; width: number; height: number };
+  editable: boolean;
+  notebookId: string;
+  studentId?: string;
+  onResponseUploaded?: (fieldId: string) => void;
+  typeable?: boolean;
+}) {
+  const tap = typeable ? { "data-typeable": "1" } : {};
+  const [cacheBust, setCacheBust] = useState(0);
+  const url = responseUrl(notebookId, field.id, studentId, cacheBust);
+  const [exists, setExists] = useResponseProbe(url, 0);
+  const [uploading, setUploading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const canRecord =
+    typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia && typeof window.MediaRecorder !== "undefined";
+
+  const stopTracks = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  useEffect(() => () => {
+    // Never leave a microphone open when the field unmounts mid-recording.
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
+    stopTracks();
+  }, [stopTracks]);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const qs = studentId ? `?student=${encodeURIComponent(studentId)}` : "";
+      const res = await fetch(`/api/notebooks/${notebookId}/responses/${field.id}${qs}`, {
+        method: "POST",
+        credentials: "same-origin",
+        body: form,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        let reason = "";
+        try { reason = JSON.parse(body)?.error ?? ""; } catch { reason = body.slice(0, 140); }
+        throw new Error(reason || `Upload failed (${res.status})`);
+      }
+      setExists(true);
+      setCacheBust((n) => n + 1);
+      onResponseUploaded?.(field.id);
+    } catch (err) {
+      toast.error((err as Error).message || "Couldn't upload that recording");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = async () => {
+    try {
+      const qs = studentId ? `?student=${encodeURIComponent(studentId)}` : "";
+      const res = await fetch(`/api/notebooks/${notebookId}/responses/${field.id}${qs}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error();
+      setExists(false);
+      onResponseUploaded?.(field.id);
+    } catch {
+      toast.error("Couldn't remove that recording");
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined;
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        stopTracks();
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setRecording(false);
+        // Let any final dataavailable land before assembling — browsers differ on
+        // whether it arrives before or after this handler.
+        setTimeout(() => {
+          const type = recorder.mimeType || "audio/webm";
+          const blob = new Blob(chunksRef.current, { type });
+          chunksRef.current = [];
+          if (blob.size === 0) {
+            toast.error("That recording came back empty — try once more.");
+            return;
+          }
+          const ext = type.includes("webm") ? "webm" : type.includes("ogg") ? "ogg" : "m4a";
+          void upload(new File([blob], `recording.${ext}`, { type }));
+        }, 0);
+      };
+      recorder.onerror = () => toast.error("Recording stopped unexpectedly.");
+      recorderRef.current = recorder;
+      // A timeslice makes the browser hand over chunks as it goes, so a crash or
+      // an early stop still leaves usable audio.
+      recorder.start(500);
+      setRecording(true);
+      setElapsed(0);
+      timerRef.current = setInterval(() => {
+        setElapsed((s) => {
+          const next = s + 1;
+          if (next >= MAX_RECORDING_SECONDS) recorderRef.current?.stop();
+          return next;
+        });
+      }, 1000);
+    } catch {
+      toast.error("Couldn't access the microphone");
+      stopTracks();
+    }
+  };
+
+  const stopRecording = () => {
+    const rec = recorderRef.current;
+    if (!rec || rec.state === "inactive") return;
+    // Flush whatever is buffered before stopping.
+    try { rec.requestData(); } catch { /* not all browsers implement it */ }
+    rec.stop();
+  };
+
+  // A teacher can draw this field tiny, so the box floors out at a minimum
+  // size rather than compressing controls down to nothing — but the floor
+  // has to stay modest, or it swallows the page content around it. The
+  // player needs more width than the record/attach controls do, so each
+  // state gets its own (small) minimum instead of one size for all three.
+  const minSize = exists ? { minWidth: 190, minHeight: 60 } : { minWidth: 96, minHeight: 44 };
+
+  return (
+    <div
+      className="absolute overflow-hidden rounded border-2 border-pine/45 bg-white/60"
+      style={{ ...style, ...minSize }}
+      title={field.label}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="audio/*"
+        capture
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }}
+      />
+
+      {uploading ? (
+        <div className="flex h-full w-full items-center justify-center">
+          <Loader2 className="h-5 w-5 animate-spin text-pine" />
+        </div>
+      ) : exists ? (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1.5">
+          <audio {...tap} controls src={url} className="w-full shrink-0" style={{ height: 36, minHeight: 36 }} />
+          {editable && (
+            <div className="flex gap-3">
+              <button {...tap} type="button" onClick={() => inputRef.current?.click()} className="text-[14px] font-bold text-pine hover:underline">
+                Replace
+              </button>
+              <button {...tap} type="button" onClick={() => void remove()} className="text-[14px] font-bold text-[#a3341f] hover:underline">
+                Remove
+              </button>
+            </div>
+          )}
+        </div>
+      ) : editable ? (
+        recording ? (
+          <div className="flex h-full w-full items-center justify-center gap-2 px-2 text-pine/75">
+            <button
+              {...tap}
+              type="button"
+              onClick={stopRecording}
+              title="Stop recording"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-[#a3341f] bg-white text-[#a3341f] hover:bg-[#fbe9e4]"
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+            <span className="text-[14px] font-bold tabular-nums">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
+          </div>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center gap-1.5 border-2 border-dashed border-pine/35 bg-oat/70 px-1.5 text-pine/70">
+            {canRecord && (
+              <button
+                {...tap}
+                type="button"
+                onClick={() => void startRecording()}
+                title="Record audio"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-pine bg-mint text-pine"
+              >
+                <Mic className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            )}
+            <button
+              {...tap}
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-pine/45 bg-white text-pine hover:border-pine"
+              title="Attach an audio file"
+            >
+              <Music className="h-4 w-4" strokeWidth={2.5} />
+            </button>
+          </div>
+        )
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-[14px] text-pine/55">No recording</div>
+      )}
+    </div>
+  );
+}
