@@ -42,6 +42,7 @@ const RELEASES = [
     "One assignment for every section that has the notebook, started from inside the notebook.",
     [
       ["new", "<b>One assignment, every section.</b> When the notebook came from a template, creating an assignment now offers <b>Also assign in</b>: tick your other classes with the same notebook and each gets the assignment too, with its own release and due dates, posted to its own Google Classroom course if it has one. They're separate assignments from then on, graded on their own. A page you added to only one class's copy is left out there, and a class where the notebook isn't published yet gets a draft."],
+      ["better", "<b>Importing from Google Classroom lives in New class.</b> Press <b>New class</b> and choose <b>Import from Google Classroom</b> under the form to bring a course across with its roster; the separate button beside it is gone. Anything that opens Google Classroom or Google Drive now carries Google's own icon for it."],
       ["better", "<b>New assignment from inside a notebook.</b> The notebook's <b>Assignments</b> tab has a <b>New assignment</b> button that opens the form with the notebook and the page you're on already chosen."],
     ],
   ],

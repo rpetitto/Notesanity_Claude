@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, FolderOpen, PanelLeft, Pencil, PenSquare, Plus, Send, Undo2 } from "lucide-react";
+import { Archive, ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, PanelLeft, Pencil, PenSquare, Plus, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
@@ -21,6 +21,7 @@ import {
   renderPatternToCanvas, type PatternKey,
 } from "../lib/patterns";
 import { cn, formatDue, isOverdue } from "../lib/utils";
+import GoogleIcon from "../components/GoogleIcon";
 
 /** Header controls share one height so a row of them lines up. */
 const BUTTON_ROW =
@@ -813,7 +814,7 @@ export default function Workspace() {
     ...(hasGoogleClientId
       ? [{
           label: "Save to Google Drive",
-          icon: <FolderOpen className="h-5 w-5" strokeWidth={2.5} />,
+          icon: <GoogleIcon product="drive" />,
           hint: "The same PDF, straight into your Drive.",
           disabled: !!exporting,
           onClick: () => void exportTo("drive"),

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  Archive, BookOpen, Check, ChevronDown, ClipboardList, Copy, Eye, FolderOpen, GraduationCap, Palette, Plus,
+  Archive, BookOpen, Check, ChevronDown, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus,
   RefreshCw, RotateCcw, Settings2, Trash2, Upload, UserPlus, UserX, Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from 
 import { useSession } from "../lib/session";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
+import GoogleIcon from "../components/GoogleIcon";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
 const SWATCHES = [
@@ -1031,7 +1032,7 @@ export default function ClassView() {
           ? [{
               label: "From Google Drive",
               hint: driveBusy || "Pick a file out of your Drive",
-              icon: <FolderOpen className="h-5 w-5" strokeWidth={2.5} />,
+              icon: <GoogleIcon product="drive" />,
               disabled: !!driveBusy,
               onClick: () => void importFromDrive(mine),
             }]

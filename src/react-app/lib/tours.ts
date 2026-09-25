@@ -55,12 +55,7 @@ export const TOURS: Record<string, TourStep[]> = {
       title: "Make your first class",
       body:
         "A name and a section is all it takes. You get a join code straight away that students " +
-        "can use themselves.",
-    },
-    {
-      target: "import-classroom",
-      title: "Already in Google Classroom?",
-      body: "Bring a course across with its roster instead of typing the names in again.",
+        "can use themselves. Already in Google Classroom? The same button imports a course with its roster.",
     },
     {
       target: ["nav-assignments", "nav-assignments-mobile"],

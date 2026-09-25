@@ -5,7 +5,7 @@ import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
-  FolderOpen, LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
+  LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
   Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal, FilePlus2, SquarePlus,
 } from "lucide-react";
 import { type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, pointFor, watchLongPress } from "../components/ContextMenu";
@@ -34,6 +34,7 @@ import { Button, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Sele
 import PushToClassesModal from "../components/PushToClassesModal";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
+import GoogleIcon from "../components/GoogleIcon";
 
 /** Header controls share one height so a row of them lines up. */
 /** The header's three actions: a size that fits three across a phone, the full size from `sm`. */
@@ -1133,7 +1134,7 @@ export default function NotebookEditor() {
       { label: "Blank paper…", icon: <Rows3 />, hint: "Lined, graph, dot grid, music staves…", disabled: busy, onSelect: () => setBlankOpen(true) },
       { label: "From a file…", icon: <Upload />, hint: "PDF, Word or PowerPoint", disabled: busy, onSelect: () => addPagesRef.current?.click() },
     ];
-    if (hasDrivePicker) entries.push({ label: "From Google Drive…", icon: <FolderOpen />, disabled: busy, onSelect: () => void addPagesFromDrive() });
+    if (hasDrivePicker) entries.push({ label: "From Google Drive…", icon: <GoogleIcon product="drive" />, disabled: busy, onSelect: () => void addPagesFromDrive() });
     entries.push(
       { label: "From your library…", icon: <LibraryBig />, hint: "A page you saved", disabled: busy, onSelect: () => setLibraryOpen(true) },
       { label: "Copy of this page", icon: <CopyPlus />, hint: "With its boxes, not students' work", disabled: busy || !page, onSelect: () => { if (page) duplicatePages.mutate([page.id]); } },

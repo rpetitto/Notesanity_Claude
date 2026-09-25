@@ -7,6 +7,7 @@ import PageThumb from "../components/PageThumb";
 import { ButtonLink, Card, Chip } from "../components/ui";
 import { api, pageSource, type PageRec } from "../lib/api";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
+import GoogleIcon from "../components/GoogleIcon";
 
 interface TeachingAssignment {
   id: string;
@@ -307,7 +308,7 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
                       rel="noreferrer"
                       className="inline-flex h-8 items-center gap-1 rounded-full border-2 border-pine/25 px-2.5 text-[16px] text-pine/70 hover:bg-oat"
                     >
-                      In Classroom <ExternalLink className="h-3.5 w-3.5" strokeWidth={2.5} />
+                      <GoogleIcon product="classroom" className="h-4 w-4" /> In Classroom <ExternalLink className="h-3.5 w-3.5" strokeWidth={2.5} />
                     </a>
                   )}
                 </div>

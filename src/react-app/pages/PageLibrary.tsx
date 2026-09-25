@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, FolderOpen, LibraryBig, Loader2, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, LibraryBig, Loader2, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
@@ -21,6 +21,7 @@ import { cn } from "../lib/utils";
 import { api, libraryPageSource, type LibraryPageRec } from "../lib/api";
 import { useSession } from "../lib/session";
 import { relativeTime } from "../lib/utils";
+import GoogleIcon from "../components/GoogleIcon";
 
 export default function PageLibrary() {
   const qc = useQueryClient();
@@ -99,7 +100,7 @@ export default function PageLibrary() {
             },
             ...(hasDrivePicker ? [{
               label: "From Google Drive",
-              icon: <FolderOpen className="h-5 w-5" strokeWidth={2.5} />,
+              icon: <GoogleIcon product="drive" />,
               hint: "Pick a file without downloading it",
               onClick: () => void importFromDrive(),
             }] : []),

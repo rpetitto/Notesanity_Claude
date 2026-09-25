@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Archive, Plus, RotateCcw, Settings2, Users, BookOpen, Import } from "lucide-react";
+import { Archive, ArrowLeft, Plus, RotateCcw, Settings2, Users, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import Tour from "../components/Tour";
@@ -9,6 +9,7 @@ import { Button, ConfirmModal, Input, Label, Menu, Modal, type MenuItem } from "
 import { api, type ClassSummary } from "../lib/api";
 import { hasGoogleClientId, listCourses, listStudents, type ClassroomCourse } from "../lib/google";
 import { DEFAULT_ACCENT } from "../lib/utils";
+import GoogleIcon from "../components/GoogleIcon";
 
 /** `GET /api/classes` rows also carry `emoji` — declared locally since `ClassSummary`
  * (shared with other owners' code) doesn't yet. */
@@ -93,8 +94,14 @@ function ClassCard({ cls, menu }: { cls: ClassRow; menu?: MenuItem[] }) {
   );
 }
 
+/**
+ * One way in to a new class. Typing a name is the default; a class that
+ * already exists in Google Classroom comes across from the same dialog, with
+ * its roster, rather than from a second button beside it.
+ */
 function NewClassModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
+  const [importing, setImporting] = useState(false);
   const [name, setName] = useState("");
   const [section, setSection] = useState("");
   useEscapeClose(true, onClose);
@@ -108,6 +115,21 @@ function NewClassModal({ onClose }: { onClose: () => void }) {
     },
     onError: (err: Error) => toast.error(err.message),
   });
+
+  if (importing) {
+    return (
+      <Modal onClose={onClose} title="Import from Google Classroom">
+        <button
+          type="button"
+          onClick={() => setImporting(false)}
+          className="-mt-1 mb-3 inline-flex h-11 items-center gap-1.5 rounded-full px-2 font-display text-[16px] text-pine hover:bg-oat"
+        >
+          <ArrowLeft className="h-4 w-4" strokeWidth={2.5} /> Back to a new class
+        </button>
+        <ClassroomCourses onDone={onClose} />
+      </Modal>
+    );
+  }
 
   return (
     <Modal onClose={onClose} title="New class">
@@ -142,17 +164,28 @@ function NewClassModal({ onClose }: { onClose: () => void }) {
           {mutation.isPending ? "Creating…" : "Create class"}
         </Button>
       </form>
+      {hasGoogleClientId && (
+        <>
+          <div className="my-4 flex items-center gap-3 text-[16px] text-pine/60" aria-hidden>
+            <span className="h-[2px] flex-1 bg-pine/15" /> or <span className="h-[2px] flex-1 bg-pine/15" />
+          </div>
+          <Button type="button" variant="secondary" className="w-full" onClick={() => setImporting(true)}>
+            <GoogleIcon product="classroom" /> Import from Google Classroom
+          </Button>
+          <p className="mt-2 text-center text-[16px] text-pine/70">Brings a course across with its roster.</p>
+        </>
+      )}
     </Modal>
   );
 }
 
-function ImportClassroomModal({ onClose }: { onClose: () => void }) {
+/** The teacher's Classroom courses; picking one imports it, roster and all. */
+function ClassroomCourses({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient();
   const [courses, setCourses] = useState<ClassroomCourse[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importingId, setImportingId] = useState<string | null>(null);
-  useEscapeClose(true, onClose);
 
   useEffect(() => {
     let canceled = false;
@@ -189,7 +222,7 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
       await qc.invalidateQueries({ queryKey: ["classes"] });
       if (result.added > 0) toast.success(`Imported ${result.added} student${result.added === 1 ? "" : "s"}`);
       for (const s of result.skipped ?? []) toast.error(`${s.email}: ${s.reason}`);
-      onClose();
+      onDone();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Import failed");
     } finally {
@@ -198,7 +231,7 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal onClose={onClose} title="Import from Google Classroom">
+    <>
       {loading && <Spinner label="Loading your courses…" />}
       {!loading && error && <ErrorNote error={new Error(error)} />}
       {!loading && !error && courses && courses.length === 0 && (
@@ -226,7 +259,7 @@ function ImportClassroomModal({ onClose }: { onClose: () => void }) {
           ))}
         </ul>
       )}
-    </Modal>
+    </>
   );
 }
 
@@ -240,7 +273,6 @@ export default function TeacherHome() {
       api.get<{ classes: ClassRow[] }>(`/api/classes${showArchived ? "?archived=1" : ""}`),
   });
   const [newClassOpen, setNewClassOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
 
   const [confirming, setConfirming] = useState<ClassRow | null>(null);
 
@@ -294,12 +326,6 @@ export default function TeacherHome() {
         {/* The two actions are wider than a handset once the title is beside
             them, so they drop to their own line rather than push the page. */}
         <div className="flex flex-wrap items-center gap-2">
-          {hasGoogleClientId && (
-            <Button type="button" variant="secondary" data-tour="import-classroom" onClick={() => setImportOpen(true)}>
-              <Import className="h-4 w-4" strokeWidth={2.5} />
-              Import from Classroom
-            </Button>
-          )}
           <Button type="button" variant="secondary" onClick={() => setShowArchived((v) => !v)}>
             <Archive className="h-4 w-4" strokeWidth={2.5} />
             {showArchived ? "Back to my classes" : "Archived"}
@@ -343,7 +369,6 @@ export default function TeacherHome() {
       )}
 
       {newClassOpen && <NewClassModal onClose={() => setNewClassOpen(false)} />}
-      {importOpen && <ImportClassroomModal onClose={() => setImportOpen(false)} />}
 
       {/* Only while nothing else is open: a spotlight over a modal would ring
           the form rather than the button the step is talking about. */}
@@ -373,7 +398,7 @@ export default function TeacherHome() {
         />
       )}
 
-      {!newClassOpen && !importOpen && !confirming && <Tour place="home" />}
+      {!newClassOpen && !confirming && <Tour place="home" />}
     </Shell>
   );
 }

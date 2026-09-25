@@ -10,6 +10,7 @@ import PageThumb from "../components/PageThumb";
 import { Button, Card, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import { cn, toIso, toLocalInput } from "../lib/utils";
 import { createCoursework, hasGoogleClientId } from "../lib/google";
+import GoogleIcon from "../components/GoogleIcon";
 
 type Grading = "none" | "complete" | "points" | "letter";
 
@@ -579,7 +580,7 @@ export default function AssignmentEditor() {
             <div className="rounded-[12px] border-[3px] border-pine/20 bg-oat p-3">
               {alreadyPosted ? (
                 <div className="flex items-start gap-2 text-[16px] text-pine">
-                  <Check className="mt-1 h-4 w-4 shrink-0 text-mint" strokeWidth={2.5} />
+                  <GoogleIcon product="classroom" className="mt-0.5" />
                   <span>
                     This is posted in Google Classroom.{" "}
                     {postedLink && (
@@ -604,7 +605,9 @@ export default function AssignmentEditor() {
                       className="mt-1 h-4 w-4 shrink-0 accent-mint"
                     />
                     <span>
-                      <span className="block font-display">Also post to Google Classroom</span>
+                      <span className="flex items-center gap-2 font-display">
+                        <GoogleIcon product="classroom" /> Also post to Google Classroom
+                      </span>
                       <span className="block text-pine/70">
                         {chosenSiblings.length
                           ? "Creates an assignment in the Classroom course each class came from, linking back here."

@@ -11,7 +11,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookText, CheckSquare, ChevronDown, FolderOpen, Plus, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
+import { BookText, CheckSquare, ChevronDown, Plus, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import NewNotebookModal from "../components/NewNotebookModal";
@@ -20,6 +20,7 @@ import { Button, Chip, ConfirmModal, Menu, Select, buttonClass, type MenuItem } 
 import { api, type ClassSummary } from "../lib/api";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 import { NotebookCard, type ClassNotebook } from "./ClassView";
+import GoogleIcon from "../components/GoogleIcon";
 
 interface TeachingNotebook extends ClassNotebook {
   class_id: string;
@@ -163,7 +164,7 @@ export default function TeacherNotebooks() {
             items={[
               { label: "Blank pages", icon: <Rows3 className="h-5 w-5" strokeWidth={2.5} />, hint: "Lined, graph, dot grid, staves…", onClick: () => setBlankOpen(true) },
               { label: "Upload a file", icon: <Upload className="h-5 w-5" strokeWidth={2.5} />, hint: "PDF, Word or PowerPoint", onClick: () => fileRef.current?.click() },
-              ...(hasDrivePicker ? [{ label: "From Google Drive", icon: <FolderOpen className="h-5 w-5" strokeWidth={2.5} />, hint: "Pick a file without downloading it", onClick: () => void importFromDrive() }] : []),
+              ...(hasDrivePicker ? [{ label: "From Google Drive", icon: <GoogleIcon product="drive" />, hint: "Pick a file without downloading it", onClick: () => void importFromDrive() }] : []),
             ]}
           />
           <input
