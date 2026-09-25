@@ -90,13 +90,12 @@ export default function TeacherNotebooks() {
 
   const all = list.data?.notebooks ?? [];
   const hasClasses = (classes.data?.classes ?? []).some((c) => c.my_role === "teacher");
-  const shown = useMemo(() => {
-    if (filter === "all") return all;
-    if (filter === "templates") return all.filter((n) => n.kind === "template");
-    return all.filter((n) => n.class_id === filter);
-  }, [all, filter]);
-  const templates = shown.filter((n) => n.kind === "template");
-  const inClasses = shown.filter((n) => n.kind !== "template");
+  // Templates belong to no class, so the class filter only narrows the notebooks below them.
+  const templates = all.filter((n) => n.kind === "template");
+  const inClasses = useMemo(
+    () => all.filter((n) => n.kind !== "template" && (filter === "all" || n.class_id === filter)),
+    [all, filter],
+  );
 
   const templateMenu = (t: TeachingNotebook): MenuItem[] => {
     const pending = (t.copies ?? []).reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
@@ -146,56 +145,38 @@ export default function TeacherNotebooks() {
 
   return (
     <Shell>
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <div>
-          <h1 className="font-display text-[32px] text-pine">Notebooks</h1>
-          <p className="text-[16px] text-pine/70">Everything you teach from, in every class — and the templates you build them from.</p>
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Show" className="h-12">
-            <option value="all">All classes</option>
-            <option value="templates">Templates only</option>
-            {(classes.data?.classes ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-          <Menu
-            label="New template"
-            triggerClassName={buttonClass("primary", "md")}
-            trigger={<><Plus className="h-5 w-5" strokeWidth={2.5} /> New template <ChevronDown className="h-4 w-4" strokeWidth={2.5} /></>}
-            items={[
-              { label: "Blank pages", icon: <Rows3 className="h-5 w-5" strokeWidth={2.5} />, hint: "Lined, graph, dot grid, staves…", onClick: () => setBlankOpen(true) },
-              { label: "Upload a file", icon: <Upload className="h-5 w-5" strokeWidth={2.5} />, hint: "PDF, Word or PowerPoint", onClick: () => fileRef.current?.click() },
-              ...(hasDrivePicker ? [{ label: "From Google Drive", icon: <GoogleIcon product="drive" />, hint: "Pick a file without downloading it", onClick: () => void importFromDrive() }] : []),
-            ]}
-          />
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf,.docx,.doc,.pptx,.ppt,application/pdf"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              e.target.value = "";
-              if (f) navigate("/templates/upload", { state: { file: f, template: true } });
-            }}
-          />
-        </div>
+      <div className="mb-6">
+        <h1 className="font-display text-[32px] text-pine">Notebooks</h1>
+        <p className="text-[16px] text-pine/70">Everything you teach from, in every class — and the templates you build them from.</p>
       </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf,.docx,.doc,.pptx,.ppt,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) navigate("/templates/upload", { state: { file: f, template: true } });
+        }}
+      />
 
       {list.isLoading && <Spinner label="Loading your notebooks…" />}
       {list.error && <ErrorNote error={list.error as Error} />}
 
       {!list.isLoading && !list.error && (
         <>
-          {(filter === "all" || filter === "templates") && (
-            <section className="mb-8">
-              <h2 className="mb-3 flex items-center gap-2 font-display text-[20px] text-pine">
+          <section className="mb-8">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h2 className="flex items-center gap-2 font-display text-[20px] text-pine">
                 <BookText className="h-5 w-5" strokeWidth={2.5} /> Templates
                 <Chip tone="quiet">{templates.length}</Chip>
+              </h2>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
                 {templates.length > 0 && (
                   <Button
                     size="sm"
                     variant={picked ? "primary" : "secondary"}
-                    className="ml-auto"
                     onClick={() => setPicked(picked ? null : new Set())}
                     aria-pressed={!!picked}
                   >
@@ -203,52 +184,66 @@ export default function TeacherNotebooks() {
                     {picked ? "Done selecting" : "Select"}
                   </Button>
                 )}
-              </h2>
-              {templates.length === 0 ? (
-                <EmptyState
-                  title="No templates yet"
-                  body="Build a notebook once, then push it into every class that uses it. When you add pages to the template later, send just the new ones to all of them at once."
+                <Menu
+                  label="New template"
+                  triggerClassName={buttonClass("primary", "sm")}
+                  trigger={<><Plus className="h-5 w-5" strokeWidth={2.5} /> New template <ChevronDown className="h-4 w-4" strokeWidth={2.5} /></>}
+                  items={[
+                    { label: "Blank pages", icon: <Rows3 className="h-5 w-5" strokeWidth={2.5} />, hint: "Lined, graph, dot grid, staves…", onClick: () => setBlankOpen(true) },
+                    { label: "Upload a file", icon: <Upload className="h-5 w-5" strokeWidth={2.5} />, hint: "PDF, Word or PowerPoint", onClick: () => fileRef.current?.click() },
+                    ...(hasDrivePicker ? [{ label: "From Google Drive", icon: <GoogleIcon product="drive" />, hint: "Pick a file without downloading it", onClick: () => void importFromDrive() }] : []),
+                  ]}
                 />
-              ) : (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {templates.map((t) => (
-                    <NotebookCard
-                      key={t.id}
-                      nb={t}
-                      to={`/notebooks/${t.id}/edit`}
-                      byline={byline(t)}
-                      menu={templateMenu(t)}
-                      selected={picked?.has(t.id)}
-                      onSelect={picked ? () => togglePicked(t.id) : undefined}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
+              </div>
+            </div>
+            {templates.length === 0 ? (
+              <EmptyState
+                title="No templates yet"
+                body="Build a notebook once, then push it into every class that uses it. When you add pages to the template later, send just the new ones to all of them at once."
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {templates.map((t) => (
+                  <NotebookCard
+                    key={t.id}
+                    nb={t}
+                    to={`/notebooks/${t.id}/edit`}
+                    byline={byline(t)}
+                    menu={templateMenu(t)}
+                    selected={picked?.has(t.id)}
+                    onSelect={picked ? () => togglePicked(t.id) : undefined}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 
-          {filter !== "templates" && (
-            <section>
-              <h2 className="mb-3 font-display text-[20px] text-pine">
-                {filter === "all" ? "In your classes" : (classes.data?.classes.find((c) => c.id === filter)?.name ?? "This class")}
-                <Chip tone="quiet" className="ml-2">{inClasses.length}</Chip>
+          <section>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h2 className="flex items-center gap-2 font-display text-[20px] text-pine">
+                In your classes
+                <Chip tone="quiet">{inClasses.length}</Chip>
               </h2>
-              {inClasses.length === 0 ? (
-                <EmptyState title="Nothing here yet" body="Notebooks you make inside a class, or push from a template, show up here." />
-              ) : (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {inClasses.map((n) => (
-                    <NotebookCard
-                      key={n.id}
-                      nb={n}
-                      to={`/notebooks/${n.id}/edit`}
-                      byline={`${n.class_emoji ? `${n.class_emoji} ` : ""}${n.class_name ?? ""}${n.template_id ? " · from a template" : ""}`}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
+              <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Show notebooks from" className="ml-auto h-11 w-auto min-w-[12rem]">
+                <option value="all">All classes</option>
+                {(classes.data?.classes ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </div>
+            {inClasses.length === 0 ? (
+              <EmptyState title="Nothing here yet" body="Notebooks you make inside a class, or push from a template, show up here." />
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {inClasses.map((n) => (
+                  <NotebookCard
+                    key={n.id}
+                    nb={n}
+                    to={`/notebooks/${n.id}/edit`}
+                    byline={`${n.class_emoji ? `${n.class_emoji} ` : ""}${n.class_name ?? ""}${n.template_id ? " · from a template" : ""}`}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         </>
       )}
 
