@@ -423,9 +423,16 @@ app.get("/api/assignments/:id", handler(async (c) => {
       .prepare(`SELECT * FROM submissions WHERE assignment_id = ? AND student_id = ?`)
       .bind(a.id, user.id)
       .first<any>();
+    // Posted to Classroom from here: the student's browser turns it in there
+    // too, with their own Google permission, when they hand it in here.
+    const course = a.google_coursework_id
+      ? await db.prepare(`SELECT google_course_id FROM classes WHERE id = ?`).bind(a.class_id).first<{ google_course_id: string | null }>()
+      : null;
     return c.json({
       assignment: base,
       isTeacher: false,
+      studentId: user.id,
+      classroom: course?.google_course_id ? { courseId: course.google_course_id, courseworkId: a.google_coursework_id as string } : null,
       submission: {
         status: sub?.status ?? "not_started",
         submittedAt: sub?.submitted_at ?? null,

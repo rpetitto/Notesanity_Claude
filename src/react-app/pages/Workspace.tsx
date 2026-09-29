@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { emptyLayer, parseLayer, TEACHER_COLORS } from "../lib/ink";
-import { hasGoogleClientId } from "../lib/google";
+import { STUDENT_COURSEWORK_SCOPE, getToken, hasGoogleClientId, preloadGoogle, reclaimOnClassroom, turnInOnClassroom } from "../lib/google";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
 import NotebookSurface, { type LayerMap, type ZoomMode } from "../components/NotebookSurface";
@@ -679,21 +679,78 @@ export default function Workspace() {
     if (!visiblePage && pages[0]) setVisiblePage(pages[0].id);
   }, [pages, visiblePage]);
 
+  /**
+   * An assignment posted to Google Classroom is turned in there too — with a
+   * link to this work attached, so the teacher has something to open from
+   * Classroom — and taken back there when it's unsubmitted here. Google's
+   * permission is asked for first, while the click still counts as the
+   * student's (a popup opened later is blocked). Here always wins: if Google
+   * says no, the work is still handed in, and the student is told.
+   */
+  const classroom = (assignmentQuery.data as any)?.classroom as { courseId: string; courseworkId: string } | null | undefined;
+  useEffect(() => { if (classroom) preloadGoogle(); }, [classroom]);
+  const classroomToken = () =>
+    classroom && hasGoogleClientId ? getToken(STUDENT_COURSEWORK_SCOPE, { quiet: true }).catch((e: Error) => e) : null;
+
+  const [classroomSynced, setClassroomSynced] = useState(false);
   const submit = useMutation({
     mutationFn: async () => {
+      const tokenP = classroomToken();
       await work.flush();
-      return api.post(`/api/assignments/${assignmentId}/submit`);
+      await api.post(`/api/assignments/${assignmentId}/submit`);
+      if (!tokenP || !classroom) return { classroom: null as string | null };
+      const token = await tokenP;
+      if (token instanceof Error) return { classroom: "skipped" };
+      try {
+        const link = `${window.location.origin}/assignments/${assignmentId}?student=${(assignmentQuery.data as any)?.studentId ?? ""}`;
+        return { classroom: await turnInOnClassroom(token, classroom.courseId, classroom.courseworkId, link) };
+      } catch {
+        return { classroom: "failed" };
+      }
     },
-    onSuccess: () => {
-      toast.success("Turned in — these pages are now locked.");
+    onSuccess: (res) => {
+      if (res.classroom === "turned_in" || res.classroom === "already") setClassroomSynced(true);
+      if (res.classroom === "turned_in" || res.classroom === "already") toast.success("Turned in here and on Google Classroom — these pages are now locked.");
+      else toast.success("Turned in — these pages are now locked.");
+      if (res.classroom === "skipped") toast.message("Not turned in on Google Classroom", { description: "Google's permission wasn't given, so only Notesanity has it. Your teacher can still see it here." });
+      if (res.classroom === "failed" || res.classroom === "not_in_course") toast.message("Not turned in on Google Classroom", { description: res.classroom === "not_in_course" ? "This Google account isn't in the Classroom course. Your teacher can still see your work here." : "Google Classroom didn't accept it. Your teacher can still see your work here." });
       qc.invalidateQueries({ queryKey: ["assignment", assignmentId] });
       qc.invalidateQueries({ queryKey: ["my-assignments"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /**
+   * Work handed in here before this existed — or when Google's permission was
+   * declined at the time — can still be turned in on Classroom afterwards.
+   * Harmless to press twice: Classroom already having it is just said so.
+   */
+  const syncClassroom = useMutation({
+    mutationFn: async () => {
+      const tokenP = classroomToken();
+      if (!tokenP || !classroom) throw new Error("This assignment isn't in Google Classroom.");
+      const token = await tokenP;
+      if (token instanceof Error) throw new Error("Google's permission wasn't given, so Classroom wasn't changed.");
+      const link = `${window.location.origin}/assignments/${assignmentId}?student=${(assignmentQuery.data as any)?.studentId ?? ""}`;
+      return turnInOnClassroom(token, classroom.courseId, classroom.courseworkId, link);
+    },
+    onSuccess: (r) => {
+      setClassroomSynced(true);
+      if (r === "not_in_course") toast.message("This Google account isn't in the Classroom course", { description: "Your teacher can still see your work here." });
+      else toast.success(r === "already" ? "Already turned in on Google Classroom" : "Turned in on Google Classroom, with a link to this work");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const unsubmit = useMutation({
-    mutationFn: () => api.post(`/api/assignments/${assignmentId}/unsubmit`),
+    mutationFn: async () => {
+      const tokenP = classroomToken();
+      await api.post(`/api/assignments/${assignmentId}/unsubmit`);
+      if (!tokenP || !classroom) return;
+      const token = await tokenP;
+      if (token instanceof Error) return;
+      await reclaimOnClassroom(token, classroom.courseId, classroom.courseworkId).catch(() => false);
+    },
     onSuccess: () => {
       toast.success("Unsubmitted — you can keep working.");
       qc.invalidateQueries({ queryKey: ["assignment", assignmentId] });
@@ -942,6 +999,11 @@ export default function Workspace() {
           {assignment && locked && !marked && (
             <>
               <Chip tone="mint" icon={<Check className="h-4 w-4" strokeWidth={2.5} />}>Handed in</Chip>
+              {classroom && hasGoogleClientId && !classroomSynced && (
+                <Button variant="secondary" onClick={() => syncClassroom.mutate()} disabled={syncClassroom.isPending} title="Turn this in on Google Classroom too, with a link to your work here">
+                  <GoogleIcon product="classroom" /> {syncClassroom.isPending ? "Turning in…" : "Turn in on Classroom"}
+                </Button>
+              )}
               {canUnsubmit && (
                 <Button variant="secondary" onClick={() => unsubmit.mutate()} disabled={unsubmit.isPending}>
                   <Undo2 className="h-4 w-4" strokeWidth={2.5} /> Take it back

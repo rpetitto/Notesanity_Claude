@@ -31,6 +31,13 @@ export const COURSEWORK_SCOPES = [
   "https://www.googleapis.com/auth/classroom.coursework.students",
 ].join(" ");
 
+/**
+ * A student's own side of a Classroom assignment: turning it in, and taking it
+ * back. `coursework.me` reaches only the student's own submissions, and only
+ * on coursework this app posted — Google's rule, not ours.
+ */
+export const STUDENT_COURSEWORK_SCOPE = "https://www.googleapis.com/auth/classroom.coursework.me";
+
 // drive.file is enough: we only touch files this app itself creates.
 export const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file";
 
@@ -67,8 +74,17 @@ function loadGis(): Promise<void> {
 
 const tokens = new Map<string, { token: string; expiresAt: number }>();
 
-/** Request (or reuse) an access token for a scope set. Prompts only when needed. */
-export async function getToken(scope: string): Promise<string> {
+/** Load Google's script ahead of a click that will need it, so the permission popup opens straight from the click. */
+export function preloadGoogle() {
+  if (CLIENT_ID) loadGis().catch(() => {});
+}
+
+/**
+ * Request (or reuse) an access token for a scope set. Prompts only when needed.
+ * `quiet` lets Google skip the consent screen for a permission already granted
+ * — for a student turning work in, who would otherwise see it every visit.
+ */
+export async function getToken(scope: string, opts: { quiet?: boolean } = {}): Promise<string> {
   if (!CLIENT_ID) {
     throw new Error("Google integration isn't configured — set VITE_GOOGLE_CLIENT_ID and redeploy.");
   }
@@ -87,7 +103,7 @@ export async function getToken(scope: string): Promise<string> {
       },
       error_callback: (err: any) => reject(new Error(err?.message ?? "Google authorization was canceled")),
     });
-    client.requestAccessToken({ prompt: cached ? "" : "consent" });
+    client.requestAccessToken({ prompt: cached || opts.quiet ? "" : "consent" });
   });
 }
 
@@ -336,6 +352,51 @@ export async function pushGrades(
   });
 
   return result;
+}
+
+/* ---------- a student turning work in on Classroom ---------- */
+
+async function mySubmission(token: string, courseId: string, courseWorkId: string) {
+  const data = await gapi<{ studentSubmissions?: any[] }>(
+    `${CLASSROOM}/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions?userId=me`,
+    token,
+  );
+  return data.studentSubmissions?.[0] ?? null;
+}
+
+export type TurnInResult = "turned_in" | "already" | "not_in_course";
+
+/**
+ * Turn the student's Classroom submission in, with a link to their work here
+ * attached — so the teacher's "Student work" view in Classroom shows something
+ * to open, rather than an empty submission. The link goes to this student's
+ * work on the Notesanity grading screen; for the student it opens their own.
+ */
+export async function turnInOnClassroom(token: string, courseId: string, courseWorkId: string, link: string): Promise<TurnInResult> {
+  const sub = await mySubmission(token, courseId, courseWorkId);
+  if (!sub?.id) return "not_in_course";
+  if (sub.state === "TURNED_IN") return "already";
+  const base = `${CLASSROOM}/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions/${sub.id}`;
+  const attached = (sub.assignmentSubmission?.attachments ?? []).some((a: any) => a.link?.url === link);
+  if (!attached) {
+    await gapi(`${base}:modifyAttachments`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ addAttachments: [{ link: { url: link } }] }),
+    });
+  }
+  await gapi(`${base}:turnIn`, token, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  return "turned_in";
+}
+
+/** Take a turned-in Classroom submission back, as unsubmitting here does. */
+export async function reclaimOnClassroom(token: string, courseId: string, courseWorkId: string): Promise<boolean> {
+  const sub = await mySubmission(token, courseId, courseWorkId);
+  if (!sub?.id || sub.state !== "TURNED_IN") return false;
+  await gapi(`${CLASSROOM}/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions/${sub.id}:reclaim`, token, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+  });
+  return true;
 }
 
 const CONVERTIBLE: Record<string, string> = {

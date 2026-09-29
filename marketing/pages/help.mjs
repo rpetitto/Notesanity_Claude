@@ -282,8 +282,16 @@ const BODY = () => `
          Classroom gradebook. Only an assignment Notesanity posted can take a grade \u2014 Google
          doesn't let one app change another's \u2014 so one you made in Classroom by hand can't.
          Points and complete/incomplete go across as numbers; a letter grade stays here, because
-         Classroom only accepts numbers. If a student never pressed <b>Turn in</b> in Classroom,
-         the grade waits in your Classroom gradebook until you return it there.`,
+         Classroom only accepts numbers. If the work was never turned in on Classroom, the grade
+         waits in your Classroom gradebook until you return it there.`,
+      ],
+      [
+        "When a student hands in, is it turned in on Google Classroom too?",
+        `Yes, for an assignment you posted from here. Handing in turns it in on Classroom as well,
+         with a link to the student's work in Notesanity attached, so <b>Student work</b> in Classroom
+         has something to open. Taking it back reclaims it there. The first time, Google asks the
+         student's permission; if they decline, or the school's Google admin blocks it, it's handed in
+         here only, and a <b>Turn in on Classroom</b> button stays on the assignment to try again.`,
       ],
       [
         "How do I grade?",
