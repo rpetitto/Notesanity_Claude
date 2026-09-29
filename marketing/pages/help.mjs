@@ -89,9 +89,48 @@ const BODY = () => `
       ],
       [
         "Who can create an account?",
-        `Only addresses on a domain your school has approved. The first person to sign in sets
-         the school up; after that an admin decides which domains count as staff and which as
-         students, from the <b>Admin</b> page.`,
+        `Teachers and students sign in with an address on a domain your school has approved; an
+         admin decides which domains count as staff and which as students, from the <b>Admin</b>
+         page. Sign-in asks who you are first — teacher, student, or parent or guardian — and makes
+         an account only when your address backs that up. Personal addresses like Gmail never count
+         as a school's. Where staff and students share a domain, a new teacher waits for an admin
+         to confirm them. Parents and guardians can use any address, with a family code.`,
+      ],
+    ])}
+
+    ${group("Families", [
+      [
+        "Can parents see their child's work?",
+        `Yes, when your school has family access on and a teacher or admin has given them their
+         child's family code. They see that child's assignments — what's due, what's started,
+         what's handed in — the grades and feedback once you return them, and the child's notebooks
+         with their writing and your marks. They can look but not change anything, and they never
+         see other students.`,
+      ],
+      [
+        "How do I give a family access?",
+        `Open the class, choose <b>Roster</b>, then <b>Families</b>. Every student has a code: email
+         it to a family, copy their link, or <b>Print codes to send home</b> for a slip per student.
+         One code works for every parent or guardian in a family. The same list shows who is linked,
+         and removes anyone who shouldn't be.`,
+      ],
+      [
+        "I'm a parent. How do I sign in?",
+        `Go to the sign-in page, choose <b>Parent or guardian</b>, and enter the family code from your
+         child's teacher, then sign in with Google or any email address. Next time you won't need the
+         code. Another child at the school has their own code: add it from <b>My children</b>.`,
+      ],
+      [
+        "A code has been shared too widely. What do I do?",
+        `Make a new one: in <b>Families</b>, the refresh button beside the student retires the old code
+         straight away. Families already linked stay linked; remove any who shouldn't be from the
+         same list. An admin can switch family access off for the whole school from the <b>Admin</b>
+         page, which closes every family view until it's turned back on.`,
+      ],
+      [
+        "Can a student use a family code?",
+        `No. Codes go home on paper, so a student account can't use one — otherwise a classmate who
+         picked one up could read another child's work.`,
       ],
     ])}
 
@@ -361,8 +400,10 @@ const BODY = () => `
       ],
       [
         "Who can see a student's work?",
-        `The student, and the teachers of the class it belongs to. Not other students. Personal
-         notebooks are visible only to the student who made them.`,
+        `The student, the teachers of the class it belongs to, and any parent or guardian the school
+         has linked to that student with a family code — who can look but not change anything. Not
+         other students. Personal notebooks are visible only to the student who made them, and aren't
+         shown to families.`,
       ],
       [
         "Can we export our work?",

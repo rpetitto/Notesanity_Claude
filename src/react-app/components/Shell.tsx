@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, BookText, ClipboardList, Eye, LayoutGrid, LibraryBig, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { BookOpen, BookText, ClipboardList, Eye, LayoutGrid, LibraryBig, LogOut, Settings, ShieldCheck, Users } from "lucide-react";
 import { signOutHref, useSession } from "../lib/session";
 import { api } from "../lib/api";
 import { cn, initials } from "../lib/utils";
@@ -79,7 +79,12 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
   const { user, impersonating } = useSession();
   const { pathname } = useLocation();
 
-  const nav = user?.role === "teacher"
+  const nav = user?.role === "guardian"
+    ? [
+        { to: "/family", label: "My children", icon: Users },
+        { to: "/settings", label: "Settings", icon: Settings },
+      ]
+    : user?.role === "teacher"
     ? [
         { to: "/classes", label: "Classes", icon: LayoutGrid },
         { to: "/notebooks", label: "Notebooks", icon: BookText },
@@ -101,7 +106,7 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
         {impersonating && user && <ImpersonationBanner viewingAsEmail={user.email} reason={impersonating.reason} />}
         <header className="border-b-2 border-pine/12 bg-oat/95 backdrop-blur">
         <div className={cn("mx-auto flex h-14 items-center gap-4 px-4", wide ? "max-w-none" : "max-w-6xl")}>
-          <Link to={user?.role === "teacher" ? "/classes" : "/work"} className="flex shrink-0 items-center gap-2">
+          <Link to={user?.role === "teacher" ? "/classes" : user?.role === "guardian" ? "/family" : "/work"} className="flex shrink-0 items-center gap-2">
             <Logo size={26} />
             {/* The mark alone carries the brand once space is tight. */}
             <span className="wordmark hidden text-[22px] md:inline">Notesanity</span>

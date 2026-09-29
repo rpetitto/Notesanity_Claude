@@ -1060,3 +1060,60 @@ migrate("032_scale_indexes", async () => {
     }
   }
 });
+
+/**
+ * Families, and signing in through a door.
+ *
+ * A parent or guardian is linked to a particular child by something the school
+ * issued — a family code, printed or sent by a teacher or admin — never by
+ * saying so. `guardian_links` is that link, apart from the account's role, so a
+ * teacher who is also a parent at the school keeps their teacher account and
+ * gains a child. `family_codes` holds one current code per student; making a
+ * new one retires the old, and links already made stay.
+ *
+ * `requested_role` records that someone came in through the Teacher door on an
+ * address that can't settle it by itself (a domain the school uses for staff
+ * and students alike): they wait as 'pending' until an admin confirms.
+ * `auth_tokens.intent` carries the door and any family code through an emailed
+ * sign-in link, which is the one route where the choice and the account are
+ * made in different requests. `orgs.family_access` is the school's switch.
+ *
+ * Schema only: nothing here rewrites an existing row.
+ */
+migrate("033_families", async () => {
+  const has = async (table: string, name: string) => {
+    const cols = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    return (cols.results ?? []).some((c) => c.name === name);
+  };
+  if (!(await has("users", "requested_role"))) {
+    await db.prepare(`ALTER TABLE users ADD COLUMN requested_role TEXT NOT NULL DEFAULT ''`).run();
+  }
+  if (!(await has("orgs", "family_access"))) {
+    await db.prepare(`ALTER TABLE orgs ADD COLUMN family_access INTEGER NOT NULL DEFAULT 1`).run();
+  }
+  if (!(await has("auth_tokens", "intent"))) {
+    await db.prepare(`ALTER TABLE auth_tokens ADD COLUMN intent TEXT NOT NULL DEFAULT ''`).run();
+  }
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS family_codes (
+        student_id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        code TEXT NOT NULL UNIQUE,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS guardian_links (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        guardian_id TEXT NOT NULL,
+        student_id TEXT NOT NULL,
+        via TEXT NOT NULL DEFAULT 'code',
+        created_at TEXT NOT NULL,
+        UNIQUE (guardian_id, student_id)
+      )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_guardian_links_student ON guardian_links(student_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_guardian_links_org ON guardian_links(org_id)`),
+  ]);
+});

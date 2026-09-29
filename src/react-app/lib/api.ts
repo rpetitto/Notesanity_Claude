@@ -55,7 +55,11 @@ export interface Me {
   email: string;
   name: string;
   picture?: string | null;
-  role: "teacher" | "student" | "pending";
+  role: "teacher" | "student" | "pending" | "guardian";
+  /** "teacher" while an admin is yet to confirm someone who asked to be one. */
+  requestedRole?: string;
+  /** Children linked to this account — a parent's, or a teacher who is also a parent. */
+  childCount?: number;
   isAdmin: boolean;
   /** Platform owner: sees and edits across every school. */
   isSuperadmin?: boolean;

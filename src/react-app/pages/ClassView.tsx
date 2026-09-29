@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  Archive, BookOpen, Check, ChevronDown, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus,
+  Archive, BookOpen, Check, HeartHandshake, ChevronDown, ClipboardList, Copy, Eye, GraduationCap, Palette, Plus,
   RefreshCw, RotateCcw, Settings2, Trash2, Upload, UserPlus, UserX, Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import { useSession } from "../lib/session";
 import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 import GoogleIcon from "../components/GoogleIcon";
+import FamilyAccessModal from "../components/FamilyAccessModal";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
 const SWATCHES = [
@@ -961,6 +962,7 @@ export default function ClassView() {
   };
   const [inviteOpen, setInviteOpen] = useState(false);
   const [coTeacherOpen, setCoTeacherOpen] = useState(false);
+  const [familiesOpen, setFamiliesOpen] = useState(false);
   const [workTab, setWorkTab] = useState<WorkTab>("todo");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [newNotebookOpen, setNewNotebookOpen] = useState(false);
@@ -1582,6 +1584,10 @@ export default function ClassView() {
       {tab === "roster" && isTeacher && (
         <div>
           <div className="mb-4 flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setFamiliesOpen(true)}>
+              <HeartHandshake className="h-4 w-4" strokeWidth={2.5} />
+              Families
+            </Button>
             <Button type="button" variant="secondary" onClick={() => setCoTeacherOpen(true)}>
               <UserPlus className="h-4 w-4" strokeWidth={2.5} />
               Add co-teacher
@@ -1670,6 +1676,7 @@ export default function ClassView() {
 
       {inviteOpen && <InviteModal classId={id} onClose={() => setInviteOpen(false)} />}
       {coTeacherOpen && <CoTeacherModal classId={id} onClose={() => setCoTeacherOpen(false)} />}
+      {familiesOpen && <FamilyAccessModal classId={id!} className={cls.name} onClose={() => setFamiliesOpen(false)} />}
       {newNotebookOpen && (
         <NewNotebookModal
           destination={{ kind: "class", classId: id! }}

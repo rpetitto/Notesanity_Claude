@@ -208,7 +208,8 @@ ${HERO_CSS}
         onto a page. A student can answer a question by talking to it.`)}
       ${feature("Grade where the work is", `
         Annotate a student's page in your own color, leave a comment, and return it with a
-        grade. Hover any mark to see when it was made.`)}
+        grade. Hover any mark to see when it was made. Families can follow along with a code you
+        send home — to look, never to change.`)}
       ${feature("Nothing gets lost", `
         Work is saved as it's written and mirrored locally first, so a dropped Wi-Fi
         connection doesn't cost a lesson. Every stroke, typed note and comment carries the

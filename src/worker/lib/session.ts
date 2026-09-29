@@ -30,7 +30,9 @@ export interface AppUser {
   email: string;
   name: string;
   picture: string | null;
-  role: "teacher" | "student" | "pending";
+  role: "teacher" | "student" | "pending" | "guardian";
+  /** "teacher" while someone who came in through the Teacher door waits for an admin to confirm. */
+  requested_role?: string;
   is_admin: number;
   last_seen_at?: string | null;
   /** Platform owner — sees and edits across every school. */
@@ -65,6 +67,20 @@ export function param(c: Context, name: string): string {
 }
 
 const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";
+
+/**
+ * Addresses anyone in the world can have. They never make someone part of a
+ * school: a school can't approve "gmail.com", because that would approve
+ * everyone. People on these addresses get in by a family code, or by a teacher
+ * adding them to a roster, which creates the account ahead of them.
+ */
+export const PUBLIC_MAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
+  "yahoo.com", "ymail.com", "icloud.com", "me.com", "mac.com", "aol.com",
+  "proton.me", "protonmail.com", "gmx.com", "gmx.net", "mail.com", "zoho.com",
+  "fastmail.com", "hey.com", "comcast.net", "att.net", "verizon.net", "sbcglobal.net",
+]);
+
 const csv = (s: string) =>
   s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
 
@@ -82,7 +98,7 @@ const csv = (s: string) =>
  * reached when the primary lookup misses.
  */
 export async function orgForDomain(domain: string): Promise<Org | null> {
-  if (!domain) return null;
+  if (!domain || PUBLIC_MAIL_DOMAINS.has(domain)) return null;
   const primary = await db
     .prepare(`SELECT * FROM orgs WHERE lower(primary_domain) = ?`)
     .bind(domain)
@@ -117,10 +133,19 @@ export async function findUserInOrg(email: string, orgId: string): Promise<AppUs
   return db.prepare(`SELECT * FROM users WHERE email = ? AND org_id = ?`).bind(email, orgId).first<AppUser>();
 }
 
-/** Which role a domain implies within its school; "pending" when it says nothing. */
+/**
+ * Which role a domain implies within its school; "pending" when it can't say.
+ *
+ * A domain on both lists can't say either: plenty of schools give staff and
+ * students the same one. Treating that as "teacher" (as this once did, by
+ * checking the staff list first) made every student who signed in before a
+ * roster import created their account a teacher.
+ */
 export function roleForDomain(org: Org, domain: string): AppUser["role"] {
-  if (csv(org.teacher_domains ?? "").includes(domain)) return "teacher";
-  if (csv(org.student_domains ?? "").includes(domain)) return "student";
+  const staff = csv(org.teacher_domains ?? "").includes(domain);
+  const students = csv(org.student_domains ?? "").includes(domain);
+  if (staff && !students) return "teacher";
+  if (students && !staff) return "student";
   return "pending";
 }
 
@@ -311,9 +336,23 @@ async function resolveUser(c: Context): Promise<AppUser | null> {
   };
 }
 
+/**
+ * What a family account may change: its own links and sign-in, nothing else.
+ * Every other write is refused here, once, rather than trusted to each route —
+ * a family account reaches notebooks through read-only routes, and a route
+ * that forgot to check would otherwise be a way to write in a child's work.
+ */
+const GUARDIAN_WRITE_PREFIXES = ["/api/family/", "/api/auth/", "/api/me/"];
+
 export async function requireUser(c: Context): Promise<AppUser> {
   const user = await currentUser(c);
   if (!user) throw new HttpError(401, "Not signed in");
+  if (user.role === "guardian" && !["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {
+    const path = new URL(c.req.url).pathname;
+    if (!GUARDIAN_WRITE_PREFIXES.some((p) => path.startsWith(p))) {
+      throw new HttpError(403, "Family accounts can look but not change anything.");
+    }
+  }
   return user;
 }
 

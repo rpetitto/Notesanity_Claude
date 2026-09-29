@@ -5,6 +5,7 @@ import { fieldContent, importedLinks, linkLabel } from "../lib/links";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import type { LibraryField } from "../lib/page-library";
 import { requireNotebookRoom, requirePlan } from "../lib/plans";
+import { childrenInClass } from "../lib/family";
 import { MAX_TEMPLATE_PAGES, TEMPLATES, templateFor } from "../lib/templates";
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -34,11 +35,29 @@ const NOT_THIS_CLASS =
   "Rights come from how you're enrolled, not from your account role.";
 const OTHERS_NOTEBOOK =
   "This is the student's own notebook — you can read it, not write in it.";
+const FAMILY_READS = "Families can look at a child's work, not change it.";
 
 /** Teacher-or-enrolled-student access to a notebook, resolved via its class. */
 async function notebookAccess(c: any, notebookId: string) {
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
   if (!nb) throw new HttpError(404, "Notebook not found");
+
+  // A family reading along: only reads, only a class one of their children is
+  // in, and only what that child could open themselves — so the page images
+  // and pictures behind the family view load, and nothing else opens up.
+  if (c.req.method === "GET" && nb.class_id && (nb.kind === "class" || nb.kind === "student")) {
+    const user = await requireUser(c);
+    const kids = await childrenInClass(user.id, nb.class_id);
+    const mine = await db.prepare(`SELECT 1 AS yes FROM enrollments WHERE class_id = ? AND user_id = ? AND status = 'active'`)
+      .bind(nb.class_id, user.id).first();
+    if (kids.length && !mine && !(await db.prepare(`SELECT 1 AS yes FROM classes WHERE id = ? AND owner_id = ?`).bind(nb.class_id, user.id).first())) {
+      const visible = nb.kind === "class"
+        ? nb.status === "published" && !nb.archived
+        : kids.includes(nb.owner_id) && !nb.archived;
+      if (!visible) throw new HttpError(404, "Notebook not found");
+      return { nb, user, isTeacher: false, denied: FAMILY_READS };
+    }
+  }
 
   // A personal notebook has no class to be a member of. Only its owner may
   // touch it, and they hold the editing rights a teacher holds over a class

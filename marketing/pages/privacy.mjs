@@ -15,7 +15,7 @@ import { layout } from "../layout.mjs";
  * processing agreement is offered as standard.
  */
 
-const UPDATED = "September 8, 2026";
+const UPDATED = "September 29, 2026";
 
 export default () =>
   layout({
@@ -81,6 +81,7 @@ export default () =>
         <tr><td>Name</td><td>So teachers and classmates see a person, not an address</td></tr>
         <tr><td>Profile picture</td><td>Only if you sign in with Google, which supplies it</td></tr>
         <tr><td>Role and school</td><td>Decides what you can see — a teacher's view differs from a student's</td></tr>
+        <tr><td>Family links</td><td>Which parent or guardian accounts a school has linked to which student, and each student's current family code, so a family sees only its own child's work</td></tr>
         <tr><td>Last sign-in time</td><td>So a school admin can see which accounts are actually in use</td></tr>
       </table>
 
@@ -91,7 +92,7 @@ export default () =>
         <tr><td>Typed answers, checkboxes, dropdowns</td><td>The work itself</td></tr>
         <tr><td>Images and audio a student uploads</td><td>Answers given as a photo or a recording</td></tr>
         <tr><td>Documents a teacher uploads</td><td>The notebooks they build lessons from</td></tr>
-        <tr><td>Grades, feedback and grading</td><td>Assessment, visible to the student and their teachers</td></tr>
+        <tr><td>Grades, feedback and grading</td><td>Assessment, visible to the student, their teachers, and any family the school has linked to them once returned</td></tr>
         <tr><td>Edit history</td><td>Who changed what and when, so a teacher can see how work progressed</td></tr>
       </table>
 
@@ -137,6 +138,14 @@ export default () =>
         Parents' rights to inspect, review and request correction of their child's records are
         exercised through the school, which can reach every record we hold for that child. We help
         schools answer those requests.
+      </p>
+      <p>
+        A school can also give parents and guardians direct, read-only access. A teacher or admin
+        issues a family code for a student; a parent who signs in with it sees that child's notebooks,
+        assignments and returned grades, and nothing about any other student. Family accounts can't
+        change anything. A school admin can see and remove every link, and can switch family access
+        off for the whole school. Personal notebooks a student keeps outside any class are never shown
+        to families.
       </p>
 
       <h2 id="coppa">5. COPPA and children under 13</h2>

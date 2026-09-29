@@ -19,6 +19,7 @@ import { logMail } from "../lib/maillog";
 import { SUPERADMIN_EMAILS } from "../schema";
 import type { Context } from "hono";
 import { HttpError, handler, noOrgsYet, now, orgForDomain, roleForDomain, setLocalSessionResolver, uid } from "../lib/session";
+import { NO_CODE_MESSAGE, linkGuardian, lookupCode, requireCode } from "../lib/family";
 
 const SESSION_COOKIE = "notesanity_session";
 const SESSION_DAYS = 30;
@@ -188,7 +189,48 @@ async function resolveOrgFor(email: string): Promise<{ orgId: string; role: stri
   return { orgId: org.id, role: roleForDomain(org, domain), isAdmin: 0 };
 }
 
-async function findOrCreateUser(email: string, name?: string) {
+/**
+ * The door someone came in by — chosen on the sign-in page before any account
+ * exists, so a person who wanders off halfway leaves nothing behind.
+ *
+ * It only ever decides between things the school already allows: a domain that
+ * says "teacher" or "student" is obeyed whichever door was used, and the
+ * Teacher door on an address that can't say (a domain shared by staff and
+ * students) asks an admin rather than granting it. The Family door needs a
+ * family code, and is the only way an address the school doesn't own gets in.
+ */
+export type Door = "teacher" | "student" | "family";
+export interface Intent { door?: Door; familyCode?: string }
+
+export function readIntent(body: any): Intent {
+  const door = ["teacher", "student", "family"].includes(body?.door) ? body.door as Door : undefined;
+  const familyCode = typeof body?.familyCode === "string" && body.familyCode.trim() ? body.familyCode : undefined;
+  return { door, familyCode };
+}
+
+const SCHOOL_ADDRESS_MESSAGE =
+  "Sign in with your school email address. If you're a parent or guardian, choose Family and use the code from your child's teacher.";
+
+/** Would this address get an account through this door? No side effects beyond `resolveOrgFor`'s bootstrap. */
+async function canCreate(email: string, intent: Intent): Promise<boolean> {
+  if (intent.door === "family" || (!intent.door && intent.familyCode)) {
+    const holder = await lookupCode(intent.familyCode);
+    return !!holder?.familyAccess;
+  }
+  return !!(await resolveOrgFor(email).catch(() => null));
+}
+
+/** After sign-in: a family code that came along links the account to that child. */
+async function claimCode(user: { id: string; role: string }, intent: Intent) {
+  if (!intent.familyCode) return;
+  // A code goes home on paper; a classmate who picks one up mustn't be able to
+  // read that child's work with it.
+  if (user.role === "student") throw new HttpError(403, "Family codes are for parents and guardians, not student accounts.");
+  const holder = await requireCode(intent.familyCode);
+  await linkGuardian(user.id, holder);
+}
+
+async function findOrCreateUser(email: string, name?: string, intent: Intent = {}) {
   const existing = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first<any>();
   if (existing) {
     // Re-applied rather than set once: the seed list is the source of truth, so
@@ -200,23 +242,50 @@ async function findOrCreateUser(email: string, name?: string) {
     return existing;
   }
 
+  // The Family door: any address, but only with a code — and the account
+  // belongs to the child's school, because that's whose work it reads.
+  if (intent.door === "family" || (!intent.door && intent.familyCode && !SUPERADMIN_EMAILS.includes(email))) {
+    if (!intent.familyCode) throw new HttpError(403, NO_CODE_MESSAGE);
+    const holder = await requireCode(intent.familyCode);
+    const id = uid();
+    await db
+      .prepare(
+        `INSERT INTO users (id, org_id, email, name, role, is_admin, is_superadmin, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, 'guardian', 0, 0, ?, ?)`,
+      )
+      .bind(id, holder.orgId, email, name?.trim() || email, now(), now())
+      .run();
+    return await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first<any>();
+  }
+
   const resolved = await resolveOrgFor(email);
   if (!resolved) {
     // No school is named: with several tenants, that would tell a stranger who
     // the customers are.
     throw new HttpError(
       403,
-      "That email isn't on a domain any school here has approved. Ask your Notesanity admin to add it.",
+      intent.door
+        ? SCHOOL_ADDRESS_MESSAGE
+        : "That email isn't on a domain any school here has approved. Ask your Notesanity admin to add it.",
     );
   }
+
+  // A domain that can't say which (shared by staff and students, or on
+  // neither list) takes the door's word for "student" — the lesser role — and
+  // turns "teacher" into a request an admin confirms.
+  let role = resolved.role;
+  let requested = "";
+  if (role === "pending" && intent.door === "student") role = "student";
+  if (role === "pending" && intent.door === "teacher") requested = "teacher";
+
   const id = uid();
   await db
     .prepare(
-      `INSERT INTO users (id, org_id, email, name, role, is_admin, is_superadmin, created_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, org_id, email, name, role, requested_role, is_admin, is_superadmin, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      id, resolved.orgId, email, name?.trim() || email, resolved.role,
+      id, resolved.orgId, email, name?.trim() || email, role, requested,
       resolved.isAdmin, SUPERADMIN_EMAILS.includes(email) ? 1 : 0, now(), now(),
     )
     .run();
@@ -231,14 +300,16 @@ function appOrigin(c: Context): string {
 // ---------------------------------------------------------------- password
 
 app.post("/api/auth/password/register", handler(async (c) => {
-  const { email, password, name } = await c.req.json<{ email: string; password: string; name?: string }>();
+  const body = await c.req.json<{ email: string; password: string; name?: string }>();
+  const { email, password, name } = body;
+  const intent = readIntent(body);
   const address = normalize(email);
   if (!address.includes("@")) throw new HttpError(400, "Enter a valid email address.");
   if (!password || password.length < MIN_PASSWORD) {
     throw new HttpError(400, `Choose a password of at least ${MIN_PASSWORD} characters.`);
   }
 
-  const user = await findOrCreateUser(address, name);
+  const user = await findOrCreateUser(address, name, intent);
   const existing = await db.prepare(`SELECT user_id FROM credentials WHERE user_id = ?`).bind(user.id).first();
   if (existing) {
     throw new HttpError(409, "That account already has a password. Sign in instead, or use a sign-in link.");
@@ -251,12 +322,15 @@ app.post("/api/auth/password/register", handler(async (c) => {
     .bind(user.id, await derive(password, salt, iterations), salt, iterations, now())
     .run();
 
+  await claimCode(user, intent);
   await startSession(c, user.id);
   return c.json({ ok: true });
 }));
 
 app.post("/api/auth/password/login", handler(async (c) => {
-  const { email, password } = await c.req.json<{ email: string; password: string }>();
+  const body = await c.req.json<{ email: string; password: string }>();
+  const { email, password } = body;
+  const intent = readIntent(body);
   const address = normalize(email);
   const user = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(address).first<any>();
   const cred = user
@@ -273,6 +347,7 @@ app.post("/api/auth/password/login", handler(async (c) => {
   }
 
   await db.prepare(`UPDATE users SET last_seen_at = ? WHERE id = ?`).bind(now(), user.id).run();
+  await claimCode(user, intent);
   await startSession(c, user.id);
   return c.json({ ok: true });
 }));
@@ -309,18 +384,19 @@ app.post("/api/auth/password/change", handler(async (c) => {
 
 // ------------------------------------------------------------- magic link
 
-async function issueToken(address: string, purpose: string): Promise<string> {
+async function issueToken(address: string, purpose: string, intent: Intent = {}): Promise<string> {
   const token = randomToken(32);
   await db
     .prepare(
-      `INSERT INTO auth_tokens (id, token_hash, email, purpose, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO auth_tokens (id, token_hash, email, purpose, intent, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uid(),
       await sha256(token),
       address,
       purpose,
+      intent.door || intent.familyCode ? JSON.stringify(intent) : "",
       new Date(Date.now() + TOKEN_MINUTES * 60_000).toISOString(),
       now(),
     )
@@ -329,7 +405,9 @@ async function issueToken(address: string, purpose: string): Promise<string> {
 }
 
 app.post("/api/auth/magic/request", handler(async (c) => {
-  const { email: raw, purpose } = await c.req.json<{ email: string; purpose?: string }>();
+  const body = await c.req.json<{ email: string; purpose?: string }>();
+  const { email: raw, purpose } = body;
+  const intent = readIntent(body);
   const address = normalize(raw);
   const kind = purpose === "reset" ? "reset" : "magic";
   if (!address.includes("@")) throw new HttpError(400, "Enter a valid email address.");
@@ -337,8 +415,8 @@ app.post("/api/auth/magic/request", handler(async (c) => {
   // Only send when the address could actually sign in, but never say which.
   const user = await db.prepare(`SELECT id, org_id FROM users WHERE email = ?`).bind(address).first<{ id: string; org_id: string }>();
   const resolved = user ? null : await resolveOrgFor(address).catch(() => null);
-  const allowed = user ? true : Boolean(resolved);
-  const orgId = user?.org_id ?? resolved?.orgId ?? null;
+  const allowed = user ? true : await canCreate(address, intent);
+  const orgId = user?.org_id ?? resolved?.orgId ?? (await lookupCode(intent.familyCode))?.orgId ?? null;
 
   if (!allowed) {
     // Nothing is sent, and the caller is told the same thing either way — so
@@ -349,7 +427,7 @@ app.post("/api/auth/magic/request", handler(async (c) => {
   }
 
   if (allowed) {
-    const token = await issueToken(address, kind);
+    const token = await issueToken(address, kind, intent);
     const link = `${appOrigin(c)}/api/auth/magic/callback?token=${token}`;
     const reset = kind === "reset";
     const { html, text } = renderEmail({
@@ -412,8 +490,11 @@ app.get("/api/auth/magic/callback", handler(async (c) => {
   await db.prepare(`UPDATE auth_tokens SET used_at = ? WHERE id = ?`).bind(now(), row.id).run();
 
   let user;
+  let intent: Intent = {};
+  try { intent = row.intent ? readIntent(JSON.parse(row.intent)) : {}; } catch { /* an old token: no door */ }
   try {
-    user = await findOrCreateUser(row.email);
+    user = await findOrCreateUser(row.email, undefined, intent);
+    await claimCode(user, intent);
   } catch {
     return c.redirect("/?auth_error=not_allowed", 302);
   }
@@ -541,7 +622,9 @@ app.post("/api/auth/google", handler(async (c) => {
   const clientId = (c.env as Record<string, string | undefined>)?.GOOGLE_CLIENT_ID ?? "";
   if (!clientId) throw new HttpError(503, "Google sign-in isn't configured for this deployment.");
 
-  const { credential } = await c.req.json<{ credential?: string }>();
+  const body = await c.req.json<{ credential?: string }>();
+  const { credential } = body;
+  const intent = readIntent(body);
   if (!credential) throw new HttpError(400, "No Google credential was sent.");
 
   const claims = await verifyGoogleIdToken(credential, clientId);
@@ -549,7 +632,7 @@ app.post("/api/auth/google", handler(async (c) => {
 
   // Throws 403 with the domain message when the address belongs to no school,
   // which is the same answer the other sign-in routes give.
-  const user = await findOrCreateUser(address, claims.name);
+  const user = await findOrCreateUser(address, claims.name, intent);
 
   // Google is the authority on these two, so keep them fresh on every sign-in.
   await db
@@ -557,6 +640,7 @@ app.post("/api/auth/google", handler(async (c) => {
     .bind(claims.name?.trim() || user.name, claims.picture ?? user.picture ?? null, now(), user.id)
     .run();
 
+  await claimCode(user, intent);
   await startSession(c, user.id);
   return c.json({ ok: true });
 }));

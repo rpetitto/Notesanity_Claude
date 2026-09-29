@@ -6,6 +6,7 @@ import { Spinner, ErrorNote } from "./components/Shell";
 import { api } from "./lib/api";
 import Landing from "./pages/Landing";
 import RolePicker from "./pages/RolePicker";
+import { FamilyChild, FamilyHome, FamilyNotebookView } from "./pages/Family";
 import TeacherHome from "./pages/TeacherHome";
 import StudentHome from "./pages/StudentHome";
 import ClassView from "./pages/ClassView";
@@ -70,6 +71,19 @@ export default function App() {
     );
   }
 
+  // A family account sees its children and its settings, and nothing else.
+  if (user.role === "guardian") {
+    return (
+      <Routes>
+        <Route path="/family" element={<FamilyHome />} />
+        <Route path="/family/:studentId" element={<FamilyChild />} />
+        <Route path="/family/:studentId/notebooks/:notebookId" element={<FamilyNotebookView />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="*" element={<Navigate to="/family" replace />} />
+      </Routes>
+    );
+  }
+
   const home = user.role === "teacher" ? "/classes" : "/work";
 
   return (
@@ -92,6 +106,10 @@ export default function App() {
       <Route path="/notebooks/:notebookId" element={<Workspace />} />
       <Route path="/work" element={<StudentHome />} />
       <Route path="/settings" element={<Settings />} />
+      {/* A teacher can be a parent at the school too. */}
+      <Route path="/family" element={<FamilyHome />} />
+      <Route path="/family/:studentId" element={<FamilyChild />} />
+      <Route path="/family/:studentId/notebooks/:notebookId" element={<FamilyNotebookView />} />
       <Route path="/admin" element={<Suspense fallback={<Spinner label="Loading admin…" />}><Admin /></Suspense>} />
       <Route path="*" element={<Navigate to={home} replace />} />
     </Routes>

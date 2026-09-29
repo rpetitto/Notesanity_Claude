@@ -146,7 +146,7 @@ export default function Settings() {
           <div className="truncate text-[16px] text-pine/70">{user.email}</div>
         </div>
         <Chip tone="quiet" className="shrink-0 capitalize">
-          {user.role}
+          {user.role === "guardian" ? "Family" : user.role}
           {user.isAdmin ? " · admin" : ""}
         </Chip>
         <ButtonLink href={signOutHref} variant="secondary" size="sm" className="shrink-0">
@@ -155,10 +155,22 @@ export default function Settings() {
         </ButtonLink>
       </Card>
 
+      {/* A teacher who is also a parent here: the way to their children, kept
+          off the main menu, which is already full for a teacher. */}
+      {user.role !== "guardian" && (user.childCount ?? 0) > 0 && (
+        <Card className="mb-6 flex flex-wrap items-center gap-3 p-5">
+          <div className="min-w-0 flex-1">
+            <h2 className="font-display text-[17px] text-pine">My children</h2>
+            <p className="mt-1 text-[16px] text-pine/70">Your {user.childCount === 1 ? "child's" : "children's"} notebooks and assignments, to look at.</p>
+          </div>
+          <ButtonLink to="/family" variant="secondary" size="sm">Open</ButtonLink>
+        </Card>
+      )}
+
       {/* Students have nothing to buy and nothing to manage, so the card is theirs to not see. */}
       {plan && user.role === "teacher" && <PlanCard plan={plan} isTeacher />}
 
-      <Card className="mb-6 p-5">
+      {user.role !== "guardian" && <Card className="mb-6 p-5">
         <h2 className="font-display text-[17px] text-pine">Guided tours</h2>
         <p className="mt-1 text-[16px] text-pine/70">
           The short walkthroughs of your home screen, a class and a notebook. Start them over and
@@ -173,7 +185,7 @@ export default function Settings() {
           <RotateCcw className="h-4 w-4" strokeWidth={2.5} />
           {replay.isPending ? "Resetting…" : "Show the tours again"}
         </Button>
-      </Card>
+      </Card>}
 
       {/* School-wide administration lives on the Admin page now, so this page
           stays about the person using it. */}

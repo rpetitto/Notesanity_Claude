@@ -1,5 +1,6 @@
 import { app, db, storage } from "../platform";
 import { handler, now, uid, requireUser, HttpError, param} from "../lib/session";
+import { childrenInClass } from "../lib/family";
 import { coalesceStatement, insertActivity, lockFrom, logActivity, pageLock, pageLockStatement, type LogInput } from "../lib/activity";
 import {
   MAX_LAYER_BYTES, type LayerShape,
@@ -113,6 +114,16 @@ async function resolveInstance(c: any, notebookId: string, studentIdParam?: stri
   };
 }
 
+/** The child's copy, when the caller is their family and the child is in that class. Never creates one. */
+async function familyInstance(c: any, notebookId: string, studentId: string) {
+  const user = await requireUser(c);
+  const nb = await db.prepare(`SELECT class_id, kind, owner_id, status, archived FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
+  if (!nb?.class_id || nb.archived) return null;
+  if (!(await childrenInClass(user.id, nb.class_id)).includes(studentId)) return null;
+  if (nb.kind === "class" ? nb.status !== "published" : !(nb.kind === "student" && nb.owner_id === studentId)) return null;
+  return await db.prepare(`SELECT id FROM instances WHERE notebook_id = ? AND student_id = ?`).bind(notebookId, studentId).first<{ id: string }>();
+}
+
 /**
  * The row that holds one person's work in one notebook, created on first open.
  *
@@ -151,11 +162,13 @@ async function ensureInstance(nb: any, studentId: string, checkEnrolment: boolea
  * Everything needed to render one student's notebook: pages, fields, their ink
  * layers, teacher markup, and typed field values.
  */
-app.get("/api/notebooks/:id/work", handler(async (c) => {
-  const studentParam = c.req.query("student") || undefined;
-  const { nb, isTeacher, instance, studentId, readOnly, readOnlyReason, canAnnotate } =
-    await resolveInstance(c, param(c, "id"), studentParam);
-
+/**
+ * What one person's copy of a notebook holds — its pages and boxes, their ink
+ * and answers, and the teacher's published marks — for the student's own view,
+ * a teacher looking in, and a family reading along. `wanted` narrows it to
+ * some pages.
+ */
+export async function workPayload(nb: any, instanceId: string, studentId: string, wanted: string[]) {
   /**
    * Narrow the whole response to the pages asked for.
    *
@@ -166,7 +179,6 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
    * turns a class of thirty into thirty small reads instead of thirty whole
    * notebooks.
    */
-  const wanted = (c.req.query("pages") || "").split(",").map((p) => p.trim()).filter(Boolean);
   const pageFilter = wanted.length ? ` AND id IN (${wanted.map(() => "?").join(",")})` : "";
   const layerFilter = wanted.length ? ` AND page_id IN (${wanted.map(() => "?").join(",")})` : "";
 
@@ -184,9 +196,9 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     db.prepare(
       `SELECT id, page_id, kind, data, rev, byte_length FROM layers
         WHERE instance_id = ?${layerFilter}`,
-    ).bind(instance.id, ...wanted),
+    ).bind(instanceId, ...wanted),
     db.prepare(`SELECT field_id, value, asset_key, content_type FROM field_values WHERE instance_id = ?`)
-      .bind(instance.id),
+      .bind(instanceId),
     // Published teacher annotations on the master pages — the same for everyone,
     // and narrowed by `?pages=` for the same reason the layers are.
     db.prepare(
@@ -200,7 +212,7 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
   // Only layers that hold something are worth a fetch — a row exists for every
   // page ever touched, including ones erased back to blank.
   const inked = (layerRows.results ?? []).filter((l) => l.byte_length > 0 || l.data !== "");
-  const keys = inked.map((l) => inkKey(nb.id, instance.id, l.page_id, l.kind));
+  const keys = inked.map((l) => inkKey(nb.id, instanceId, l.page_id, l.kind));
   const blobs = await readInkMany(keys);
 
   const layers = {
@@ -221,9 +233,7 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     }),
   };
 
-  return c.json({
-    notebook: { id: nb.id, title: nb.title, classId: nb.class_id, kind: nb.kind ?? "class" },
-    instanceId: instance.id,
+  return {
     pages: pages.results ?? [],
     fields: fields.results ?? [],
     layers: layers.results ?? [],
@@ -231,6 +241,22 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
     masterAnnotations: (masterAnnotations.results ?? []).map((a: any) => ({
       pageId: a.page_id, data: a.published_data,
     })),
+    student,
+  };
+}
+
+app.get("/api/notebooks/:id/work", handler(async (c) => {
+  const studentParam = c.req.query("student") || undefined;
+  const { nb, isTeacher, instance, studentId, readOnly, readOnlyReason, canAnnotate } =
+    await resolveInstance(c, param(c, "id"), studentParam);
+
+  const wanted = (c.req.query("pages") || "").split(",").map((p) => p.trim()).filter(Boolean);
+  const { pages, fields, layers, values, masterAnnotations, student } = await workPayload(nb, instance.id, studentId, wanted);
+
+  return c.json({
+    notebook: { id: nb.id, title: nb.title, classId: nb.class_id, kind: nb.kind ?? "class" },
+    instanceId: instance.id,
+    pages, fields, layers, values, masterAnnotations,
     student,
     isTeacher,
     // A teacher looking into a student's own notebook is a reader. Told plainly
@@ -509,7 +535,10 @@ app.post("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
 /** Serve a student's uploaded response to anyone who may view their work. */
 app.get("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { instance } = await resolveInstance(c, param(c, "id"), studentParam);
+  // A family reading along sees the photos and recordings their child handed
+  // in, the way the child does; everyone else goes through the usual rules.
+  const instance = (studentParam && await familyInstance(c, param(c, "id"), studentParam))
+    || (await resolveInstance(c, param(c, "id"), studentParam)).instance;
   const row = await db
     .prepare(`SELECT asset_key, content_type FROM field_values WHERE instance_id = ? AND field_id = ?`)
     .bind(instance.id, param(c, "fieldId"))

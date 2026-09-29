@@ -1,5 +1,12 @@
 /**
- * Sign-in. Three ways in: Google, a password, or a one-time link by email.
+ * Sign-in. First who you are — teacher, student, or family — then how: Google,
+ * a password, or a one-time link by email.
+ *
+ * Asking who comes first so that nothing is made for someone who leaves
+ * halfway: the server creates an account only once it can check the answer
+ * (a school address for staff and students, a family code for a parent). The
+ * choice never grants more than that address or code already allows, and it
+ * doesn't matter at all for someone who already has an account.
  *
  * The copy follows the brand's voice rule — say what happens, in a sentence you
  * would actually say out loud to a colleague.
@@ -8,7 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { Mail, KeyRound, ArrowRight, Check } from "lucide-react";
+import { Mail, KeyRound, ArrowRight, Check, PenSquare, GraduationCap, Users, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { signOutHref } from "../lib/session";
@@ -18,10 +25,45 @@ import { Button, Input, Label } from "../components/ui";
 import { cn } from "../lib/utils";
 
 type Method = "link" | "password";
+type Door = "teacher" | "student" | "family";
+
+const DOOR_KEY = "notesanity:door";
+const DOORS: { key: Door; label: string; hint: string; icon: typeof PenSquare }[] = [
+  { key: "teacher", label: "Teacher", hint: "Build notebooks, set work, grade it", icon: PenSquare },
+  { key: "student", label: "Student", hint: "Your classes and your notebooks", icon: GraduationCap },
+  { key: "family", label: "Parent or guardian", hint: "Follow along with your child's work", icon: Users },
+];
 
 export default function Landing({ error }: { error?: Error | null }) {
   const [params] = useSearchParams();
   const [method, setMethod] = useState<Method>("link");
+
+  // A family link (/family?code=…) arrives with the door already chosen.
+  const codeInUrl = params.get("code") ?? "";
+  const [door, setDoorState] = useState<Door | null>(() => {
+    if (codeInUrl || window.location.pathname.startsWith("/family")) return "family";
+    try { const d = localStorage.getItem(DOOR_KEY); return d === "teacher" || d === "student" || d === "family" ? d : null; } catch { return null; }
+  });
+  const setDoor = (d: Door | null) => {
+    setDoorState(d);
+    try { if (d) localStorage.setItem(DOOR_KEY, d); else localStorage.removeItem(DOOR_KEY); } catch { /* ignore */ }
+  };
+  const [familyCode, setFamilyCode] = useState(codeInUrl);
+  const [codeCheck, setCodeCheck] = useState<{ valid: boolean; child?: string; reason?: string } | null>(null);
+  useEffect(() => {
+    const code = familyCode.replace(/[^a-z0-9]/gi, "");
+    if (door !== "family" || code.length !== 8) { setCodeCheck(null); return; }
+    let dead = false;
+    api.get<{ valid: boolean; child?: string; reason?: string }>(`/api/family/code/${encodeURIComponent(code)}`)
+      .then((r) => { if (!dead) setCodeCheck(r); })
+      .catch(() => { if (!dead) setCodeCheck(null); });
+    return () => { dead = true; };
+  }, [familyCode, door]);
+  /** What every sign-in call carries: the door, and a family code when there is one. */
+  const intent = () => ({ door: door ?? undefined, familyCode: door === "family" && familyCode.trim() ? familyCode.trim() : undefined });
+  // Google's button calls back long after it was mounted; this keeps its answer current.
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
 
   const [googleBusy, setGoogleBusy] = useState(false);
 
@@ -38,7 +80,7 @@ export default function Landing({ error }: { error?: Error | null }) {
   const completeGoogle = async (credential: string) => {
     setGoogleBusy(true);
     try {
-      await api.post("/api/auth/google", { credential });
+      await api.post("/api/auth/google", { credential, ...intentRef.current() });
       window.location.href = "/";
     } catch (e) {
       toast.error((e as Error).message);
@@ -51,7 +93,7 @@ export default function Landing({ error }: { error?: Error | null }) {
     setGoogleBusy(true);
     try {
       const credential = await requestGoogleIdToken();
-      await api.post("/api/auth/google", { credential });
+      await api.post("/api/auth/google", { credential, ...intent() });
       window.location.href = "/";
     } catch (e) {
       toast.error((e as Error).message);
@@ -85,8 +127,9 @@ export default function Landing({ error }: { error?: Error | null }) {
       // The overlay stays inert and the brand button underneath keeps working
       // through the prompt path, which is the honest fallback.
       .catch(() => {});
-    return () => { dead = true; teardown?.(); };
-  }, []);
+    return () => { dead = true; teardown?.(); setGoogleMounted(false); };
+    // Mounted again whenever the door changes, because the button only exists once one is chosen.
+  }, [door]);
   const [register, setRegister] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -97,7 +140,7 @@ export default function Landing({ error }: { error?: Error | null }) {
   const linkProblem = params.get("auth_error");
 
   const sendLink = useMutation({
-    mutationFn: () => api.post("/api/auth/magic/request", { email }),
+    mutationFn: () => api.post("/api/auth/magic/request", { email, ...intent() }),
     onSuccess: () => setLinkSent(true),
     onError: (e: Error) => toast.error(e.message),
   });
@@ -105,8 +148,8 @@ export default function Landing({ error }: { error?: Error | null }) {
   const withPassword = useMutation({
     mutationFn: () =>
       register
-        ? api.post("/api/auth/password/register", { email, password, name })
-        : api.post("/api/auth/password/login", { email, password }),
+        ? api.post("/api/auth/password/register", { email, password, name, ...intent() })
+        : api.post("/api/auth/password/login", { email, password, ...intent() }),
     onSuccess: () => { window.location.href = "/"; },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -143,7 +186,32 @@ export default function Landing({ error }: { error?: Error | null }) {
         )}
 
         <div className="rounded-[22px] border-[3px] border-pine bg-white p-5 shadow-[6px_6px_0_0_var(--color-pine)]">
-          {linkSent ? (
+          {!door ? (
+            <div>
+              <h1 className="mb-1 text-[22px]">Who's signing in?</h1>
+              <p className="mb-4 text-[16px] text-pine/70">So we can set up the right space — and check it's really you.</p>
+              <div className="space-y-2.5" role="list">
+                {DOORS.map(({ key, label, hint, icon: Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="listitem"
+                    onClick={() => setDoor(key)}
+                    className="flex min-h-[64px] w-full items-center gap-3 rounded-[16px] border-[3px] border-pine bg-white px-4 py-2.5 text-left transition-[transform,box-shadow] hover:bg-oat active:translate-x-[2px] active:translate-y-[2px]"
+                  >
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-[3px] border-pine bg-oat text-pine">
+                      <Icon className="h-5 w-5" strokeWidth={2.5} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block font-display text-[17px] text-pine">{label}</span>
+                      <span className="block text-[16px] text-pine/70">{hint}</span>
+                    </span>
+                    <ArrowRight className="ml-auto h-5 w-5 shrink-0 text-pine/50" strokeWidth={2.5} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : linkSent ? (
             <div className="py-4 text-center">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border-[3px] border-pine bg-mint">
                 <Check className="h-7 w-7 text-pine" strokeWidth={2.5} />
@@ -159,6 +227,39 @@ export default function Landing({ error }: { error?: Error | null }) {
             </div>
           ) : (
             <>
+              <div className="-mt-1 mb-4 flex items-center justify-between gap-2">
+                <span className="font-display text-[17px] text-pine">
+                  {door === "teacher" ? "Signing in as a teacher" : door === "student" ? "Signing in as a student" : "Signing in as family"}
+                </span>
+                <button type="button" onClick={() => setDoor(null)} className="inline-flex min-h-[44px] items-center gap-1 rounded-full px-2 text-[16px] text-pine/70 underline underline-offset-2 hover:text-pine">
+                  <ArrowLeft className="h-4 w-4" strokeWidth={2.5} /> Change
+                </button>
+              </div>
+
+              {door === "family" && (
+                <div className="mb-5 rounded-[16px] border-[3px] border-pine/20 bg-oat p-3">
+                  <Label htmlFor="family-code">Family code</Label>
+                  <Input
+                    id="family-code"
+                    value={familyCode}
+                    onChange={(e) => setFamilyCode(e.target.value.toUpperCase())}
+                    placeholder="ABCD-2345"
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    className="mt-1.5 font-display tracking-[0.12em]"
+                    aria-describedby="family-code-help"
+                  />
+                  <p id="family-code-help" className="mt-1.5 text-[16px] text-pine/75" aria-live="polite">
+                    {codeCheck?.valid
+                      ? <span className="inline-flex items-center gap-1.5 font-display text-pine"><Check className="h-4 w-4" strokeWidth={3} /> {codeCheck.child}'s family code</span>
+                      : codeCheck && !codeCheck.valid
+                        ? codeCheck.reason ?? "That code isn't right, or it has been replaced. Check it with your child's teacher."
+                        : "First time? Enter the code from your child's teacher. Already signed up? Leave it blank."}
+                  </p>
+                </div>
+              )}
+
               {/* Method switch — neither option is the mint action; the submit button is. */}
               <div className="mb-5 flex gap-1 rounded-full border-[3px] border-pine p-1">
                 {([
@@ -187,7 +288,7 @@ export default function Landing({ error }: { error?: Error | null }) {
                   else withPassword.mutate();
                 }}
               >
-                <Label htmlFor="email">School email</Label>
+                <Label htmlFor="email">{door === "family" ? "Your email" : "School email"}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -195,7 +296,7 @@ export default function Landing({ error }: { error?: Error | null }) {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@school.edu"
+                  placeholder={door === "family" ? "you@example.com" : "you@school.edu"}
                   className="mt-1.5"
                 />
 

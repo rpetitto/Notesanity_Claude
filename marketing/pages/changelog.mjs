@@ -38,6 +38,16 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "September 29, 2026",
+    "Families can follow along, and sign-in asks who you are before it makes an account.",
+    [
+      ["new", "<b>Parents and guardians can see their child's work.</b> Under <b>Roster → Families</b> every student has a family code: email it, copy the link, or print a slip per student to send home. A parent who signs in with it sees that child's assignments — due, started, handed in — the grades and feedback you return, and the child's notebooks with their writing and your marks. They can look but never change anything, and never see another student. One code works for a whole family; a new code retires the old without unlinking anyone. Admins see every link, can remove any, and can switch family access off for the school."],
+      ["better", "<b>Sign-in asks who you are first.</b> Teacher, student, or parent or guardian — then Google, a link or a password. An account is made only when your address or family code backs up the choice, so someone who wanders off halfway no longer leaves an empty account behind. If you already have an account, the choice doesn't matter."],
+      ["fixed", "<b>Anyone with a Gmail address could make themselves a teacher.</b> A school set up from a Gmail sign-in treated every Gmail address as its own, and the first-run screen let them choose \"I'm a teacher\". Personal addresses like Gmail and Outlook now never count as a school's; parents use a family code instead."],
+      ["fixed", "<b>On a domain shared by staff and students, a new student could land as a teacher.</b> Anyone signing in before a roster import created their account became a teacher. Now they're a student, and someone who asks to be a teacher waits for an admin to confirm them under People."],
+    ],
+  ],
+  [
     "September 25, 2026",
     "One assignment for every section that has the notebook, started from inside the notebook.",
     [

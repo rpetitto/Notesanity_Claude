@@ -588,7 +588,90 @@ interface OrgResponse {
   primaryDomain: string;
   teacherDomains: string;
   studentDomains: string;
+  familyAccess: boolean;
   canEdit: boolean;
+}
+
+interface FamilyLink {
+  id: string;
+  created_at: string;
+  guardian_name: string;
+  guardian_email: string;
+  student_name: string;
+  student_email: string;
+}
+
+/**
+ * Families across the school: the switch that lets family codes work at all,
+ * and every parent or guardian linked to a student, to check or remove.
+ * Teachers hand the codes out from each class's roster.
+ */
+function FamilySettings() {
+  const qc = useQueryClient();
+  const org = useQuery({ queryKey: ["org"], queryFn: () => api.get<OrgResponse>("/api/org") });
+  const links = useQuery({ queryKey: ["org-family"], queryFn: () => api.get<{ links: FamilyLink[] }>("/api/org/family") });
+  const toggle = useMutation({
+    mutationFn: (on: boolean) => api.patch("/api/org", { familyAccess: on }),
+    onSuccess: async (_r, on) => {
+      await qc.invalidateQueries({ queryKey: ["org"] });
+      toast.success(on ? "Family access is on" : "Family access is off — families see nothing until it's back on");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+  const unlink = useMutation({
+    mutationFn: (id: string) => api.del(`/api/org/family/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["org-family"] }),
+    onError: (err: Error) => toast.error(err.message),
+  });
+  const on = !!org.data?.familyAccess;
+  const list = links.data?.links ?? [];
+  return (
+    <Card className="p-5">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="font-display text-[17px] text-pine">Families</h2>
+          <p className="mt-1 text-[16px] text-pine/70">
+            Parents and guardians sign in with a family code a teacher sends home, and see only their own child's
+            notebooks, assignments and returned grades — to look at, never to change. Teachers find the codes under
+            <b> Roster → Families</b> in each class.
+          </p>
+        </div>
+        <label className="flex min-h-[44px] shrink-0 items-center gap-2 font-display text-[16px] text-pine">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={on}
+            disabled={!org.data || toggle.isPending}
+            onChange={(e) => toggle.mutate(e.target.checked)}
+            className="h-5 w-5 accent-mint"
+          />
+          Family access {on ? "on" : "off"}
+        </label>
+      </div>
+      {links.isLoading && <Spinner />}
+      {list.length === 0 && !links.isLoading && <p className="mt-3 text-[16px] text-pine/70">No families linked yet.</p>}
+      {list.length > 0 && (
+        <ul className="mt-3 divide-y divide-pine/10">
+          {list.map((l) => (
+            <li key={l.id} className="flex flex-wrap items-center gap-3 py-2 text-[16px]">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-display text-pine">{l.guardian_name}{l.guardian_email !== l.guardian_name ? ` · ${l.guardian_email}` : ""}</span>
+                <span className="block truncate text-pine/70">sees {l.student_name} · since {relativeTime(l.created_at)}</span>
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={unlink.isPending}
+                onClick={() => { if (confirm(`Stop ${l.guardian_name} seeing ${l.student_name}'s work?`)) unlink.mutate(l.id); }}
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
 }
 
 interface OrgUser {
@@ -596,7 +679,8 @@ interface OrgUser {
   email: string;
   name: string;
   picture: string | null;
-  role: "teacher" | "student" | "pending";
+  role: "teacher" | "student" | "pending" | "guardian";
+  requested_role?: string;
   is_admin: number;
   last_seen_at: string | null;
 }
@@ -637,7 +721,10 @@ function OrgSettings() {
       <h2 className="font-display text-[17px] text-pine">School settings</h2>
       <p className="mt-1 text-[16px] text-pine/70">
         Only these domains can sign in. Anyone else gets no email and no account — so if staff aren't receiving
-        sign-in links, check their domain is listed here first.
+        sign-in links, check their domain is listed here first. Personal addresses like gmail.com never count as a
+        school's domain; parents and guardians sign in with a family code instead. A domain on both lists (staff and
+        students sharing one) makes new accounts students, and anyone who asks to be a teacher waits for you to confirm
+        them under People.
       </p>
       <p className="mt-2 text-[16px] text-pine/70">
         Currently allowed: <span className="font-display font-bold text-pine">
@@ -826,6 +913,9 @@ function OrgUsers() {
                 {u.name} {u.is_admin ? <span className="text-[16px] font-sans font-normal text-pine/60">(admin)</span> : null}
               </span>
               <span className="block truncate text-[16px] text-pine/70">{u.email}</span>
+              {u.role === "pending" && u.requested_role === "teacher" && (
+                <span className="mt-0.5 block text-[16px] font-bold text-[#8a6a1f]">Asked to be a teacher — set their role to confirm</span>
+              )}
             </span>
             {department && u.role === "teacher" && (
               <Button
@@ -838,7 +928,9 @@ function OrgUsers() {
                 {holders.has(u.id) ? "Remove seat" : "Give Pro seat"}
               </Button>
             )}
-            <Select
+            {u.role === "guardian" ? (
+              <span className="shrink-0 rounded-full border-2 border-pine/25 bg-oat px-3 py-1.5 font-display text-[16px] text-pine/75">Family</span>
+            ) : <Select
               value={u.role === "pending" ? "" : u.role}
               onChange={(e) => mutation.mutate({ id: u.id, role: e.target.value as "teacher" | "student" })}
               disabled={mutation.isPending}
@@ -849,7 +941,7 @@ function OrgUsers() {
               </option>
               <option value="teacher">Teacher</option>
               <option value="student">Student</option>
-            </Select>
+            </Select>}
           </li>
         ))}
       </ul>
@@ -875,6 +967,7 @@ function SchoolAdmin() {
       <OrgOverview />
       <div className="mt-4 space-y-4">
         <OrgSettings />
+        <FamilySettings />
         <MailLog />
         <OrgUsers />
       </div>
@@ -978,6 +1071,8 @@ export default function Admin() {
       {tab === "school" ? (
         <div className="space-y-4">
           <OrgSettings />
+          <FamilySettings />
+        <FamilySettings />
           <MailLog />
           <OrgUsers />
         </div>

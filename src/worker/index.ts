@@ -19,6 +19,7 @@ import "./routes/classes";
 import "./routes/notebooks";
 import "./routes/work";
 import "./routes/assignments";
+import "./routes/family";
 import "./routes/admin";
 import "./routes/org-admin";
 import "./routes/page-library";
