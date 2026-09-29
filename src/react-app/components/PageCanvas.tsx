@@ -1090,7 +1090,8 @@ export default function PageCanvas({
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    const hit = markAt(studentLayer, px / scale, py / scale, 5 / scale);
+    // About a fingertip's worth of slack around a mark, at any zoom.
+    const hit = markAt(studentLayer, px / scale, py / scale, 10 / scale);
     setMarkHover(hit ? { x: px, y: py, hit } : null);
   };
 

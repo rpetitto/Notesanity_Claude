@@ -634,7 +634,7 @@ app.post("/api/assignments/:id/grade", handler(async (c) => {
   }
   await logActivity({
     actorId: user.id, actorRole: "teacher", action: "grade",
-    detail: `Marked "${a.title}"`, assignmentId: a.id, notebookId: a.notebook_id, studentId: b.studentId,
+    detail: `Graded "${a.title}"`, assignmentId: a.id, notebookId: a.notebook_id, studentId: b.studentId,
   });
   return c.json({ ok: true });
 }));
@@ -764,7 +764,8 @@ app.get("/api/activity", handler(async (c) => {
 
   return c.json({
     events: (rows.results ?? []).map((r) => ({
-      id: r.id, action: r.action, detail: r.detail, at: r.created_at,
+      // Entries written before "grade" replaced "mark" read the same as new ones.
+      id: r.id, action: r.action, detail: String(r.detail ?? "").replace(/^Marked "/, 'Graded "'), at: r.created_at,
       pageId: r.page_id, actor: r.actor_name ?? "Someone", actorRole: r.actor_role,
     })),
   });

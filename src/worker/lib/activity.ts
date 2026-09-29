@@ -18,7 +18,8 @@ import { now, uid } from "./session";
 const COALESCE_MINUTES = 5;
 
 export type ActivityAction =
-  | "edit"          // ink, text, stamps on a page
+  | "edit"          // ink and stamps on a page
+  | "note"          // a typed note on a page — its own line, so typing isn't lost under "Wrote"
   | "answer"        // typed into a field
   | "upload"        // image or audio response
   | "submit"
@@ -41,7 +42,7 @@ export interface LogInput {
   studentId?: string | null;
 }
 
-const COALESCED: ActivityAction[] = ["edit", "answer", "annotate"];
+const COALESCED: ActivityAction[] = ["edit", "answer", "annotate", "note"];
 
 /**
  * The statement that folds this entry into the same person's last one on the

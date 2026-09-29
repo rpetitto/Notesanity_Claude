@@ -125,6 +125,42 @@ async function familyInstance(c: any, notebookId: string, studentId: string) {
 }
 
 /**
+ * What a save of someone's page actually did, as history entries.
+ *
+ * One "Wrote on this page" for every kind of save hid typing entirely: a note
+ * typed into a table read the same as a scribble. Now a typed note gets its
+ * own line quoting what was typed, and ink, erasing and stamps say which they
+ * were. Each kind folds with its own earlier entries, so a run of typing is
+ * one line, not one per keystroke-save.
+ */
+function describeChange(base: LogInput, before: LayerShape | null, after: LayerShape): LogInput[] {
+  const prev = before ?? { v: 1, s: [], x: [], e: [], c: [] } as unknown as LayerShape;
+  const teacher = base.action === "annotate";
+  const out: LogInput[] = [];
+
+  const oldNotes = new Map(((prev.x ?? []) as any[]).map((t) => [t.id, String(t.v ?? "")]));
+  const typed = ((after.x ?? []) as any[]).filter((t) => String(t.v ?? "").trim() && oldNotes.get(t.id) !== String(t.v ?? ""));
+  if (typed.length) {
+    const words = String(typed[typed.length - 1].v).replace(/\s+/g, " ").trim();
+    const quote = words.length > 60 ? `${words.slice(0, 57)}…` : words;
+    out.push({ ...base, action: "note", detail: `Typed “${quote}”${teacher ? " on the page" : ""}` });
+  }
+
+  const strokesBefore = (prev.s ?? []).length, strokesAfter = (after.s ?? []).length;
+  const stampsBefore = (prev.e ?? []).length, stampsAfter = (after.e ?? []).length;
+  const notesRemoved = [...oldNotes.keys()].filter((id) => !((after.x ?? []) as any[]).some((t) => t.id === id)).length;
+  const parts: string[] = [];
+  if (strokesAfter > strokesBefore) parts.push(teacher ? "Marked up this page" : "Wrote on this page");
+  if (strokesAfter < strokesBefore || notesRemoved > 0 || stampsAfter < stampsBefore) parts.push("Erased on this page");
+  if (stampsAfter > stampsBefore) parts.push("Added a stamp");
+  if (parts.length) out.push({ ...base, detail: parts.join(" · ") });
+
+  // Moving or recoloring something still changed the page; say so plainly.
+  if (!out.length) out.push({ ...base, detail: teacher ? "Marked up this page" : "Changed this page" });
+  return out;
+}
+
+/**
  * The row that holds one person's work in one notebook, created on first open.
  *
  * Lazy rather than provisioned up front, which covers a student who enrolled
@@ -372,6 +408,7 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
 
     const rev = existing.rev + 1;
     let next: LayerShape;
+    let prior: LayerShape | null = null;
 
     if (isDelta) {
       // A delta describes strokes appended to one exact revision. Anything
@@ -400,8 +437,11 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
       // Falls back to the D1 column for a row the backfill hasn't reached.
       const base = stored ?? parseShape(existing.data);
       next = { v: 1, s: [...base.s, ...d.s], x: d.x ?? [], e: d.e ?? [], c: d.c ?? [] };
+      prior = base;
     } else {
       next = parseShape(body.data!);
+      // A whole-page save doesn't say what changed; the last version does.
+      prior = (await readInk(key).catch(() => null)) ?? parseShape(existing.data);
     }
 
     // R2 first, then the row. The recoverable failure is an object ahead of its
@@ -413,13 +453,12 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     // `AND rev = ?`: two saves that both started from this revision can't
     // both claim the next one. The one that loses is told so, and its client
     // answers a conflict the way it always has, by fetching and resending.
-    const [updated, folded] = await db.batch([
-      db.prepare(`UPDATE layers SET data = '', byte_length = ?, rev = ?, updated_at = ? WHERE id = ? AND rev = ?`)
-        .bind(size, rev, now(), existing.id, existing.rev),
-      coalesceStatement(activity)!,
-    ]);
+    const updated = await db
+      .prepare(`UPDATE layers SET data = '', byte_length = ?, rev = ?, updated_at = ? WHERE id = ? AND rev = ?`)
+      .bind(size, rev, now(), existing.id, existing.rev)
+      .run();
     if (!updated.meta?.changes) return c.json({ conflict: true, rev }, 409);
-    if (!folded.meta?.changes) await insertActivity(activity);
+    for (const entry of describeChange(activity, prior, next)) await logActivity(entry);
     return c.json({ ok: true, rev });
   }
 
@@ -443,7 +482,7 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
     .bind(layerId, instance.id, pageId, kind, size, now())
     .run();
   if (!inserted.meta?.changes) return c.json({ conflict: true, rev: 1 }, 409);
-  await logActivity(activity);
+  for (const entry of describeChange(activity, null, fresh)) await logActivity(entry);
   return c.json({ ok: true, rev: 1 });
 }));
 

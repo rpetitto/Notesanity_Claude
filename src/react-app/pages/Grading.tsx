@@ -982,6 +982,7 @@ const ACTIVITY_ICON: Record<string, typeof Pencil> = {
   edit: Pencil,
   annotate: Pencil,
   answer: TypeIcon,
+  note: TypeIcon,
   upload: Upload,
   submit: Send,
   unsubmit: Undo2,

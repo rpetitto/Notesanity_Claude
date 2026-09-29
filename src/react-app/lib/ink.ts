@@ -462,6 +462,23 @@ export interface MarkHit {
 }
 
 /**
+ * How wide a note's text actually is, in page units. A note's stored `w` is
+ * where it started, not how far its text runs — the box grows as it's typed —
+ * so hovering the words past that first width used to find nothing.
+ */
+let measurer: CanvasRenderingContext2D | null = null;
+function textWidth(text: string, size: number): number {
+  try {
+    measurer ??= document.createElement("canvas").getContext("2d");
+    if (!measurer) return 0;
+    measurer.font = `${size}px Nunito, system-ui, sans-serif`;
+    return Math.max(0, ...text.split("\n").map((line) => measurer!.measureText(line).width)) + size * 0.6;
+  } catch {
+    return text.length * size * 0.55;
+  }
+}
+
+/**
  * Topmost mark at a point, for hovering rather than erasing.
  *
  * Searches back to front so the answer matches what the eye sees on top, and
@@ -485,7 +502,9 @@ export function markAt(layer: LayerData, x: number, y: number, radius: number): 
     const t = layer.x[i];
     const lines = (t.v.match(/\n/g)?.length ?? 0) + 1;
     const height = Math.max(t.s * 1.5, lines * t.s * 1.3);
-    if (x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + height) {
+    const width = Math.max(t.w, textWidth(t.v, t.s));
+    // The words plus a margin, so the pointer needn't sit exactly on a letter.
+    if (x >= t.x - radius && x <= t.x + width + radius && y >= t.y - radius && y <= t.y + height + radius) {
       return { kind: "text", ts: t.ts, detail: t.v };
     }
   }
