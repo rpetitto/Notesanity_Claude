@@ -30,7 +30,8 @@ import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
 import { cn, formatDue, relativeTime } from "../lib/utils";
-import { pushGrades, type ClassroomGrade, type GradePushResult } from "../lib/google";
+import { hasGoogleClientId, pushGrades, type ClassroomGrade, type GradePushResult } from "../lib/google";
+import GoogleIcon from "../components/GoogleIcon";
 
 /** Header controls share one height so a row of them lines up. */
 const BUTTON_ROW =
@@ -510,6 +511,35 @@ export default function Grading() {
     onSuccess: (res, vars) => {
       qc.invalidateQueries({ queryKey: ["assignment", assignmentId] });
       toast.success(vars.all ? "Grades returned to the class" : "Returned to student");
+      reportClassroom(res);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  /**
+   * Send every returned grade to Classroom again — after a student turns their
+   * work in there, or when the first attempt was refused. Classroom only lets a
+   * grade reach the student once the work is turned in there, so a grade held
+   * the first time goes through on a second send once it has been.
+   */
+  const resendClassroom = useMutation({
+    mutationFn: async () => {
+      const courseId: string | undefined = assignment?.googleCourseId;
+      const courseworkId: string | undefined = assignment?.googleCourseworkId;
+      if (!courseId || !courseworkId) return { classroom: null as GradePushResult | null, classroomError: null as string | null };
+      const grades = classroomGradesFor(rows.filter((r) => r.graded && r.returnedAt));
+      if (grades.length === 0) return { classroom: null, classroomError: "No returned grades to send yet." };
+      try {
+        return { classroom: await pushGrades(courseId, courseworkId, grades), classroomError: null };
+      } catch (e) {
+        return { classroom: null, classroomError: (e as Error).message };
+      }
+    },
+    onSuccess: (res) => reportClassroom(res),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  function reportClassroom(res: { classroom: GradePushResult | null; classroomError: string | null }) {
       if (res.classroomError) {
         toast.error("Google Classroom didn't take the grades", { description: res.classroomError });
       } else if (res.classroom) {
@@ -520,8 +550,8 @@ export default function Grading() {
         if (held > 0) {
           toast.message(`${held} grade${held === 1 ? " is" : "s are"} waiting in Classroom`, {
             description:
-              "Classroom won't release a grade for work that wasn't turned in there. " +
-              "It's in your Classroom gradebook — return it from Classroom to show the student.",
+              "Classroom won't return a grade on work that wasn't turned in there, so it's a draft grade in your Classroom " +
+              "gradebook. Once the student turns it in on Classroom, press Send grades to Classroom again — or return it from Classroom.",
           });
         }
         if (missing.length > 0) {
@@ -530,9 +560,7 @@ export default function Grading() {
           });
         }
       }
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  }
 
   const reopen = useMutation({
     mutationFn: () => api.post(`/api/assignments/${assignmentId}/reopen`, { studentId }),
@@ -626,6 +654,11 @@ export default function Grading() {
           ) : (
             <Button variant="secondary" disabled>
               <Send className="h-4 w-4" strokeWidth={2.5} /> Nothing to return yet
+            </Button>
+          )}
+          {assignment.googleCourseId && assignment.googleCourseworkId && hasGoogleClientId && rows.some((r) => r.graded && r.returnedAt) && (
+            <Button variant="secondary" onClick={() => resendClassroom.mutate()} disabled={resendClassroom.isPending} title="Send the returned grades to Google Classroom again">
+              <GoogleIcon product="classroom" /> {resendClassroom.isPending ? "Sending…" : "Send grades to Classroom"}
             </Button>
           )}
 
