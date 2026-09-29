@@ -8,10 +8,9 @@
  * without a database console.
  *
  * Writes are narrow, and deliberately so. Editing a title or a grade is
- * reversible and obviously scoped; deleting a notebook from a spreadsheet cell
- * is neither, and a grid makes destruction indistinguishable from a typo. So
- * this exposes no deletes — those stay behind the screens that already confirm
- * them and explain what they affect.
+ * reversible and obviously scoped. Deleting isn't a cell edit: it's a row
+ * action that asks for the name to be typed back, and it goes to Recently
+ * deleted — restorable for 30 days, then erased — rather than straight out.
  */
 
 import { app, db } from "../platform";
@@ -22,6 +21,8 @@ import {
 import { SUPERADMIN_EMAILS } from "../schema";
 import { page } from "../lib/paging";
 import { PLANS, type PlanKey } from "../../shared/plans.mjs";
+import { PUBLIC_MAIL_DOMAINS } from "../lib/session";
+import { TRASH_DAYS, purgeExpired, restore, trashNotebook, trashOrg, trashUser } from "../lib/trash";
 
 export async function requireSuperadmin(c: any) {
   const user = await requireUser(c);
@@ -35,7 +36,7 @@ export async function requireSuperadmin(c: any) {
 
 /** Fields a superadmin may change, per table. Anything not listed is read-only. */
 const EDITABLE: Record<string, { table: string; columns: string[] }> = {
-  orgs: { table: "orgs", columns: ["name", "teacher_domains", "student_domains"] },
+  orgs: { table: "orgs", columns: ["name", "primary_domain", "teacher_domains", "student_domains"] },
   users: { table: "users", columns: ["name", "role", "is_admin", "is_superadmin"] },
   notebooks: { table: "notebooks", columns: ["title", "status"] },
   assignments: { table: "assignments", columns: ["title", "due_at", "status", "points_max"] },
@@ -62,9 +63,9 @@ app.get("/api/admin/overview", handler(async (c) => {
 /**
  * The schools on the platform.
  *
- * `primary_domain` is what sign-in resolves against, so it is set once here and
- * never editable in the grid: changing it would strand every account already
- * created under it.
+ * `primary_domain` is what a new sign-in resolves against. Changing it strands
+ * nobody — an existing account is found by its email, not its domain — it only
+ * changes where the next new address on that domain lands.
  */
 app.get("/api/admin/orgs", handler(async (c) => {
   await requireSuperadmin(c);
@@ -172,9 +173,10 @@ app.get("/api/admin/users", handler(async (c) => {
   await requireSuperadmin(c);
   return page(c, {
     select: `u.id, u.email, u.name, u.role, u.is_admin, u.is_superadmin, u.created_at, u.last_seen_at,
+             u.org_id, o.name AS org_name,
              (SELECT COUNT(*) FROM enrollments e WHERE e.user_id = u.id) AS classes`,
-    from: `users u`,
-    searchable: ["u.email", "u.name", "u.role"],
+    from: `users u LEFT JOIN orgs o ON o.id = u.org_id`,
+    searchable: ["u.email", "u.name", "u.role", "o.name"],
     order: `u.created_at DESC`,
   });
 }));
@@ -182,7 +184,7 @@ app.get("/api/admin/users", handler(async (c) => {
 app.get("/api/admin/notebooks", handler(async (c) => {
   await requireSuperadmin(c);
   return page(c, {
-    select: `n.id, n.title, n.status, n.page_count, n.created_at, n.updated_at,
+    select: `n.id, n.title, n.status, n.archived, n.page_count, n.created_at, n.updated_at,
              c.name AS class_name, u.email AS owner_email,
              (SELECT COUNT(*) FROM assignments a WHERE a.notebook_id = n.id) AS assignments`,
     from: `notebooks n
@@ -351,12 +353,23 @@ app.patch("/api/admin/:kind/:id", handler(async (c) => {
     throw new HttpError(400, "You can't remove your own superadmin access.");
   }
 
-  const value =
+  let value =
     body.value === null || body.value === undefined
       ? null
       : typeof body.value === "boolean"
         ? (body.value ? 1 : 0)
         : body.value as string | number;
+
+  // A school's primary domain decides where every new address on it lands, so
+  // it has to be a real domain, nobody else's, and never a personal-mail one.
+  if (kind === "orgs" && body.column === "primary_domain") {
+    const domain = String(value ?? "").trim().toLowerCase().replace(/^@/, "");
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain)) throw new HttpError(400, "That isn't a domain — something like school.edu.");
+    if (PUBLIC_MAIL_DOMAINS.has(domain)) throw new HttpError(400, `${domain} is a personal-mail domain; it can't belong to a school.`);
+    const taken = await db.prepare(`SELECT id FROM orgs WHERE lower(primary_domain) = ? AND id <> ?`).bind(domain, id).first();
+    if (taken) throw new HttpError(409, `Another school already uses ${domain}.`);
+    value = domain;
+  }
 
   await db
     .prepare(`UPDATE ${spec.table} SET ${body.column} = ? WHERE id = ?`)
@@ -366,5 +379,83 @@ app.patch("/api/admin/:kind/:id", handler(async (c) => {
   if (spec.table === "notebooks" || spec.table === "assignments") {
     await db.prepare(`UPDATE ${spec.table} SET updated_at = ? WHERE id = ?`).bind(now(), id).run();
   }
+  return c.json({ ok: true });
+}));
+
+
+// ------------------------------------------------------------ row actions
+
+/** Move someone to another school — for an account that landed in the wrong one. */
+app.post("/api/admin/users/:id/move", handler(async (c) => {
+  await requireSuperadmin(c);
+  const id = param(c, "id");
+  const { orgId } = await c.req.json<{ orgId?: string }>();
+  const [user, org] = await Promise.all([
+    db.prepare(`SELECT id, name FROM users WHERE id = ?`).bind(id).first<{ id: string; name: string }>(),
+    db.prepare(`SELECT id, name FROM orgs WHERE id = ?`).bind(orgId ?? "").first<{ id: string; name: string }>(),
+  ]);
+  if (!user) throw new HttpError(404, "User not found");
+  if (!org) throw new HttpError(404, "School not found");
+  // Classes belong to a school; someone still in one would straddle two.
+  const ties = await db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM classes WHERE owner_id = ?) AS owns,
+              (SELECT COUNT(*) FROM enrollments WHERE user_id = ? AND status = 'active') AS enrolled,
+              (SELECT COUNT(*) FROM guardian_links WHERE guardian_id = ? OR student_id = ?) AS families`,
+    )
+    .bind(id, id, id, id)
+    .first<{ owns: number; enrolled: number; families: number }>();
+  if (ties?.owns || ties?.enrolled) {
+    throw new HttpError(400, `${user.name} is in ${(ties.owns ?? 0) + (ties.enrolled ?? 0)} class${(ties.owns ?? 0) + (ties.enrolled ?? 0) === 1 ? "" : "es"} at their current school. Remove them from those first.`);
+  }
+  await db.prepare(`UPDATE users SET org_id = ?, is_admin = 0 WHERE id = ?`).bind(org.id, id).run();
+  return c.json({ ok: true, familiesKept: ties?.families ?? 0 });
+}));
+
+/** Archive or bring back a notebook, as its teacher could. */
+app.post("/api/admin/notebooks/:id/archive", handler(async (c) => {
+  await requireSuperadmin(c);
+  const { archived } = await c.req.json<{ archived?: boolean }>();
+  await db.prepare(`UPDATE notebooks SET archived = ?, updated_at = ? WHERE id = ?`).bind(archived ? 1 : 0, now(), param(c, "id")).run();
+  return c.json({ ok: true });
+}));
+
+/** Delete to Recently deleted. Kind is checked against a fixed list. */
+app.delete("/api/admin/:kind/:id", handler(async (c) => {
+  const actor = await requireSuperadmin(c);
+  const kind = param(c, "kind");
+  const id = param(c, "id");
+  const trashId =
+    kind === "users" ? await trashUser(id, actor.id)
+    : kind === "notebooks" ? await trashNotebook(id, actor.id)
+    : kind === "orgs" ? await trashOrg(id, actor.id)
+    : null;
+  if (!trashId) throw new HttpError(400, "That can't be deleted from here");
+  return c.json({ ok: true, trashId, restorableDays: TRASH_DAYS });
+}));
+
+/** What's been deleted, newest first, with what can still be restored. */
+app.get("/api/admin/trash", handler(async (c) => {
+  await requireSuperadmin(c);
+  const rows = await db
+    .prepare(
+      `SELECT t.id, t.kind, t.label, t.deleted_at, t.purge_after, t.restored_at, t.purged_at,
+              u.name AS deleted_by_name, o.name AS org_name
+         FROM trash t LEFT JOIN users u ON u.id = t.deleted_by LEFT JOIN orgs o ON o.id = t.org_id
+        ORDER BY t.deleted_at DESC LIMIT 200`,
+    )
+    .all();
+  return c.json({ items: rows.results ?? [] });
+}));
+
+/** Erase whatever has passed its 30 days now, rather than waiting for the hourly run. */
+app.post("/api/admin/trash/purge-due", handler(async (c) => {
+  await requireSuperadmin(c);
+  return c.json({ purged: await purgeExpired(100) });
+}));
+
+app.post("/api/admin/trash/:id/restore", handler(async (c) => {
+  await requireSuperadmin(c);
+  await restore(param(c, "id"));
   return c.json({ ok: true });
 }));

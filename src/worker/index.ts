@@ -30,6 +30,7 @@ import "./routes/billing-webhooks";
 import "./routes/status";
 import "./routes/contact";
 import { drainMailQueue } from "./lib/mailqueue";
+import { purgeExpired } from "./lib/trash";
 
 /**
  * Queued mail goes out a few at a time, every minute.
@@ -42,6 +43,16 @@ import { drainMailQueue } from "./lib/mailqueue";
 cron("drain-mail-queue", "* * * * *", async () => {
   const { sent, failed } = await drainMailQueue();
   return { sent, failed };
+});
+
+/**
+ * Erase what a superadmin deleted more than 30 days ago. The trigger fires
+ * every minute; this only works once an hour, and each item is idempotent, so
+ * a run that dies halfway just finishes on the next one.
+ */
+cron("purge-trash", "* * * * *", async () => {
+  if (new Date().getUTCMinutes() !== 17) return { skipped: true };
+  return { purged: await purgeExpired() };
 });
 
 auth.allow();

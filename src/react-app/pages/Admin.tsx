@@ -24,7 +24,9 @@ import {
 import "@glideapps/glide-data-grid/dist/index.css";
 import { toast } from "sonner";
 import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
-import { Button, Card, Input, Label, Select } from "../components/ui";
+import { Button, Card, Input, Label, Modal, Select } from "../components/ui";
+import { openContextMenu, type ContextEntry } from "../components/ContextMenu";
+import { Archive, ArchiveRestore, ArrowRightLeft, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import { cn, relativeTime } from "../lib/utils";
@@ -56,10 +58,10 @@ const TABLES: TableSpec[] = [
     key: "orgs",
     label: "Schools",
     endpoint: "orgs",
-    hint: "Sign-in resolves a person to a school by their email domain. The primary domain is fixed once accounts exist under it.",
+    hint: "Sign-in sends a new address to the school whose domain it's on. Changing a primary domain moves nobody who already has an account.",
     columns: [
       { id: "name", title: "School", width: 200, editable: true },
-      { id: "primary_domain", title: "Primary domain", width: 190 },
+      { id: "primary_domain", title: "Primary domain", width: 190, editable: true },
       { id: "teacher_domains", title: "Teacher domains", width: 200, editable: true },
       { id: "student_domains", title: "Student domains", width: 200, editable: true },
       { id: "users", title: "People", width: 90, kind: "number" },
@@ -75,6 +77,7 @@ const TABLES: TableSpec[] = [
     columns: [
       { id: "email", title: "Email", width: 240 },
       { id: "name", title: "Name", width: 170, editable: true },
+      { id: "org_name", title: "School", width: 170 },
       { id: "role", title: "Role", width: 100, editable: true },
       { id: "is_admin", title: "Admin", width: 80, kind: "boolean", editable: true },
       { id: "is_superadmin", title: "Superadmin", width: 110, kind: "boolean", editable: true },
@@ -133,6 +136,13 @@ const TABLES: TableSpec[] = [
   {
     key: "school",
     label: "School",
+    endpoint: "",
+    hint: "",
+    columns: [],
+  },
+  {
+    key: "trash",
+    label: "Recently deleted",
     endpoint: "",
     hint: "",
     columns: [],
@@ -427,7 +437,7 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
   const save = useMutation({
     mutationFn: ({ id, column, value }: { id: string; column: string; value: unknown }) =>
       api.patch(`${base}/${spec.writeKind ?? spec.endpoint}/${id}`, { column, value }),
-    onSuccess: () => qc.invalidateQueries({ queryKey }),
+    onSuccess: () => { toast.success("Saved"); qc.invalidateQueries({ queryKey }); },
     onError: (e: Error) => {
       toast.error(e.message);
       // The grid already painted the new value optimistically; refetching puts
@@ -436,13 +446,51 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
     },
   });
 
+  // Editable columns say so in their header; rows that can be acted on get a "⋯" at the end.
+  const canEdit = scope === "admin";
+  const hasActions = canEdit && ROW_ACTION_KINDS.includes(spec.endpoint);
   const columns: GridColumn[] = useMemo(
-    () => spec.columns.map((c) => ({ title: c.title, id: c.id, width: c.width ?? 150 })),
-    [spec],
+    () => [
+      ...spec.columns.map((c) => ({ title: canEdit && c.editable ? `${c.title} ✎` : c.title, id: c.id, width: c.width ?? 150 })),
+      ...(hasActions ? [{ title: "", id: "__actions", width: 56 }] : []),
+    ],
+    [spec, canEdit, hasActions],
   );
+  const [confirming, setConfirming] = useState<null | { action: "delete"; row: Record<string, unknown> }>(null);
+  const [moving, setMoving] = useState<Record<string, unknown> | null>(null);
+  const act = useMutation({
+    mutationFn: async ({ kind, row, archived }: { kind: "delete" | "archive"; row: Record<string, unknown>; archived?: boolean }) =>
+      kind === "delete"
+        ? api.del(`/api/admin/${spec.endpoint}/${row.id}`)
+        : api.post(`/api/admin/notebooks/${row.id}/archive`, { archived }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: [scope, spec.endpoint] });
+      qc.invalidateQueries({ queryKey: ["admin-trash"] });
+      setConfirming(null);
+      toast.success(v.kind === "delete" ? "Deleted — restorable from Recently deleted for 30 days" : v.archived ? "Archived" : "Brought back");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const rowName = (row: Record<string, unknown>) => String(row.name ?? row.title ?? row.email ?? "");
+  const openRowMenu = (row: Record<string, unknown>, x: number, y: number) => {
+    const entries: ContextEntry[] = [];
+    if (spec.endpoint === "users") {
+      entries.push({ label: "Move to another school…", icon: <ArrowRightLeft />, onSelect: () => setMoving(row) });
+    }
+    if (spec.endpoint === "notebooks") {
+      const archived = !!row.archived;
+      entries.push({ label: archived ? "Bring back from archive" : "Archive", icon: archived ? <ArchiveRestore /> : <Archive />, onSelect: () => act.mutate({ kind: "archive", row, archived: !archived }) });
+    }
+    entries.push({ kind: "separator" });
+    entries.push({ label: "Delete…", icon: <Trash2 />, danger: true, hint: "Restorable for 30 days", onSelect: () => setConfirming({ action: "delete", row }) });
+    openContextMenu({ x, y, title: rowName(row), entries });
+  };
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
+      if (col >= spec.columns.length) {
+        return { kind: GridCellKind.Text, data: "⋯", displayData: "⋯", allowOverlay: false, readonly: true, contentAlign: "center" };
+      }
       const column = spec.columns[col];
       const record = rows[row];
       const raw = record?.[column.id];
@@ -526,6 +574,7 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
             : `${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
           {" · "}
           {spec.hint}
+          {scope === "admin" && spec.columns.some((c) => c.editable) && " Double-click a ✎ cell to change it."}
           {isFetching && " · updating…"}
         </p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -560,6 +609,11 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
             rows={rows.length}
             getCellContent={getCellContent}
             onCellEdited={onCellEdited}
+            onCellClicked={([col, row], ev) => {
+              if (!hasActions || col < spec.columns.length || !rows[row]) return;
+              const b = ev.bounds;
+              openRowMenu(rows[row], b.x + b.width / 2, b.y + b.height);
+            }}
             rowMarkers="number"
             smoothScrollX
             smoothScrollY
@@ -569,7 +623,135 @@ function AdminGrid({ spec, scope = "admin" }: { spec: TableSpec; scope?: AdminSc
           />
         </div>
       )}
+      {confirming && (
+        <ConfirmByName
+          name={rowName(confirming.row)}
+          what={spec.endpoint === "users" ? "account" : spec.endpoint === "orgs" ? "school" : "notebook"}
+          busy={act.isPending}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => act.mutate({ kind: "delete", row: confirming.row })}
+        />
+      )}
+      {moving && <MoveUser user={moving} onClose={() => { setMoving(null); qc.invalidateQueries({ queryKey: [scope, spec.endpoint] }); }} />}
     </div>
+  );
+}
+
+/** Which tables get a row menu. */
+const ROW_ACTION_KINDS = ["users", "notebooks", "orgs"];
+
+/** Deleting asks for the name back — a grid makes a slip too easy. */
+function ConfirmByName({ name, what, busy, onCancel, onConfirm }: { name: string; what: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const [typed, setTyped] = useState("");
+  const ok = typed.trim().toLowerCase() === name.trim().toLowerCase();
+  return (
+    <Modal onClose={onCancel} title={`Delete this ${what}?`}>
+      <p className="text-[16px] text-pine/80">
+        <b>{name}</b> goes to <b>Recently deleted</b>. You can restore it from there for 30 days; after that it's
+        erased for good, as the privacy notice promises.
+        {what === "account" && " Their sign-in stops working at once; their own notebooks go with them."}
+        {what === "notebook" && " Every student's work in it and the assignments built on it go with it."}
+      </p>
+      <Label htmlFor="confirm-name" className="mt-4">Type the name to confirm</Label>
+      <Input id="confirm-name" autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={name} className="mt-1.5" />
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button variant="danger" disabled={!ok || busy} onClick={onConfirm}>
+          <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Move someone to another school — for an account that landed in the wrong one. */
+function MoveUser({ user, onClose }: { user: Record<string, unknown>; onClose: () => void }) {
+  const orgs = useQuery({
+    queryKey: ["admin", "orgs", "picker"],
+    queryFn: () => api.get<{ rows: { id: string; name: string; primary_domain: string }[] }>(`/api/admin/orgs?limit=500`),
+  });
+  const [orgId, setOrgId] = useState("");
+  const move = useMutation({
+    mutationFn: () => api.post(`/api/admin/users/${user.id}/move`, { orgId }),
+    onSuccess: () => { toast.success("Moved"); onClose(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Modal onClose={onClose} title={`Move ${String(user.name ?? user.email)}`}>
+      <p className="text-[16px] text-pine/80">Only someone in no classes can move; remove them from their classes first.</p>
+      <Label htmlFor="move-org" className="mt-4">To school</Label>
+      <Select id="move-org" value={orgId} onChange={(e) => setOrgId(e.target.value)} className="mt-1.5">
+        <option value="">Choose a school…</option>
+        {(orgs.data?.rows ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}{o.primary_domain?.startsWith("solo:") ? "" : ` · ${o.primary_domain}`}</option>)}
+      </Select>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" disabled={!orgId || move.isPending} onClick={() => move.mutate()}>Move</Button>
+      </div>
+    </Modal>
+  );
+}
+
+interface TrashItem {
+  id: string;
+  kind: "user" | "notebook" | "school";
+  label: string;
+  deleted_at: string;
+  purge_after: string;
+  restored_at: string | null;
+  purged_at: string | null;
+  deleted_by_name: string | null;
+  org_name: string | null;
+}
+
+/** Everything a superadmin has deleted: restorable for 30 days, then a record of what went. */
+function RecentlyDeleted() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["admin-trash"], queryFn: () => api.get<{ items: TrashItem[] }>("/api/admin/trash") });
+  const restore = useMutation({
+    mutationFn: (id: string) => api.post(`/api/admin/trash/${id}/restore`, {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-trash"] }); qc.invalidateQueries({ queryKey: ["admin"] }); toast.success("Restored"); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const KIND = { user: "Account", notebook: "Notebook", school: "School" } as const;
+  if (q.isLoading) return <Spinner />;
+  if (q.error) return <ErrorNote error={q.error as Error} />;
+  const items = q.data?.items ?? [];
+  return (
+    <Card className="p-5">
+      <h2 className="font-display text-[17px] text-pine">Recently deleted</h2>
+      <p className="mt-1 text-[16px] text-pine/70">
+        Deleted accounts, notebooks and schools stay here for 30 days and can be put back exactly as they were. After
+        that they're erased for good; the line below stays as the record of what went and who deleted it.
+      </p>
+      {items.length === 0 && <p className="mt-4 text-[16px] text-pine/70">Nothing deleted.</p>}
+      {items.length > 0 && (
+        <ul className="mt-3 divide-y divide-pine/10">
+          {items.map((t) => {
+            const live = !t.restored_at && !t.purged_at;
+            return (
+              <li key={t.id} className="flex flex-wrap items-center gap-3 py-2.5 text-[16px]">
+                <span className="w-24 shrink-0 font-display text-pine/70">{KIND[t.kind] ?? t.kind}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-display text-pine">{t.label}</span>
+                  <span className="block text-pine/70">
+                    Deleted {relativeTime(t.deleted_at)}{t.deleted_by_name ? ` by ${t.deleted_by_name}` : ""}{t.org_name ? ` · ${t.org_name}` : ""}
+                    {live && ` · erased ${new Date(t.purge_after).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
+                    {t.restored_at && ` · restored ${relativeTime(t.restored_at)}`}
+                    {t.purged_at && " · erased"}
+                  </span>
+                </span>
+                {live && (
+                  <Button variant="secondary" size="sm" disabled={restore.isPending} onClick={() => restore.mutate(t.id)}>
+                    <RotateCcw className="h-4 w-4" strokeWidth={2.5} /> Restore
+                  </Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -1067,11 +1249,12 @@ export default function Admin() {
         ))}
       </div>
 
-      {tab === "school" ? (
+      {tab === "trash" ? (
+        <RecentlyDeleted />
+      ) : tab === "school" ? (
         <div className="space-y-4">
           <OrgSettings />
           <FamilySettings />
-        <FamilySettings />
           <MailLog />
           <OrgUsers />
         </div>

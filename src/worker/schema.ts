@@ -1122,3 +1122,33 @@ migrate("033_families", async () => {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_guardian_links_org ON guardian_links(org_id)`),
   ]);
 });
+
+/**
+ * Recently deleted.
+ *
+ * A superadmin's delete moves a user, notebook or school out of the live
+ * tables into a snapshot (kept in storage under `trash/`), so nothing deleted
+ * can leak back into a list through a query that forgot to filter it — and
+ * restoring puts the rows back exactly. After 30 days the cron job erases the
+ * snapshot and anything left behind, which is the window the privacy notice
+ * promises. The row itself stays as the record of who deleted what, when.
+ */
+migrate("034_trash", async () => {
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS trash (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        org_id TEXT,
+        deleted_by TEXT NOT NULL,
+        deleted_at TEXT NOT NULL,
+        purge_after TEXT NOT NULL,
+        restored_at TEXT,
+        purged_at TEXT,
+        detail TEXT NOT NULL DEFAULT ''
+      )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash(purge_after) WHERE restored_at IS NULL AND purged_at IS NULL`),
+  ]);
+});

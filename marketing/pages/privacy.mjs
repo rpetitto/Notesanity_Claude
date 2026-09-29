@@ -196,6 +196,7 @@ export default () =>
         <tr><th>What</th><th>Kept</th></tr>
         <tr><td>Schoolwork, notebooks and grades</td><td>While the school's account is open, unless the school deletes them sooner</td></tr>
         <tr><td>Account details</td><td>While the account exists</td></tr>
+        <tr><td>Deleted accounts, notebooks and schools</td><td>30 days, restorable on the school's request, then permanently erased</td></tr>
         <tr><td>Sign-in sessions</td><td>30 days, then expired and removed</td></tr>
         <tr><td>Sign-in links</td><td>20 minutes, and single use</td></tr>
         <tr><td>Failure logs</td><td>The most recent 500 entries only</td></tr>
@@ -203,7 +204,10 @@ export default () =>
       </table>
       <p>
         When a school asks us to delete its data, we remove it from our live systems within 30 days.
-        Backups age out on their own cycle and are never restored to bring deleted data back.
+        Something we delete is held apart for those 30 days — out of the app, reachable by no one
+        else — so a mistaken deletion can be undone at the school's request; at the end of the 30
+        days it is erased for good, including its files. Only a record that it existed and who deleted
+        it remains. Backups age out on their own cycle and are never restored to bring deleted data back.
       </p>
 
       <h2 id="security">8. How it is protected</h2>

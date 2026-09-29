@@ -18,7 +18,7 @@ import { renderEmail } from "../lib/email";
 import { logMail } from "../lib/maillog";
 import { SUPERADMIN_EMAILS } from "../schema";
 import type { Context } from "hono";
-import { HttpError, handler, noOrgsYet, now, orgForDomain, roleForDomain, setLocalSessionResolver, uid } from "../lib/session";
+import { HttpError, PUBLIC_MAIL_DOMAINS, handler, noOrgsYet, now, orgForDomain, roleForDomain, setLocalSessionResolver, uid } from "../lib/session";
 import { NO_CODE_MESSAGE, linkGuardian, lookupCode, requireCode } from "../lib/family";
 import { joinClass } from "./classes";
 
@@ -177,12 +177,16 @@ async function resolveOrgFor(email: string): Promise<{ orgId: string; role: stri
   if (!org) {
     if (!(await noOrgsYet())) return null;
     const orgId = uid();
+    // A personal address can't give the school its domain — that's how a
+    // school once came to own gmail.com. It gets a placeholder to set on the
+    // Admin page instead.
+    const personal = PUBLIC_MAIL_DOMAINS.has(domain);
     await db
       .prepare(
         `INSERT INTO orgs (id, name, primary_domain, teacher_domains, student_domains, created_at)
          VALUES (?, ?, ?, '', '', ?)`,
       )
-      .bind(orgId, domain, domain, now())
+      .bind(orgId, personal ? "My school" : domain, personal ? `unset:${orgId}` : domain, now())
       .run();
     return { orgId, role: "teacher", isAdmin: 1 };
   }
