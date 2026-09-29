@@ -44,10 +44,24 @@ function StudentAssignmentRedirect() {
   return <Navigate to={`/notebooks/${data.assignment.notebookId}?assignment=${assignmentId}`} replace />;
 }
 
-/** Routes `/assignments/:id` by role — teachers grade, students land in their workspace. */
+/**
+ * Routes `/assignments/:id` by how the person is in *that* class — whoever
+ * teaches it grades, everyone else does the work. Asked of the class, not the
+ * account: a teacher can be enrolled as a student in someone else's class
+ * (trying it out, or taking a course), and sending them to grade a class they
+ * don't teach dead-ended.
+ */
 function AssignmentRoute() {
   const { user } = useSession();
-  return user?.role === "teacher" ? <Grading /> : <StudentAssignmentRedirect />;
+  const { assignmentId } = useParams<{ assignmentId: string }>();
+  const probe = useQuery({
+    queryKey: ["assignment", assignmentId],
+    queryFn: () => api.get<{ isTeacher?: boolean; assignment: { notebookId: string } }>(`/api/assignments/${assignmentId}`),
+    enabled: !!assignmentId && user?.role === "teacher",
+  });
+  if (user?.role !== "teacher") return <StudentAssignmentRedirect />;
+  if (probe.isLoading) return <Spinner label="Opening assignment…" />;
+  return probe.data && probe.data.isTeacher === false ? <StudentAssignmentRedirect /> : <Grading />;
 }
 
 export default function App() {

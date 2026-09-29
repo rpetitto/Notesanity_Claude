@@ -466,24 +466,27 @@ export default function Workspace() {
    * student's own notebook is the opposite case: there is nothing for them to
    * edit, and the workspace is exactly the right place to read it.
    */
+  // Whether they teach *this* class, not what their account is: a teacher can
+  // be enrolled as a student in someone else's class, and belongs here then.
   const isTeacherRole = user?.role === "teacher";
   const metaQuery = useQuery({
     queryKey: ["notebook-meta", notebookId],
-    queryFn: () => api.get<{ notebook: { kind?: string } }>(`/api/notebooks/${notebookId}`),
+    queryFn: () => api.get<{ notebook: { kind?: string }; isTeacher?: boolean }>(`/api/notebooks/${notebookId}`),
     enabled: !!notebookId && isTeacherRole,
   });
   const studentOwned = metaQuery.data?.notebook.kind === "student";
+  const teachesThis = !!metaQuery.data?.isTeacher && !studentOwned;
 
   useEffect(() => {
-    if (isTeacherRole && notebookId && metaQuery.data && !studentOwned) {
+    if (isTeacherRole && notebookId && metaQuery.data && teachesThis) {
       navigate(`/notebooks/${notebookId}/edit`, { replace: true });
     }
-  }, [isTeacherRole, studentOwned, metaQuery.data, notebookId, navigate]);
+  }, [isTeacherRole, teachesThis, metaQuery.data, notebookId, navigate]);
 
   const workQuery = useQuery({
     queryKey: ["work", notebookId],
     queryFn: () => api.get<WorkResponse>(`/api/notebooks/${notebookId}/work`),
-    enabled: !!notebookId && (!isTeacherRole || studentOwned),
+    enabled: !!notebookId && (!isTeacherRole || (!!metaQuery.data && !teachesThis)),
   });
 
   const assignmentQuery = useQuery({
