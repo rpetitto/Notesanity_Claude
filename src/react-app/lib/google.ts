@@ -72,7 +72,53 @@ function loadGis(): Promise<void> {
   return gisPromise;
 }
 
-const tokens = new Map<string, { token: string; expiresAt: number }>();
+/**
+ * Google access tokens, remembered for their hour of life.
+ *
+ * Kept in memory and in localStorage, keyed by the Notesanity account, so a
+ * page load, a new tab or the next step of a task doesn't ask Google again —
+ * asking every time was the complaint. Keyed by account so a shared computer
+ * never hands one person's Google access to the next person who signs in. A
+ * token that already covers the scopes asked for is reused whichever request
+ * got it, so granting "post to Classroom" also covers "read the roster".
+ */
+type Cached = { token: string; expiresAt: number; scopes: string[] };
+const tokens = new Map<string, Cached>();
+let account: { email: string; id: string } | null = null;
+
+/** Who is signed in here — lets Google skip its account picker, and keys the remembered tokens. */
+export function setGoogleAccount(next: { email: string; id: string } | null) {
+  if (account?.id !== next?.id) tokens.clear();
+  account = next;
+}
+
+const storeKey = () => (account ? `notesanity:google-tokens:${account.id}` : null);
+
+/** Signing out forgets Google too, whichever sign-out link was used. */
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (e) => {
+    if (!(e.target as Element | null)?.closest?.('a[href="/api/auth/leave"]')) return;
+    tokens.clear();
+    try {
+      for (const k of Object.keys(localStorage)) if (k.startsWith("notesanity:google-tokens:")) localStorage.removeItem(k);
+    } catch { /* private mode */ }
+  }, true);
+}
+function loadStored(): Cached[] {
+  const key = storeKey();
+  if (!key) return [];
+  try { return (JSON.parse(localStorage.getItem(key) ?? "[]") as Cached[]).filter((t) => t.expiresAt > Date.now() + 60_000); } catch { return []; }
+}
+function saveStored(list: Cached[]) {
+  const key = storeKey();
+  if (!key) return;
+  try { localStorage.setItem(key, JSON.stringify(list.filter((t) => t.expiresAt > Date.now() + 60_000))); } catch { /* private mode */ }
+}
+function covering(scope: string): Cached | undefined {
+  const wanted = scope.split(" ").filter(Boolean);
+  const all = [...tokens.values(), ...loadStored()];
+  return all.find((t) => t.expiresAt > Date.now() + 60_000 && wanted.every((w) => t.scopes.includes(w)));
+}
 
 /** Load Google's script ahead of a click that will need it, so the permission popup opens straight from the click. */
 export function preloadGoogle() {
@@ -80,30 +126,36 @@ export function preloadGoogle() {
 }
 
 /**
- * Request (or reuse) an access token for a scope set. Prompts only when needed.
- * `quiet` lets Google skip the consent screen for a permission already granted
- * — for a student turning work in, who would otherwise see it every visit.
+ * An access token for a scope set: a remembered one when it covers the scopes,
+ * otherwise Google's popup — which asks for consent only for scopes not
+ * granted before, and goes straight to the signed-in account.
  */
-export async function getToken(scope: string, opts: { quiet?: boolean } = {}): Promise<string> {
+export async function getToken(scope: string, _opts: { quiet?: boolean } = {}): Promise<string> {
   if (!CLIENT_ID) {
     throw new Error("Google integration isn't configured — set VITE_GOOGLE_CLIENT_ID and redeploy.");
   }
-  const cached = tokens.get(scope);
-  if (cached && cached.expiresAt > Date.now() + 60_000) return cached.token;
+  const cached = covering(scope);
+  if (cached) return cached.token;
 
   await loadGis();
   return new Promise<string>((resolve, reject) => {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID,
       scope,
+      include_granted_scopes: true,
+      ...(account?.email ? { hint: account.email, login_hint: account.email } : {}),
       callback: (resp: any) => {
         if (resp.error) return reject(new Error(resp.error_description || resp.error));
-        tokens.set(scope, { token: resp.access_token, expiresAt: Date.now() + (resp.expires_in ?? 3600) * 1000 });
+        const granted = String(resp.scope ?? scope).split(" ").filter(Boolean);
+        const entry: Cached = { token: resp.access_token, expiresAt: Date.now() + (resp.expires_in ?? 3600) * 1000, scopes: granted };
+        tokens.set(granted.sort().join(" "), entry);
+        saveStored([...loadStored().filter((t) => t.token !== entry.token), entry]);
         resolve(resp.access_token);
       },
       error_callback: (err: any) => reject(new Error(err?.message ?? "Google authorization was canceled")),
     });
-    client.requestAccessToken({ prompt: cached || opts.quiet ? "" : "consent" });
+    // "" lets Google skip anything already agreed to; it shows consent only for new scopes.
+    client.requestAccessToken({ prompt: "" });
   });
 }
 

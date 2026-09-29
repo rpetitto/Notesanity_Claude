@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Me } from "./api";
+import { setGoogleAccount } from "./google";
 
 export interface Impersonating {
   superadminEmail: string;
@@ -37,6 +38,8 @@ export function useSession() {
     retry: false,
     staleTime: 60_000,
   });
+  // Google's remembered tokens belong to this account and no other.
+  if (!q.isLoading) setGoogleAccount(q.data?.user ? { email: q.data.user.email, id: q.data.user.id } : null);
   return {
     user: q.data?.user ?? null,
     org: q.data?.org ?? null,
