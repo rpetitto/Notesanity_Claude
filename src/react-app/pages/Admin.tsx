@@ -30,6 +30,7 @@ import { Archive, ArchiveRestore, ArrowRightLeft, RotateCcw, Trash2 } from "luci
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import { cn, relativeTime } from "../lib/utils";
+import { confirmDialog } from "../components/ConfirmDialog";
 
 type ColumnKind = "text" | "number" | "boolean";
 
@@ -844,7 +845,7 @@ function FamilySettings() {
                 variant="secondary"
                 size="sm"
                 disabled={unlink.isPending}
-                onClick={() => { if (confirm(`Stop ${l.guardian_name} seeing ${l.student_name}'s work?`)) unlink.mutate(l.id); }}
+                onClick={async () => { if (await confirmDialog({ title: `Remove ${l.guardian_name}?`, body: `They'll stop seeing ${l.student_name}'s work.`, confirmLabel: "Remove", tone: "danger" })) unlink.mutate(l.id); }}
               >
                 Remove
               </Button>

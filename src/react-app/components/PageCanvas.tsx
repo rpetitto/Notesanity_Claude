@@ -179,6 +179,8 @@ const MARKING_TOOLS: ToolKind[] = ["pen", "highlighter", "eraser", "shape"];
 
 /** What a pen tap can land on instead of drawing — see `typeableUnder`, and `.tap-probe` in index.css. */
 const TAP_TARGETS = '[data-layer="fields"] [data-typeable="1"], .rich-text a[href]';
+/** The teacher's answer boxes alone — what a text-tool tap types into instead of adding a note. */
+const FIELD_TARGETS = '[data-layer="fields"] [data-typeable="1"]';
 
 export default function PageCanvas({
   pdfUrl, sourceIndex, pageWidth, pageHeight, pattern, patternColor, scale,
@@ -541,6 +543,14 @@ export default function PageCanvas({
       // clobbers the new box's autoFocus, leaving the student typing into
       // nothing.
       e.preventDefault();
+      // A tap on one of the teacher's answer boxes means "type here", not "put
+      // a note of my own on top of it" — so it goes into the box, the way a
+      // pen tap does.
+      const box = typeableUnder(e.clientX, e.clientY, FIELD_TARGETS);
+      if (box) {
+        const focusable = box.matches("textarea, input, select") ? box : box.querySelector<HTMLElement>("textarea, input, select");
+        if (focusable) { focusable.focus(); return; }
+      }
       activePointer.current = e.pointerId;
       surface.setPointerCapture(e.pointerId);
       textPress.current = { x, y, clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId, rect: null };

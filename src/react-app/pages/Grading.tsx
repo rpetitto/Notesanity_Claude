@@ -539,9 +539,27 @@ export default function Grading() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /**
+   * Whether Classroom held something back last time — the only time a second
+   * send helps. Remembered per assignment on this device, so the button is
+   * there when it's needed and gone once everything has gone through.
+   */
+  const heldKey = `notesanity:classroom-held:${assignmentId}`;
+  const [classroomHeld, setClassroomHeld] = useState<boolean>(() => {
+    try { return localStorage.getItem(heldKey) === "1"; } catch { return false; }
+  });
+  const markHeld = (held: boolean) => {
+    setClassroomHeld(held);
+    try { if (held) localStorage.setItem(heldKey, "1"); else localStorage.removeItem(heldKey); } catch { /* private mode */ }
+  };
+
   function reportClassroom(res: { classroom: GradePushResult | null; classroomError: string | null }) {
+      if (res.classroomError || res.classroom) markHeld(!!res.classroomError || (res.classroom?.held ?? 0) > 0);
       if (res.classroomError) {
-        toast.error("Google Classroom didn't take the grades", { description: res.classroomError });
+        toast.error("Google Classroom didn't take the grades", {
+          description: res.classroomError,
+          action: { label: "Send again", onClick: () => resendClassroom.mutate() },
+        });
       } else if (res.classroom) {
         const { returned, held, missing } = res.classroom;
         if (returned > 0) {
@@ -551,7 +569,8 @@ export default function Grading() {
           toast.message(`${held} grade${held === 1 ? " is" : "s are"} waiting in Classroom`, {
             description:
               "Classroom won't return a grade on work that wasn't turned in there, so it's a draft grade in your Classroom " +
-              "gradebook. Once the student turns it in on Classroom, press Send grades to Classroom again — or return it from Classroom.",
+              "gradebook. Once the student turns it in on Classroom, send it again — or return it from Classroom.",
+            action: { label: "Send again", onClick: () => resendClassroom.mutate() },
           });
         }
         if (missing.length > 0) {
@@ -656,7 +675,7 @@ export default function Grading() {
               <Send className="h-4 w-4" strokeWidth={2.5} /> Nothing to return yet
             </Button>
           )}
-          {assignment.googleCourseId && assignment.googleCourseworkId && hasGoogleClientId && rows.some((r) => r.graded && r.returnedAt) && (
+          {classroomHeld && assignment.googleCourseId && assignment.googleCourseworkId && hasGoogleClientId && rows.some((r) => r.graded && r.returnedAt) && (
             <Button variant="secondary" onClick={() => resendClassroom.mutate()} disabled={resendClassroom.isPending} title="Send the returned grades to Google Classroom again">
               <GoogleIcon product="classroom" /> {resendClassroom.isPending ? "Sending…" : "Send grades to Classroom"}
             </Button>

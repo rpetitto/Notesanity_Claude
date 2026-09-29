@@ -35,6 +35,7 @@ import PushToClassesModal from "../components/PushToClassesModal";
 import { useBackTo } from "../lib/useBackTo";
 import { cn, formatDue, DEFAULT_ACCENT } from "../lib/utils";
 import GoogleIcon from "../components/GoogleIcon";
+import { confirmDialog } from "../components/ConfirmDialog";
 
 /** Header controls share one height so a row of them lines up. */
 /** The header's three actions: a size that fits three across a phone, the full size from `sm`. */
@@ -842,20 +843,21 @@ export default function NotebookEditor() {
   });
 
   /** Deleting destroys student work, so spell out the consequence first. */
-  const confirmDelete = (pageIds: string[]) => {
+  const confirmDelete = async (pageIds: string[]) => {
     const assigned = pageIds.filter((id) => (assignmentCounts[id] ?? 0) > 0).length;
-    const lines = [
-      pageIds.length === 1
-        ? "Delete this page permanently?"
-        : `Delete ${pageIds.length} pages permanently?`,
-      "",
-      "Every student's writing on it will be deleted too. This can't be undone.",
-    ];
-    if (assigned > 0) {
-      lines.push("", `${assigned} of them ${assigned === 1 ? "is" : "are"} part of an assignment and will be removed from it.`);
-    }
-    lines.push("", "To hide a page from students but keep their work, use Archive instead.");
-    if (window.confirm(lines.join("\n"))) deletePages.mutate(pageIds);
+    const ok = await confirmDialog({
+      title: pageIds.length === 1 ? "Delete this page for good?" : `Delete ${pageIds.length} pages for good?`,
+      tone: "danger",
+      confirmLabel: pageIds.length === 1 ? "Delete page" : `Delete ${pageIds.length} pages`,
+      body: (
+        <>
+          <p>Every student's writing on {pageIds.length === 1 ? "it" : "them"} is deleted too. This can't be undone.</p>
+          {assigned > 0 && <p className="mt-2">{assigned} of them {assigned === 1 ? "is" : "are"} part of an assignment and will be removed from it.</p>}
+          <p className="mt-2">To hide a page from students but keep their work, use Archive instead.</p>
+        </>
+      ),
+    });
+    if (ok) deletePages.mutate(pageIds);
   };
 
   const addPages = async (file: File) => {

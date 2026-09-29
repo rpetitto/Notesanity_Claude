@@ -14,6 +14,7 @@ import PageThumb from "../components/PageThumb";
 import NewNotebookModal from "../components/NewNotebookModal";
 import { relativeTime } from "../lib/utils";
 import { useNavigate } from "react-router-dom";
+import { confirmDialog } from "../components/ConfirmDialog";
 
 /** `GET /api/classes` rows also carry `emoji` — declared locally since `ClassSummary`
  * (shared with other owners' code) doesn't yet. There's no `hasCover` flag on this
@@ -236,8 +237,8 @@ function MyNotebooks() {
               <button
                 type="button"
                 aria-label={`Delete ${nb.title}`}
-                onClick={() => {
-                  if (window.confirm(`Delete "${nb.title}" and everything in it? This can't be undone.`)) {
+                onClick={async () => {
+                  if (await confirmDialog({ title: `Delete "${nb.title}"?`, body: "Everything in it goes too. This can't be undone.", confirmLabel: "Delete", tone: "danger" })) {
                     remove.mutate(nb.id);
                   }
                 }}

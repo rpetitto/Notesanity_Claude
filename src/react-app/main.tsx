@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 import App from "./App";
 import { ContextMenuHost } from "./components/ContextMenu";
+import { ConfirmHost } from "./components/ConfirmDialog";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -29,6 +30,7 @@ createRoot(document.getElementById("root")!).render(
         <App />
         <Toaster position="top-center" richColors closeButton />
         <ContextMenuHost />
+        <ConfirmHost />
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

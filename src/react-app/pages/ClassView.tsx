@@ -22,6 +22,7 @@ import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/u
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 import GoogleIcon from "../components/GoogleIcon";
 import FamilyAccessModal from "../components/FamilyAccessModal";
+import { confirmDialog } from "../components/ConfirmDialog";
 
 const QUICK_EMOJI = ["📚", "🔬", "🧮", "🎨", "🎵", "🌍", "⚗️", "📐", "🏛️", "💻", "✍️", "🧪", "📊", "🎭", "⚽", "🌱"];
 const SWATCHES = [
@@ -1616,8 +1617,8 @@ export default function ClassView() {
                       label="Remove co-teacher"
                       variant="ghost"
                       className="h-8 w-8 hover:bg-[#a3341f]/10 hover:text-[#a3341f]"
-                      onClick={() => {
-                        if (confirm(`Remove ${t.name} as a co-teacher? They keep their account but lose access to this class.`)) {
+                      onClick={async () => {
+                        if (await confirmDialog({ title: `Remove ${t.name} as a co-teacher?`, body: "They keep their account but lose access to this class.", confirmLabel: "Remove", tone: "danger" })) {
                           removeTeacherMutation.mutate(t.id);
                         }
                       }}

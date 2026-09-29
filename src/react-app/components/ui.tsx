@@ -10,7 +10,7 @@
  * that has come back done. Everything else is Pine on Oat.
  */
 
-import { forwardRef, useCallback, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -438,12 +438,16 @@ export function Menu({
 export function Modal({
   onClose, children, className, title,
 }: { onClose: () => void; children: ReactNode; className?: string; title?: string }) {
+  const titleId = useId();
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-pine/40 p-0 sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
         className={cn(
           "max-h-[88vh] w-full overflow-y-auto rounded-t-[22px] border-[3px] border-pine bg-white p-5",
           "sm:max-w-lg sm:rounded-[22px] sm:shadow-[6px_6px_0_0_var(--color-pine)]",
@@ -452,7 +456,7 @@ export function Modal({
         style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {title && <h2 className="mb-3 text-[22px]">{title}</h2>}
+        {title && <h2 id={titleId} className="mb-3 text-[22px]">{title}</h2>}
         {children}
       </div>
     </div>

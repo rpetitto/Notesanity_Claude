@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Spinner, ErrorNote } from "./Shell";
 import { Button, IconButton, Input, Modal } from "./ui";
 import { api } from "../lib/api";
+import { confirmDialog } from "./ConfirmDialog";
 
 interface FamilyRow {
   id: string;
@@ -130,7 +131,7 @@ export default function FamilyAccessModal({ classId, className, onClose }: { cla
                   <IconButton
                     label={`Make a new code for ${r.name}`}
                     variant="ghost"
-                    onClick={() => { if (confirm(`Make a new code for ${r.name}? The old one stops working; families already linked stay linked.`)) newCode.mutate(r.id); }}
+                    onClick={async () => { if (await confirmDialog({ title: `New family code for ${r.name}?`, body: "The old code stops working at once. Families already linked stay linked.", confirmLabel: "Make a new code" })) newCode.mutate(r.id); }}
                   >
                     <RefreshCw className="h-4 w-4" strokeWidth={2.5} />
                   </IconButton>
@@ -162,7 +163,7 @@ export default function FamilyAccessModal({ classId, className, onClose }: { cla
                           label={`Remove ${g.name}`}
                           variant="ghost"
                           className="h-9 w-9 hover:bg-[#a3341f]/10 hover:text-[#a3341f]"
-                          onClick={() => { if (confirm(`Stop ${g.name} seeing ${r.name}'s work?`)) unlink.mutate({ studentId: r.id, guardianId: g.id }); }}
+                          onClick={async () => { if (await confirmDialog({ title: `Remove ${g.name}?`, body: `They'll stop seeing ${r.name}'s work. To see it again they'd need a family code.`, confirmLabel: "Remove", tone: "danger" })) unlink.mutate({ studentId: r.id, guardianId: g.id }); }}
                         >
                           <UserX className="h-4 w-4" strokeWidth={2.5} />
                         </IconButton>

@@ -22,6 +22,7 @@ import {
 } from "../lib/patterns";
 import { cn, formatDue, isOverdue } from "../lib/utils";
 import GoogleIcon from "../components/GoogleIcon";
+import { confirmDialog } from "../components/ConfirmDialog";
 
 /** Header controls share one height so a row of them lines up. */
 const BUTTON_ROW =
@@ -778,7 +779,7 @@ export default function Workspace() {
    * It goes through the same setters an ordinary edit does, so it lands in the
    * undo history and saves like anything else.
    */
-  const clearVisiblePage = () => {
+  const clearVisiblePage = async () => {
     if (!visiblePage || !data) return;
     const target = annotating ? "teacher" : "student";
     const existing = (target === "teacher" ? work.teacherLayers : work.studentLayers)[visiblePage];
@@ -793,9 +794,9 @@ export default function Workspace() {
     }
     const parts = [
       hasInk ? "everything written on it" : "",
-      filled.length ? `${filled.length} answer${filled.length === 1 ? "" : ""} typed into boxes` : "",
+      filled.length ? `${filled.length} answer${filled.length === 1 ? "" : "s"} typed into boxes` : "",
     ].filter(Boolean).join(" and ");
-    if (!window.confirm(`Clear this page? That removes ${parts}. The boxes themselves stay.`)) return;
+    if (!(await confirmDialog({ title: "Clear this page?", body: `That removes ${parts}. The boxes themselves stay.`, confirmLabel: "Clear page", tone: "danger" }))) return;
 
     work.setLayer(visiblePage, emptyLayer());
     for (const f of filled) work.setFieldValue(f.id, "");
@@ -986,8 +987,14 @@ export default function Workspace() {
             <Button
               variant="primary"
               data-tour="turn-in"
-              onClick={() => {
-                if (confirm("Turn in this assignment? These pages lock once you do.")) {
+              onClick={async () => {
+                if (await confirmDialog({
+                  title: "Turn in this assignment?",
+                  body: classroom
+                    ? "These pages lock once you do. It's turned in on Google Classroom too."
+                    : "These pages lock once you do. You can take it back until it's graded.",
+                  confirmLabel: "Turn in",
+                })) {
                   submit.mutate();
                 }
               }}
