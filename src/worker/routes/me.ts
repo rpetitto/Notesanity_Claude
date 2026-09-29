@@ -1,7 +1,7 @@
 import { app, db } from "../platform";
 import { billingConfigured } from "../platform/billing";
 import { BETA_FREE, PLANS } from "../../shared/plans.mjs";
-import { currentUser, handler, now, requireUser, HttpError, activeImpersonation, orgForDomain } from "../lib/session";
+import { currentUser, handler, now, requireUser, HttpError, activeImpersonation, orgForDomain, uid } from "../lib/session";
 import { linkGuardian, requireCode } from "../lib/family";
 import { planForUser, notebooksUsedStatement, quotaFrom, departmentFor, requirePlan } from "../lib/plans";
 
@@ -129,9 +129,22 @@ app.post("/api/me/role", handler(async (c) => {
     return c.json({ ok: true, role: "student" });
   }
   if (role === "teacher") {
-    if (!schoolAddress) throw new HttpError(403, "Teacher accounts use a school email address.");
-    await db.prepare(`UPDATE users SET requested_role = 'teacher' WHERE id = ?`).bind(user.id).run();
-    return c.json({ ok: true, role: "pending", requestedRole: "teacher" });
+    // On the school's own address, trusted, as at sign-in. Anywhere else, the
+    // account moves into a space of its own rather than staying in a school it
+    // only landed in by accident of its domain.
+    if (schoolAddress) {
+      await db.prepare(`UPDATE users SET role = 'teacher', requested_role = '' WHERE id = ?`).bind(user.id).run();
+    } else {
+      const orgId = uid();
+      await db.batch([
+        db.prepare(
+          `INSERT INTO orgs (id, name, primary_domain, teacher_domains, student_domains, solo, created_at)
+           VALUES (?, ?, ?, '', '', 1, ?)`,
+        ).bind(orgId, `${user.name || user.email.split("@")[0]}'s classroom`, `solo:${orgId}`, now()),
+        db.prepare(`UPDATE users SET role = 'teacher', requested_role = '', is_admin = 0, org_id = ? WHERE id = ?`).bind(orgId, user.id),
+      ]);
+    }
+    return c.json({ ok: true, role: "teacher" });
   }
   if (role === "guardian") {
     const holder = await requireCode(familyCode);
@@ -164,6 +177,11 @@ app.patch("/api/org", handler(async (c) => {
   const body = await c.req.json<{ name?: string; teacherDomains?: string; studentDomains?: string; familyAccess?: boolean }>();
   const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id).first<any>();
   if (!org) throw new HttpError(404, "Org not found");
+  // A teacher's own space claims no domain — otherwise anyone could sign up
+  // and have a whole school's addresses land in their classroom.
+  if (org.solo && ((body.teacherDomains ?? "") !== "" || (body.studentDomains ?? "") !== "")) {
+    throw new HttpError(403, "A personal classroom can't claim email domains. Ask us to set up your school instead.");
+  }
   await db
     .prepare(`UPDATE orgs SET name = ?, teacher_domains = ?, student_domains = ?, family_access = ? WHERE id = ?`)
     .bind(

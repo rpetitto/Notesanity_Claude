@@ -89,12 +89,19 @@ const BODY = () => `
       ],
       [
         "Who can create an account?",
-        `Teachers and students sign in with an address on a domain your school has approved; an
-         admin decides which domains count as staff and which as students, from the <b>Admin</b>
-         page. Sign-in asks who you are first — teacher, student, or parent or guardian — and makes
-         an account only when your address backs that up. Personal addresses like Gmail never count
-         as a school's. Where staff and students share a domain, a new teacher waits for an admin
-         to confirm them. Parents and guardians can use any address, with a family code.`,
+        `Any teacher. Sign-in asks who you are first — teacher, student, or parent or guardian. A
+         teacher whose school is on Notesanity uses their school address and joins it; any other
+         teacher gets a classroom of their own on the Free plan. Students sign in with their
+         school address, or with a class code from a teacher who has their own classroom. Parents
+         and guardians use any address with a family code. Personal addresses like Gmail never
+         count as a school's, and an admin can change anyone's role from the <b>Admin</b> page.`,
+      ],
+      [
+        "My school isn't on Notesanity. Can I still use it?",
+        `Yes. Choose <b>Teacher</b> and sign in with any address, and you get a classroom of your own:
+         the same app, on the Free plan, with Pro when you want it. Your students join with your
+         class's code — they choose <b>Student</b>, enter it, and sign in with any address — or you
+         invite them by email. Nobody else lands in your classroom.`,
       ],
     ])}
 

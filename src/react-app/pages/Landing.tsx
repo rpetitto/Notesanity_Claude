@@ -49,6 +49,7 @@ export default function Landing({ error }: { error?: Error | null }) {
     try { if (d) localStorage.setItem(DOOR_KEY, d); else localStorage.removeItem(DOOR_KEY); } catch { /* ignore */ }
   };
   const [familyCode, setFamilyCode] = useState(codeInUrl);
+  const [classCode, setClassCode] = useState("");
   const [codeCheck, setCodeCheck] = useState<{ valid: boolean; child?: string; reason?: string } | null>(null);
   useEffect(() => {
     const code = familyCode.replace(/[^a-z0-9]/gi, "");
@@ -60,7 +61,11 @@ export default function Landing({ error }: { error?: Error | null }) {
     return () => { dead = true; };
   }, [familyCode, door]);
   /** What every sign-in call carries: the door, and a family code when there is one. */
-  const intent = () => ({ door: door ?? undefined, familyCode: door === "family" && familyCode.trim() ? familyCode.trim() : undefined });
+  const intent = () => ({
+    door: door ?? undefined,
+    familyCode: door === "family" && familyCode.trim() ? familyCode.trim() : undefined,
+    classCode: door === "student" && classCode.trim() ? classCode.trim() : undefined,
+  });
   // Google's button calls back long after it was mounted; this keeps its answer current.
   const intentRef = useRef(intent);
   intentRef.current = intent;
@@ -260,6 +265,29 @@ export default function Landing({ error }: { error?: Error | null }) {
                 </div>
               )}
 
+              {door === "student" && (
+                <div className="mb-5">
+                  <Label htmlFor="class-code">Class code (if you have one)</Label>
+                  <Input
+                    id="class-code"
+                    value={classCode}
+                    onChange={(e) => setClassCode(e.target.value.toUpperCase())}
+                    placeholder="From your teacher"
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    className="mt-1.5 font-display tracking-[0.12em]"
+                  />
+                  <p className="mt-1.5 text-[16px] text-pine/70">Signing in with your school email? You can leave this blank.</p>
+                </div>
+              )}
+
+              {door === "teacher" && (
+                <p className="mb-5 text-[16px] text-pine/75">
+                  Use your school email if your school is on Notesanity. Otherwise any address gets you a classroom of your own, free.
+                </p>
+              )}
+
               {/* Method switch — neither option is the mint action; the submit button is. */}
               <div className="mb-5 flex gap-1 rounded-full border-[3px] border-pine p-1">
                 {([
@@ -288,7 +316,7 @@ export default function Landing({ error }: { error?: Error | null }) {
                   else withPassword.mutate();
                 }}
               >
-                <Label htmlFor="email">{door === "family" ? "Your email" : "School email"}</Label>
+                <Label htmlFor="email">{door === "student" ? "School email" : "Your email"}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -296,7 +324,7 @@ export default function Landing({ error }: { error?: Error | null }) {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder={door === "family" ? "you@example.com" : "you@school.edu"}
+                  placeholder={door === "student" || door === "teacher" ? "you@school.edu" : "you@example.com"}
                   className="mt-1.5"
                 />
 

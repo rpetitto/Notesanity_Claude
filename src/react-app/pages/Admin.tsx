@@ -722,9 +722,8 @@ function OrgSettings() {
       <p className="mt-1 text-[16px] text-pine/70">
         Only these domains can sign in. Anyone else gets no email and no account — so if staff aren't receiving
         sign-in links, check their domain is listed here first. Personal addresses like gmail.com never count as a
-        school's domain; parents and guardians sign in with a family code instead. A domain on both lists (staff and
-        students sharing one) makes new accounts students, and anyone who asks to be a teacher waits for you to confirm
-        them under People.
+        school's domain; parents and guardians sign in with a family code instead. On a domain both lists share, or
+        your school's only domain, people choose Teacher or Student as they sign in — change anyone's role under People.
       </p>
       <p className="mt-2 text-[16px] text-pine/70">
         Currently allowed: <span className="font-display font-bold text-pine">

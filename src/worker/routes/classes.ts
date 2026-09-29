@@ -393,6 +393,11 @@ app.post("/api/classes/:id/rotate-code", handler(async (c) => {
 app.post("/api/classes/join", handler(async (c) => {
   const user = await requireUser(c);
   const { code } = await c.req.json<{ code: string }>();
+  return c.json({ class: await joinClass(user, code) });
+}));
+
+/** Join (or rejoin) a class by its code — the join route, and signing up with a class code. */
+export async function joinClass(user: { id: string; org_id: string }, code: string) {
   const cls = await db
     .prepare(`SELECT * FROM classes WHERE join_code = ? AND archived = 0`)
     .bind((code ?? "").trim().toUpperCase())
@@ -418,8 +423,8 @@ app.post("/api/classes/join", handler(async (c) => {
     ).bind(uid(), cls.id, user.id, now()),
     ...provisionStatements(cls.id, user.id),
   ]);
-  return c.json({ class: { id: cls.id, name: cls.name } });
-}));
+  return { id: cls.id as string, name: cls.name as string };
+}
 
 /** Invite students by email — creates placeholder accounts they claim on first sign-in. */
 app.post("/api/classes/:id/invite", handler(async (c) => {

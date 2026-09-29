@@ -20,6 +20,7 @@ import { SUPERADMIN_EMAILS } from "../schema";
 import type { Context } from "hono";
 import { HttpError, handler, noOrgsYet, now, orgForDomain, roleForDomain, setLocalSessionResolver, uid } from "../lib/session";
 import { NO_CODE_MESSAGE, linkGuardian, lookupCode, requireCode } from "../lib/family";
+import { joinClass } from "./classes";
 
 const SESSION_COOKIE = "notesanity_session";
 const SESSION_DAYS = 30;
@@ -200,16 +201,33 @@ async function resolveOrgFor(email: string): Promise<{ orgId: string; role: stri
  * family code, and is the only way an address the school doesn't own gets in.
  */
 export type Door = "teacher" | "student" | "family";
-export interface Intent { door?: Door; familyCode?: string }
+export interface Intent { door?: Door; familyCode?: string; classCode?: string }
 
 export function readIntent(body: any): Intent {
   const door = ["teacher", "student", "family"].includes(body?.door) ? body.door as Door : undefined;
   const familyCode = typeof body?.familyCode === "string" && body.familyCode.trim() ? body.familyCode : undefined;
-  return { door, familyCode };
+  const classCode = typeof body?.classCode === "string" && body.classCode.trim() ? body.classCode.trim().toUpperCase() : undefined;
+  return { door, familyCode, classCode };
 }
 
-const SCHOOL_ADDRESS_MESSAGE =
-  "Sign in with your school email address. If you're a parent or guardian, choose Family and use the code from your child's teacher.";
+const STUDENT_ADDRESS_MESSAGE =
+  "Sign in with your school email address, or enter the class code your teacher gave you. If you're a parent or guardian, choose Parent or guardian and use the code from your child's teacher.";
+
+/**
+ * A class a student may join by its code without a school address: one in a
+ * teacher's own space, where the teacher handing out the code is the only
+ * say-so there is. A school's classes still go by the school's domains.
+ */
+async function soloClassFor(code: string | undefined) {
+  if (!code) return null;
+  return await db
+    .prepare(
+      `SELECT c.id, c.org_id FROM classes c JOIN orgs o ON o.id = c.org_id AND o.solo = 1
+        WHERE c.join_code = ? AND c.archived = 0`,
+    )
+    .bind(code)
+    .first<{ id: string; org_id: string }>();
+}
 
 /** Would this address get an account through this door? No side effects beyond `resolveOrgFor`'s bootstrap. */
 async function canCreate(email: string, intent: Intent): Promise<boolean> {
@@ -217,7 +235,32 @@ async function canCreate(email: string, intent: Intent): Promise<boolean> {
     const holder = await lookupCode(intent.familyCode);
     return !!holder?.familyAccess;
   }
-  return !!(await resolveOrgFor(email).catch(() => null));
+  const resolved = await resolveOrgFor(email).catch(() => null);
+  if (intent.door === "teacher") return !resolved || resolved.role !== "student";
+  if (resolved) return true;
+  return intent.door === "student" && !!(await soloClassFor(intent.classCode));
+}
+
+/** A space of one's own, for a teacher whose school isn't here. It claims no domain. */
+async function soloSpaceFor(email: string, name?: string): Promise<string> {
+  const orgId = uid();
+  const who = name?.trim() || email.split("@")[0];
+  await db
+    .prepare(
+      `INSERT INTO orgs (id, name, primary_domain, teacher_domains, student_domains, solo, created_at)
+       VALUES (?, ?, ?, '', '', 1, ?)`,
+    )
+    // primary_domain is UNIQUE and NOT NULL; this one can never equal a real domain.
+    .bind(orgId, `${who}'s classroom`, `solo:${orgId}`, now())
+    .run();
+  return orgId;
+}
+
+/** After sign-in: a class code that came along joins that class. */
+async function joinWithCode(user: { id: string; org_id: string; role: string }, intent: Intent) {
+  if (!intent.classCode || user.role !== "student") return;
+  // Signing in worked; a class that turns out to be full shouldn't undo that.
+  await joinClass(user, intent.classCode).catch(() => {});
 }
 
 /** After sign-in: a family code that came along links the account to that child. */
@@ -259,24 +302,56 @@ async function findOrCreateUser(email: string, name?: string, intent: Intent = {
   }
 
   const resolved = await resolveOrgFor(email);
+
+  // The Teacher door, with no school here for this address (or a personal
+  // one): a space of their own, on the Free plan like any teacher, that
+  // nobody else lands in. This is the one-teacher sign-up.
+  if (!resolved && intent.door === "teacher") {
+    const orgId = await soloSpaceFor(email, name);
+    const id = uid();
+    await db
+      .prepare(
+        `INSERT INTO users (id, org_id, email, name, role, is_admin, is_superadmin, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, 'teacher', 0, 0, ?, ?)`,
+      )
+      .bind(id, orgId, email, name?.trim() || email, now(), now())
+      .run();
+    return await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first<any>();
+  }
+
+  // The Student door with a class code from a teacher in their own space: the
+  // code is the teacher's say-so, and the account joins that teacher's space.
+  if (!resolved && intent.door === "student") {
+    const cls = await soloClassFor(intent.classCode);
+    if (!cls) throw new HttpError(403, STUDENT_ADDRESS_MESSAGE);
+    const id = uid();
+    await db
+      .prepare(
+        `INSERT INTO users (id, org_id, email, name, role, is_admin, is_superadmin, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, 'student', 0, 0, ?, ?)`,
+      )
+      .bind(id, cls.org_id, email, name?.trim() || email, now(), now())
+      .run();
+    return await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first<any>();
+  }
+
   if (!resolved) {
     // No school is named: with several tenants, that would tell a stranger who
     // the customers are.
-    throw new HttpError(
-      403,
-      intent.door
-        ? SCHOOL_ADDRESS_MESSAGE
-        : "That email isn't on a domain any school here has approved. Ask your Notesanity admin to add it.",
-    );
+    throw new HttpError(403, "That email isn't on a domain any school here has approved. Choose Teacher, Student or Parent or guardian to sign in.");
   }
 
-  // A domain that can't say which (shared by staff and students, or on
-  // neither list) takes the door's word for "student" — the lesser role — and
-  // turns "teacher" into a request an admin confirms.
+  // A school's address. Its domain decides where it can — staff-only or
+  // student-only — and where it can't (a domain shared by staff and students,
+  // or the school's only one), the door does. A teacher is trusted on their
+  // school's own address; an admin can change anyone's role under People.
   let role = resolved.role;
-  let requested = "";
+  const requested = "";
+  if (role === "student" && intent.door === "teacher") {
+    throw new HttpError(403, "Addresses on that domain are student accounts at your school. If you teach there, ask your school's admin.");
+  }
   if (role === "pending" && intent.door === "student") role = "student";
-  if (role === "pending" && intent.door === "teacher") requested = "teacher";
+  if (role === "pending" && intent.door === "teacher") role = "teacher";
 
   const id = uid();
   await db
@@ -323,6 +398,7 @@ app.post("/api/auth/password/register", handler(async (c) => {
     .run();
 
   await claimCode(user, intent);
+  await joinWithCode(user, intent);
   await startSession(c, user.id);
   return c.json({ ok: true });
 }));
@@ -348,6 +424,7 @@ app.post("/api/auth/password/login", handler(async (c) => {
 
   await db.prepare(`UPDATE users SET last_seen_at = ? WHERE id = ?`).bind(now(), user.id).run();
   await claimCode(user, intent);
+  await joinWithCode(user, intent);
   await startSession(c, user.id);
   return c.json({ ok: true });
 }));
@@ -495,6 +572,7 @@ app.get("/api/auth/magic/callback", handler(async (c) => {
   try {
     user = await findOrCreateUser(row.email, undefined, intent);
     await claimCode(user, intent);
+    await joinWithCode(user, intent);
   } catch {
     return c.redirect("/?auth_error=not_allowed", 302);
   }
@@ -641,6 +719,7 @@ app.post("/api/auth/google", handler(async (c) => {
     .run();
 
   await claimCode(user, intent);
+  await joinWithCode(user, intent);
   await startSession(c, user.id);
   return c.json({ ok: true });
 }));

@@ -67,7 +67,7 @@ export default function RolePicker() {
           <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate("teacher")} className={card}>
             <span className={badge}><PenSquare className="h-7 w-7" strokeWidth={2.5} /></span>
             <span className="font-display text-lg text-pine">I'm a teacher</span>
-            <span className="text-[16px] text-pine/70">An admin at your school confirms teacher accounts.</span>
+            <span className="text-[16px] text-pine/70">Create classes, build notebooks, and grade student work.</span>
           </button>
           <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate("student")} className={card}>
             <span className={badge}><GraduationCap className="h-7 w-7" strokeWidth={2.5} /></span>

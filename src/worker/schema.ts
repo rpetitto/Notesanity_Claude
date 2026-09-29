@@ -1071,9 +1071,9 @@ migrate("032_scale_indexes", async () => {
  * gains a child. `family_codes` holds one current code per student; making a
  * new one retires the old, and links already made stay.
  *
- * `requested_role` records that someone came in through the Teacher door on an
- * address that can't settle it by itself (a domain the school uses for staff
- * and students alike): they wait as 'pending' until an admin confirms.
+ * `requested_role` is kept for an account that asked to teach before an admin
+ * could say yes; the Teacher door no longer asks, but the column stays read.
+ * `orgs.solo` marks a space made for one teacher whose school isn't here.
  * `auth_tokens.intent` carries the door and any family code through an emailed
  * sign-in link, which is the one route where the choice and the account are
  * made in different requests. `orgs.family_access` is the school's switch.
@@ -1093,6 +1093,11 @@ migrate("033_families", async () => {
   }
   if (!(await has("auth_tokens", "intent"))) {
     await db.prepare(`ALTER TABLE auth_tokens ADD COLUMN intent TEXT NOT NULL DEFAULT ''`).run();
+  }
+  // A teacher whose school isn't here gets a space of their own: an org that
+  // claims no domain, so nobody lands in it except the people they bring.
+  if (!(await has("orgs", "solo"))) {
+    await db.prepare(`ALTER TABLE orgs ADD COLUMN solo INTEGER NOT NULL DEFAULT 0`).run();
   }
   await db.batch([
     db.prepare(`
