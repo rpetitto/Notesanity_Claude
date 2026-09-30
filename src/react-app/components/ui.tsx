@@ -378,7 +378,17 @@ export function Menu({
           if (!open) place();
           setOpen((v) => !v);
         }}
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          // Enter and Space press a button without a pointer-down, and so used
+          // to do nothing at all: a keyboard couldn't open any "…" menu. A
+          // click with no pointer behind it (detail 0) is the keyboard.
+          if (e.detail === 0) {
+            if (!open) place();
+            setOpen((v) => !v);
+          }
+        }}
         // A pill trigger replaces the icon-button shape outright rather than
         // merging with it — the round 44px width is exactly what a labelled
         // button must not inherit.

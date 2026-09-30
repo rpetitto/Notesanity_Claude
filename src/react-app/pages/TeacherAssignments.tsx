@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { ChevronDown, ExternalLink } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
+import { ChevronDown, ExternalLink, Pencil, Trash2 } from "lucide-react";
 import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
-import { ButtonLink, Card, Chip } from "../components/ui";
+import { ButtonLink, Card, Chip, Menu } from "../components/ui";
+import { DeleteAssignmentDialog } from "../components/DeleteAssignment";
 import { api, pageSource, type PageRec } from "../lib/api";
 import { cn, isOverdue, relativeTime, DEFAULT_ACCENT, dueLabel } from "../lib/utils";
 import GoogleIcon from "../components/GoogleIcon";
@@ -213,6 +214,9 @@ function StudentRows({
 /** A tall, information-dense assignment card: thumbnail stack, scorecard, and an expandable student roster. */
 export function AssignmentCard({ a }: { a: AssignmentCardData }) {
   const [expanded, setExpanded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const navigate = useNavigate();
+  const qc = useQueryClient();
 
   const notebookQ = useQuery({
     queryKey: ["notebook", a.notebookId],
@@ -314,9 +318,29 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
                 </div>
               </div>
 
-              <ButtonLink to={`/assignments/${a.id}`} variant="secondary" size="sm">
-                Grade
-              </ButtonLink>
+              <div className="flex shrink-0 items-center gap-1">
+                <ButtonLink to={`/assignments/${a.id}`} variant="secondary" size="sm">
+                  Grade
+                </ButtonLink>
+                <Menu
+                  label={`More for ${a.title}`}
+                  items={[
+                    {
+                      label: "Edit assignment",
+                      icon: <Pencil className="h-5 w-5" strokeWidth={2.5} />,
+                      hint: "Title, pages, due date, grading",
+                      onClick: () => navigate(`/assignments/${a.id}/edit`),
+                    },
+                    {
+                      label: "Delete assignment",
+                      icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
+                      danger: true,
+                      hint: "Grades go; students' writing stays in the notebook",
+                      onClick: () => setDeleting(true),
+                    },
+                  ]}
+                />
+              </div>
             </div>
 
             <div className="mt-3 flex flex-wrap items-end gap-6 sm:mt-4">
@@ -354,6 +378,19 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
           </div>
         )}
       </div>
+      {deleting && (
+        <DeleteAssignmentDialog
+          assignmentId={a.id}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => {
+            setDeleting(false);
+            // Every list a card can sit in: the Assignments page and a class's tab.
+            qc.invalidateQueries({ queryKey: ["my-teaching"] });
+            qc.invalidateQueries({ queryKey: ["assignments"] });
+            qc.removeQueries({ queryKey: ["assignment", a.id] });
+          }}
+        />
+      )}
     </Card>
   );
 }

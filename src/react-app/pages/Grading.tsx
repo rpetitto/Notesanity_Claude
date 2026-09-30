@@ -19,6 +19,7 @@ import {
   Undo2, Unlock, Upload, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { DeleteAssignmentDialog } from "../components/DeleteAssignment";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { parseLayer } from "../lib/ink";
@@ -41,73 +42,6 @@ const BUTTON_ROW =
 
 const RAIL_KEY = "notesanity:gradeRail";
 const ROSTER_KEY = "notesanity:gradeRoster";
-
-/** What deleting (or heavily editing) an assignment would actually disturb. */
-export interface AssignmentImpact {
-  submitted: number;
-  graded: number;
-  returned: number;
-  total: number;
-  started: number;
-  grading: string;
-  status: string;
-}
-
-/**
- * A plain confirm dialog isn't enough for a destructive, hard-to-undo action
- * that affects a whole roster — the teacher needs the real numbers in front of
- * them, and needs to understand that student *work* survives even though the
- * assignment record doesn't.
- */
-export function DeleteAssignmentModal({
-  impact, loading, deleting, onCancel, onConfirm,
-}: {
-  impact: AssignmentImpact | null;
-  loading: boolean;
-  deleting: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal onClose={onCancel}>
-      <div className="flex items-start justify-between">
-        <h3 className="text-[17px] text-pine">Delete assignment?</h3>
-        <button onClick={onCancel} className="rounded-full p-1 text-pine/50 hover:bg-pine/8" aria-label="Close">
-          <X className="h-4 w-4" strokeWidth={2.5} />
-        </button>
-      </div>
-
-      {loading || !impact ? (
-        <div className="py-8"><Spinner label="Checking impact…" /></div>
-      ) : (
-        <>
-          <div className="mt-3 space-y-1.5 text-[16px] text-pine/80">
-            {impact.submitted > 0 && (
-              <p>{impact.submitted} of {impact.total} students have turned this in.</p>
-            )}
-            {impact.graded > 0 && <p>{impact.graded} have been graded.</p>}
-            {impact.submitted === 0 && impact.graded === 0 && (
-              <p>No one has turned this in yet.</p>
-            )}
-          </div>
-          <p className="mt-3 rounded-[12px] border-[3px] border-pine/20 bg-oat p-3 text-[16px] leading-relaxed text-pine/70">
-            Deleting removes the assignment and all of its grades and submission records.
-            It does <strong>not</strong> delete the pages or anything students wrote on them —
-            that work stays in the notebook.
-          </p>
-          <div className="mt-5 flex justify-end gap-2">
-            <Button variant="ghost" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button variant="danger" onClick={onConfirm} disabled={deleting}>
-              <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete assignment
-            </Button>
-          </div>
-        </>
-      )}
-    </Modal>
-  );
-}
 
 function PageRail({
   pages, pageNumbers, notebookId, activePageId, onSelect, ink,
@@ -316,8 +250,6 @@ export default function Grading() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [deleteImpact, setDeleteImpact] = useState<AssignmentImpact | null>(null);
-  const [impactLoading, setImpactLoading] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
@@ -357,28 +289,9 @@ export default function Grading() {
     );
   }, [studentId, searchParams, setSearchParams]);
 
-  const deleteMutation = useMutation({
-    mutationFn: () => api.del(`/api/assignments/${assignmentId}`),
-    onSuccess: () => {
-      toast.success("Assignment deleted");
-      navigate(`/classes/${assignment.classId}?tab=assignments`);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const openDeleteModal = async () => {
+  const openDeleteModal = () => {
     setMenuOpen(false);
     setShowDeleteModal(true);
-    setImpactLoading(true);
-    try {
-      const impact = await api.get<AssignmentImpact>(`/api/assignments/${assignmentId}/impact`);
-      setDeleteImpact(impact);
-    } catch (e) {
-      toast.error((e as Error).message);
-      setShowDeleteModal(false);
-    } finally {
-      setImpactLoading(false);
-    }
   };
 
   /*
@@ -965,12 +878,10 @@ export default function Grading() {
       </button>
 
       {showDeleteModal && (
-        <DeleteAssignmentModal
-          impact={deleteImpact}
-          loading={impactLoading}
-          deleting={deleteMutation.isPending}
-          onCancel={() => setShowDeleteModal(false)}
-          onConfirm={() => deleteMutation.mutate()}
+        <DeleteAssignmentDialog
+          assignmentId={assignmentId}
+          onClose={() => setShowDeleteModal(false)}
+          onDeleted={() => navigate(`/classes/${assignment.classId}?tab=assignments`)}
         />
       )}
 
