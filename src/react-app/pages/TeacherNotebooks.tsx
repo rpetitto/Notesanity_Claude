@@ -11,7 +11,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookText, CheckSquare, ChevronDown, Plus, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
+import { Archive, BookText, CheckSquare, ChevronDown, Plus, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import NewNotebookModal from "../components/NewNotebookModal";
@@ -26,6 +26,7 @@ interface TeachingNotebook extends ClassNotebook {
   class_id: string;
   class_name: string | null;
   class_emoji?: string | null;
+  class_archived?: number | null;
   template_id: string | null;
   copies?: {
     notebookId: string; classId: string; className: string; status: string; archived: boolean;
@@ -38,6 +39,7 @@ export default function TeacherNotebooks() {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<string>("all");
   const [blankOpen, setBlankOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [deleting, setDeleting] = useState<TeachingNotebook | null>(null);
   /** Template ids the push dialog is open for. */
   const [pushing, setPushing] = useState<string[] | null>(null);
@@ -93,8 +95,14 @@ export default function TeacherNotebooks() {
   // Templates belong to no class, so the class filter only narrows the notebooks below them.
   const templates = all.filter((n) => n.kind === "template");
   const inClasses = useMemo(
-    () => all.filter((n) => n.kind !== "template" && (filter === "all" || n.class_id === filter)),
+    () => all.filter((n) => n.kind !== "template" && !n.class_archived && (filter === "all" || n.class_id === filter)),
     [all, filter],
+  );
+  // A class put away takes its notebooks with it: they leave the main list and
+  // wait on a shelf below, still openable.
+  const archivedNotebooks = useMemo(
+    () => all.filter((n) => n.kind !== "template" && !!n.class_archived),
+    [all],
   );
 
   const templateMenu = (t: TeachingNotebook): MenuItem[] => {
@@ -244,6 +252,37 @@ export default function TeacherNotebooks() {
               </div>
             )}
           </section>
+
+          {archivedNotebooks.length > 0 && (
+            <section className="mt-8">
+              <button
+                type="button"
+                onClick={() => setShowArchived((v) => !v)}
+                aria-expanded={showArchived}
+                aria-controls="archived-notebooks"
+                className="mb-3 flex min-h-[44px] items-center gap-2 rounded-[12px] font-display text-[20px] text-pine hover:text-pine/80 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-pine"
+              >
+                <Archive className="h-5 w-5" strokeWidth={2.5} /> Archived notebooks
+                <Chip tone="quiet">{archivedNotebooks.length}</Chip>
+                <ChevronDown className={`h-5 w-5 transition-transform ${showArchived ? "rotate-180" : ""}`} strokeWidth={2.5} />
+              </button>
+              {showArchived && (
+                <div id="archived-notebooks">
+                  <p className="mb-3 text-[16px] text-pine/70">From classes you've archived. Open one to look back at it; restore the class to work in it again.</p>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {archivedNotebooks.map((n) => (
+                      <NotebookCard
+                        key={n.id}
+                        nb={n}
+                        to={`/notebooks/${n.id}/edit`}
+                        byline={`${n.class_emoji ? `${n.class_emoji} ` : ""}${n.class_name ?? ""} · archived class`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
         </>
       )}
 
