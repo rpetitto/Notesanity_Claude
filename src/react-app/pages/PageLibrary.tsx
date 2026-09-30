@@ -5,12 +5,14 @@
  * modal, which meant there was nowhere to tidy it: no way to rename the entry
  * you saved in a hurry, or clear out last year's. Inserting still belongs in a
  * notebook — that's where the question "where does this page go" has an answer
- * — so this page is for keeping the library in order, not for using it.
+ * — so this page keeps the library in order, and pushes a saved page to the end
+ * of several notebooks at once, which is the one insert that has no single
+ * notebook to start from.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, LibraryBig, Loader2, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, LibraryBig, Loader2, Pencil, Plus, Send, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import PageThumb from "../components/PageThumb";
@@ -29,6 +31,8 @@ export default function PageLibrary() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [removing, setRemoving] = useState<LibraryPageRec | null>(null);
+  /** The saved page being pushed into notebooks. */
+  const [pushing, setPushing] = useState<LibraryPageRec | null>(null);
   /** A document on its way in: picked, converted if it needs it, then its pages chosen. */
   const [importing, setImporting] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -122,7 +126,7 @@ export default function PageLibrary() {
         Pages you've saved to reuse. Save one from any notebook's page list, or bring a document
         straight in here and keep the pages you want. Drop any of them into a notebook from its{" "}
         <span className="font-display font-bold text-pine">Pages</span> tab &rarr;{" "}
-        <span className="font-display font-bold text-pine">Library</span>.
+        <span className="font-display font-bold text-pine">Library</span>, or add one to several notebooks at once from here.
       </p>
 
       {library.isLoading && <Spinner label="Loading your library…" />}
@@ -176,6 +180,12 @@ export default function PageLibrary() {
                     {p.title}
                   </div>
                   <div className="text-[14px] text-pine/55">{relativeTime(p.created_at)}</div>
+                  <Button variant="primary" size="sm" className="w-full" onClick={() => setPushing(p)} aria-label={`Add ${p.title} to notebooks`}>
+                    <Send className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    {/* Two cards across a small phone leave no room for the long label. */}
+                    <span className="min-[360px]:hidden">Add to…</span>
+                    <span className="hidden min-[360px]:inline">Add to notebooks…</span>
+                  </Button>
                   <div className="flex gap-1">
                     <Button
                       variant="secondary"
@@ -219,6 +229,7 @@ export default function PageLibrary() {
           }}
         />
       )}
+      {pushing && <PushToNotebooks entry={pushing} onClose={() => setPushing(null)} />}
       {removing && (
         <ConfirmModal
           title="Remove from your library?"
@@ -303,7 +314,7 @@ function LibraryImport({ source, onClose, onSaved }: { source: File; onClose: ()
   const pdfUrl = `/api/my/page-library/asset?key=${encodeURIComponent(assetKey)}`;
 
   return (
-    <Modal onClose={cancel} title="Add pages to your library">
+    <Modal onClose={cancel} title="Add pages to your library" className="sm:max-w-3xl">
       {error && <ErrorNote error={new Error(error)} />}
       {phase === "preparing" && !error && (
         <div className="flex items-center gap-3 py-6 text-[16px] text-pine/70">
@@ -322,7 +333,10 @@ function LibraryImport({ source, onClose, onSaved }: { source: File; onClose: ()
               {all ? "Choose none" : "Choose all"}
             </button>
           </div>
-          <div className="mt-2 grid max-h-[50vh] grid-cols-3 gap-2 overflow-y-auto p-1 sm:grid-cols-4 md:grid-cols-5">
+          {/* Columns come from the room there is, not from breakpoints: the screen's width
+              says nothing about the modal's, and a fixed count squeezed each cell narrower
+              than the thumbnail it holds. */}
+          <div className="mt-2 grid max-h-[34vh] grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2 overflow-y-auto p-1.5 sm:max-h-[50vh]">
             {sizes.map((p) => {
               const on = picked.has(p.sourceIndex);
               return (
@@ -336,7 +350,7 @@ function LibraryImport({ source, onClose, onSaved }: { source: File; onClose: ()
                     on ? "border-pine bg-mint/20" : "border-pine/15 opacity-60 hover:opacity-100",
                   )}
                 >
-                  <PageThumb pdfUrl={pdfUrl} sourceIndex={p.sourceIndex} pageWidth={p.width} pageHeight={p.height} width={88} />
+                  <PageThumb pdfUrl={pdfUrl} sourceIndex={p.sourceIndex} pageWidth={p.width} pageHeight={p.height} width={76} />
                   <span className="text-[16px] text-pine/70">p.{p.sourceIndex + 1}</span>
                   <span className={cn("absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-pine", on ? "bg-mint" : "bg-white")}>
                     {on && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
@@ -355,6 +369,173 @@ function LibraryImport({ source, onClose, onSaved }: { source: File; onClose: ()
           </div>
         </>
       )}
+    </Modal>
+  );
+}
+
+interface PushTarget {
+  id: string;
+  title: string;
+  kind: string;
+  status: string;
+  archived?: number;
+  class_id: string;
+  class_name: string | null;
+  class_emoji?: string | null;
+  class_archived?: number | null;
+}
+
+/**
+ * One saved page, added to the end of every notebook the teacher picks.
+ *
+ * Only notebooks still in use are offered: templates, and class notebooks that
+ * aren't archived in classes that aren't archived. The teacher decides once,
+ * for the whole push, whether students see the page now or whether it waits
+ * hidden until they show it from the notebook's page list.
+ */
+function PushToNotebooks({ entry, onClose }: { entry: LibraryPageRec; onClose: () => void }) {
+  const qc = useQueryClient();
+  const list = useQuery({
+    queryKey: ["teaching-notebooks"],
+    queryFn: () => api.get<{ notebooks: PushTarget[] }>("/api/my/teaching-notebooks"),
+  });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [visibility, setVisibility] = useState<"students" | "draft">("students");
+
+  const usable = (list.data?.notebooks ?? []).filter(
+    (n) => n.kind === "template" || (n.kind === "class" && !n.archived && !n.class_archived),
+  );
+  // Grouped the way a teacher thinks of them: by class, templates last.
+  const groups = new Map<string, { label: string; items: PushTarget[] }>();
+  for (const n of usable) {
+    const key = n.kind === "template" ? "~templates" : n.class_id;
+    const label = n.kind === "template" ? "Templates" : `${n.class_emoji ? `${n.class_emoji} ` : ""}${n.class_name ?? "Class"}`;
+    if (!groups.has(key)) groups.set(key, { label, items: [] });
+    groups.get(key)!.items.push(n);
+  }
+  const ordered = [...groups.entries()].sort(([a, ga], [b, gb]) =>
+    a === "~templates" ? 1 : b === "~templates" ? -1 : ga.label.localeCompare(gb.label));
+  const pickedTargets = usable.filter((n) => picked.has(n.id));
+  const pickedClassNotebooks = pickedTargets.filter((n) => n.kind === "class");
+  const pickedDraftNotebooks = pickedClassNotebooks.filter((n) => n.status !== "published").length;
+
+  const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleGroup = (items: PushTarget[]) => setPicked((s) => {
+    const n = new Set(s);
+    const all = items.every((i) => n.has(i.id));
+    for (const i of items) if (all) n.delete(i.id); else n.add(i.id);
+    return n;
+  });
+
+  const push = useMutation({
+    mutationFn: () => api.post<{ added: number; shown: number; hidden: number; templates: number; unpublished: number; skipped: number }>(
+      `/api/my/page-library/${entry.id}/push`, { notebookIds: [...picked], visibility },
+    ),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
+      const bits = [`Added “${entry.title}” to ${r.added} notebook${r.added === 1 ? "" : "s"}`];
+      if (r.hidden) bits.push(`hidden from students in ${r.hidden === 1 ? "it" : "them"} until you show it`);
+      else if (r.unpublished) bits.push(`${r.unpublished} of them ${r.unpublished === 1 ? "isn't" : "aren't"} published yet, so students see it when you publish`);
+      toast.success(bits.join(" — "));
+      if (r.skipped) toast.warning(`${r.skipped} notebook${r.skipped === 1 ? " was" : "s were"} skipped — archived, or no longer yours to edit.`);
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Modal onClose={onClose} title={`Add “${entry.title}” to notebooks`} className="sm:max-w-2xl">
+      <p className="mb-3 text-[16px] text-pine/70">It goes on the end of each notebook you choose, as its own copy — change it in one and the others stay as they are.</p>
+      {list.isLoading && <Spinner label="Loading your notebooks…" />}
+      {list.error && <ErrorNote error={list.error as Error} />}
+      {list.data && usable.length === 0 && (
+        <p className="rounded-[12px] border-2 border-dashed border-pine/30 bg-oat/60 px-4 py-6 text-center text-[16px] text-pine/70">
+          No notebooks to add it to yet. Make one in a class, or a template on the Notebooks page.
+        </p>
+      )}
+      {usable.length > 0 && (
+        <>
+          <div className="max-h-[38vh] overflow-y-auto rounded-[16px] border-[3px] border-pine sm:max-h-[42vh]">
+            {ordered.map(([key, g]) => {
+              const all = g.items.every((i) => picked.has(i.id));
+              return (
+                <fieldset key={key} className="border-b-2 border-pine/15 last:border-b-0">
+                  <legend className="sr-only">{g.label}</legend>
+                  <div className="flex items-center gap-2 bg-oat/70 px-3 py-2">
+                    <span className="min-w-0 flex-1 truncate font-display text-[16px] font-bold text-pine">{g.label}</span>
+                    {g.items.length > 1 && (
+                      <button type="button" className="min-h-[44px] px-1 text-[16px] font-bold text-pine underline" onClick={() => toggleGroup(g.items)}>
+                        {all ? "Clear" : "Choose all"}
+                      </button>
+                    )}
+                  </div>
+                  {g.items.map((n) => (
+                    <label key={n.id} className="flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 hover:bg-mint/15">
+                      <input
+                        type="checkbox"
+                        checked={picked.has(n.id)}
+                        onChange={() => toggle(n.id)}
+                        className="h-5 w-5 shrink-0 accent-[#20302C]"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-[16px] text-pine">{n.title}</span>
+                      {n.kind === "class" && n.status !== "published" && (
+                        <span className="shrink-0 text-[14px] text-pine/55">not published</span>
+                      )}
+                    </label>
+                  ))}
+                </fieldset>
+              );
+            })}
+          </div>
+
+          <fieldset className="mt-4">
+            <legend className="label-caps mb-2 text-pine/70">Students</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {([
+                ["students", "Show to students now", "It's in their notebooks as soon as it's added."],
+                ["draft", "Keep as a draft", "Hidden from students. Show it from the notebook's Pages list when you're ready."],
+              ] as const).map(([value, label, hint]) => (
+                <label
+                  key={value}
+                  className={cn(
+                    "flex cursor-pointer items-start gap-3 rounded-[14px] border-2 p-3",
+                    visibility === value ? "border-pine bg-mint/20" : "border-pine/20 hover:bg-oat",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="push-visibility"
+                    value={value}
+                    checked={visibility === value}
+                    onChange={() => setVisibility(value)}
+                    className="mt-1 h-5 w-5 shrink-0 accent-[#20302C]"
+                  />
+                  <span>
+                    <span className="block font-display text-[16px] font-bold text-pine">{label}</span>
+                    <span className="block text-[15px] leading-snug text-pine/70">{hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {visibility === "students" && pickedDraftNotebooks > 0 && (
+              <p className="mt-2 text-[15px] text-pine/70">
+                {pickedDraftNotebooks === 1 ? "One notebook you chose isn't" : `${pickedDraftNotebooks} notebooks you chose aren't`} published yet — students see the page when you publish {pickedDraftNotebooks === 1 ? "it" : "them"}.
+              </p>
+            )}
+            {pickedTargets.some((n) => n.kind === "template") && (
+              <p className="mt-2 text-[15px] text-pine/70">Templates have no students of their own: the page reaches their classes when you send the template's updates.</p>
+            )}
+          </fieldset>
+        </>
+      )}
+
+      <div className="mt-5 flex flex-wrap justify-end gap-2">
+        <Button variant="ghost" onClick={onClose} disabled={push.isPending}>Cancel</Button>
+        <Button variant="primary" onClick={() => push.mutate()} disabled={picked.size === 0 || push.isPending}>
+          {push.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2.5} />}
+          {picked.size === 0 ? "Add to notebooks" : `Add to ${picked.size} notebook${picked.size === 1 ? "" : "s"}`}
+        </Button>
+      </div>
     </Modal>
   );
 }

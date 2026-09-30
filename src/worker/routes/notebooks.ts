@@ -1,6 +1,6 @@
 import { app, db, storage } from "../platform";
 import {
-  handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+  handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, requireTeacher, HttpError, param,} from "../lib/session";
 import { fieldContent, importedLinks, linkLabel } from "../lib/links";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import type { LibraryField } from "../lib/page-library";
@@ -374,7 +374,7 @@ app.post("/api/notebooks/:id/pages/blank", handler(async (c) => {
  * same saved page twice into one notebook reuses the first copy.
  */
 app.post("/api/notebooks/:id/pages/from-library", handler(async (c) => {
-  const { nb, user, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
+  const { nb, user } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   await requirePlan(user, "pro", "The page library");
 
   const body = await c.req.json<{ entryId?: string; insertAfterPageId?: string | null }>();
@@ -384,30 +384,48 @@ app.post("/api/notebooks/:id/pages/from-library", handler(async (c) => {
     .first<any>();
   if (!entry) throw new HttpError(404, "That page isn't in your library");
 
+  const pageId = await insertLibraryPage(nb.id, entry, body.insertAfterPageId ?? null);
+  return c.json({ page: { id: pageId } });
+}));
+
+/**
+ * One saved page into one notebook, with fresh ids for everything on it.
+ *
+ * `hidden` puts the page in hidden from students — the same state as "Hide from
+ * students" in the notebook's page list, and undone the same way. `showMarkup`
+ * publishes the teacher's markup with it; otherwise the markup arrives as a
+ * draft and waits for the notebook's next update, like any other markup.
+ */
+async function insertLibraryPage(
+  notebookId: string,
+  entry: any,
+  insertAfterPageId: string | null,
+  opts: { hidden?: boolean; showMarkup?: boolean } = {},
+): Promise<string> {
   let assetKey = "";
   if (entry.asset_key) {
-    assetKey = `notebooks/${nb.id}/lib-${entry.asset_key.replace(/[^A-Za-z0-9._-]/g, "-").slice(-80)}`;
+    assetKey = `notebooks/${notebookId}/lib-${entry.asset_key.replace(/[^A-Za-z0-9._-]/g, "-").slice(-80)}`;
     await storage.copy(entry.asset_key, assetKey);
   }
 
-  const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, 1);
+  const { start, step, groupName } = await seqWindow(notebookId, insertAfterPageId, 1);
   const pageId = uid();
   await db
     .prepare(
       `INSERT INTO pages (id, notebook_id, seq, asset_key, source_index, width, height, label,
                           group_name, archived, pattern, pattern_color, teacher_annotate)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
     )
     .bind(
-      pageId, nb.id, start + step, assetKey, entry.source_index ?? 0, entry.width, entry.height,
-      entry.title ?? "", groupName, entry.pattern ?? "", entry.pattern_color ?? "",
+      pageId, notebookId, start + step, assetKey, entry.source_index ?? 0, entry.width, entry.height,
+      entry.title ?? "", groupName, opts.hidden ? 1 : 0, entry.pattern ?? "", entry.pattern_color ?? "",
     )
     .run();
 
   for (const f of JSON.parse(entry.fields || "[]") as LibraryField[]) {
     let mediaKey: string | null = null;
     if (f.media_key) {
-      mediaKey = `notebooks/${nb.id}/fields/${uid()}`;
+      mediaKey = `notebooks/${notebookId}/fields/${uid()}`;
       await storage.copy(f.media_key, mediaKey);
     }
     await db
@@ -417,26 +435,78 @@ app.post("/api/notebooks/:id/pages/from-library", handler(async (c) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .bind(
-        uid(), nb.id, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
+        uid(), notebookId, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
         f.prompt ?? "", f.content ?? "", mediaKey, now(),
       )
       .run();
   }
 
-  // Arrives as a draft: the markup is on the page, but students don't see it
-  // until this notebook is published like any other change.
   if (entry.annotation) {
     await db
       .prepare(
         `INSERT INTO page_annotations (page_id, notebook_id, draft_data, published_data, rev, updated_at)
-         VALUES (?, ?, ?, '', 1, ?)`,
+         VALUES (?, ?, ?, ?, 1, ?)`,
       )
-      .bind(pageId, nb.id, entry.annotation, now())
+      .bind(pageId, notebookId, entry.annotation, opts.showMarkup ? entry.annotation : "", now())
       .run();
   }
 
-  await syncPageCount(nb.id);
-  return c.json({ page: { id: pageId } });
+  await syncPageCount(notebookId);
+  return pageId;
+}
+
+/**
+ * Push one saved page into several notebooks at once, from the library.
+ *
+ * Only notebooks this teacher can edit and that are still in use: their own
+ * templates, and class notebooks that aren't archived in classes that aren't
+ * archived. Anything else in the list is skipped and counted, not refused, so
+ * a stale selection doesn't lose the rest of the push.
+ *
+ * `visibility` is the teacher's call per push: "students" shows the page (and
+ * its markup) now; "draft" adds it hidden from students, to show from the
+ * notebook's page list when they're ready. Templates have no students, so the
+ * page simply goes in; it reaches classes when the template's updates are sent.
+ */
+app.post("/api/my/page-library/:id/push", handler(async (c) => {
+  const user = await requireTeacher(c);
+  await requirePlan(user, "pro", "The page library");
+  const entry = await db
+    .prepare(`SELECT * FROM library_pages WHERE id = ? AND owner_id = ?`)
+    .bind(param(c, "id"), user.id)
+    .first<any>();
+  if (!entry) throw new HttpError(404, "That page isn't in your library");
+
+  const body = await c.req.json<{ notebookIds?: string[]; visibility?: "students" | "draft" }>();
+  const wanted = [...new Set((body.notebookIds ?? []).map(String))].slice(0, 200);
+  if (!wanted.length) throw new HttpError(400, "Choose at least one notebook");
+  const draft = body.visibility === "draft";
+
+  const rows = await db
+    .prepare(
+      `SELECT n.id, n.kind, n.status FROM notebooks n
+         LEFT JOIN classes c ON c.id = n.class_id
+         LEFT JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.role = 'teacher' AND e.status = 'active'
+        WHERE n.id IN (${wanted.map(() => "?").join(",")}) AND n.archived = 0
+          AND ((n.kind = 'template' AND n.owner_id = ?)
+            OR (n.kind = 'class' AND c.archived = 0 AND (c.owner_id = ? OR e.id IS NOT NULL)))`,
+    )
+    .bind(user.id, ...wanted, user.id, user.id)
+    .all<{ id: string; kind: string; status: string }>();
+  const targets = rows.results ?? [];
+
+  let shown = 0, hidden = 0, templates = 0, unpublished = 0;
+  for (const nb of targets) {
+    const isTemplate = nb.kind === "template";
+    await insertLibraryPage(nb.id, entry, null, {
+      hidden: draft && !isTemplate,
+      showMarkup: !draft && !isTemplate,
+    });
+    if (isTemplate) templates++;
+    else if (draft) hidden++;
+    else { shown++; if (nb.status !== "published") unpublished++; }
+  }
+  return c.json({ added: targets.length, shown, hidden, templates, unpublished, skipped: wanted.length - targets.length });
 }));
 
 /**

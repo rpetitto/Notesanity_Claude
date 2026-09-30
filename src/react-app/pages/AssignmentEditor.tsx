@@ -396,7 +396,7 @@ export default function AssignmentEditor() {
                 </button>
               </div>
               <p className="mt-0.5 text-[16px] text-pine/70">Pages don't have to be next to each other.</p>
-              <div className="mt-2 grid grid-cols-3 gap-2.5 sm:grid-cols-5 lg:grid-cols-7">
+              <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2.5">
                 {visiblePages.map((p) => {
                   const i = pages.indexOf(p);
                   const on = pageIds.includes(p.id);

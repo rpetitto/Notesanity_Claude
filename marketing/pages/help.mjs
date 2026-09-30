@@ -175,7 +175,10 @@ const BODY = () => `
          it) and choose <b>Save to library</b>, then add it to any other notebook with <b>Add page</b>
          &rarr; <b>From your library</b>.
          Its answer boxes and your own markup come across; nobody's work does. The saved copy stands on
-         its own, so changing or deleting the original notebook doesn't touch it.`,
+         its own, so changing or deleting the original notebook doesn't touch it.
+         To put one page into several notebooks at once, open <b>Library</b>, press <b>Add to notebooks</b>
+         on the page and tick the notebooks. Choose <b>Show to students now</b>, or <b>Keep as a draft</b>
+         to add it hidden and show it from the notebook's page list when you're ready.`,
       ],
       [
         "Can I use one notebook in several classes?",
