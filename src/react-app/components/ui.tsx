@@ -449,10 +449,18 @@ export function Modal({
   onClose, children, className, title,
 }: { onClose: () => void; children: ReactNode; className?: string; title?: string }) {
   const titleId = useId();
+  // Only a press that starts and ends on the backdrop closes it. A drag that
+  // selects text in a field and lets go past the dialog's edge ends in a click
+  // on the backdrop too, and used to throw the whole dialog away.
+  const pressedBackdrop = useRef(false);
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-pine/40 p-0 sm:items-center sm:p-4"
-      onClick={onClose}
+      onPointerDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget; }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && pressedBackdrop.current) onClose();
+        pressedBackdrop.current = false;
+      }}
     >
       <div
         role="dialog"

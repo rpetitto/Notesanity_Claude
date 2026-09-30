@@ -562,7 +562,7 @@ export default function NotebookEditor() {
   const [previewZoom, setPreviewZoom] = useState<ZoomMode>("page");
   const [previewFinger, setPreviewFinger] = useState(false);
   const [previewTool, setPreviewTool] = useState<ToolState>({
-    kind: "pen", color: PEN_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14, erase: "quick",
+    kind: "select", color: PEN_COLORS[0], width: 2.5, stamp: "⭐", fontSize: 14, erase: "quick",
   });
   const openPreview = () => {
     setPreviewLayers({});
@@ -1049,14 +1049,17 @@ export default function NotebookEditor() {
             type="button"
             aria-pressed={sidePanel === tab}
             onClick={() => setSidePanel(tab)}
+            // Sized to their words rather than split evenly: two equal halves of
+            // a 256px rail left "Assignments" and its count 108px, and the
+            // count was pushed off the edge.
             className={cn(
-              "flex h-12 flex-1 items-center justify-center gap-1.5 px-3 font-display text-[17px] font-bold capitalize transition-colors",
+              "flex h-12 flex-auto items-center justify-center gap-1.5 whitespace-nowrap px-2 font-display text-[17px] font-bold capitalize transition-colors",
               sidePanel === tab ? "border-b-[3px] -mb-[3px] border-pine text-pine" : "text-pine/50 hover:bg-oat",
             )}
           >
             {tab}
             {tab === "assignments" && assignments.length > 0 && (
-              <span className="ml-1 rounded-full border-2 border-pine/20 bg-oat px-1.5 py-0.5 text-[16px] text-pine/70">
+              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-pine/10 px-1.5 text-[16px] leading-none text-pine/75">
                 {assignments.length}
               </span>
             )}
@@ -1616,7 +1619,7 @@ export default function NotebookEditor() {
 
       <div className="relative flex min-h-0 flex-1">
         {railOpen ? (
-          <aside data-tour="nb-rail" className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
+          <aside data-tour="nb-rail" className="hidden w-72 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
             {sidePanelBody(false)}
           </aside>
         ) : (
@@ -1671,8 +1674,9 @@ export default function NotebookEditor() {
                 >
                   <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
                 </button>
-                <span className="text-[16px] text-pine/70">
-                  {page.label || `Page ${pageIdx + 1}`} · {pageIdx + 1} of {livePages.length}
+                <span className="flex min-w-0 text-[16px] text-pine/70" title={page.label || undefined}>
+                  <span className="min-w-0 truncate">{page.label || `Page ${pageIdx + 1}`}</span>
+                  <span className="shrink-0 whitespace-pre"> · {pageIdx + 1} of {livePages.length}</span>
                 </span>
                 <button
                   onClick={() => setPageIdx((i) => Math.min(livePages.length - 1, i + 1))}
@@ -2897,7 +2901,7 @@ function FieldInspector({
               <div className="mt-1.5 space-y-2">
                 {([
                   ["button", "A button", "The site's icon and what it says, drawn on the page."],
-                  ["", "An outline over the page", "For words or a picture already on the page: a dashed outline shows where to tap."],
+                  ["", "An outline over the page", "For words or a picture already on the page. On blank space, choose a button — an outline has nothing inside it."],
                 ] as const).map(([value, title, hint]) => {
                   const on = (options.trim() === "button" ? "button" : "") === value;
                   return (
@@ -2927,7 +2931,7 @@ function FieldInspector({
             <p className="mt-2 text-[16px] leading-snug text-pine/60">
               {options.trim() === "button"
                 ? "What it says is the button's words, and what a screen reader reads out."
-                : "Size the box over the words or picture students should tap. What it says is read out by screen readers."}
+                : "Size the box over the words or picture students should tap. What it says shows when a student points at the outline, and is read out by screen readers."}
             </p>
           </>
         );

@@ -1714,9 +1714,19 @@ function FieldControl({
     return (
       <a
         {...common}
-        className="absolute cursor-pointer rounded-[4px] border-2 border-dashed border-[#2f8a63] bg-mint/10 transition-colors hover:bg-mint/30 focus-visible:bg-mint/30 focus-visible:outline-[3px] focus-visible:outline-mint"
+        className="group absolute cursor-pointer rounded-[4px] border-2 border-dashed border-[#2f8a63] bg-mint/10 transition-colors hover:bg-mint/30 focus-visible:bg-mint/30 focus-visible:outline-[3px] focus-visible:outline-mint"
         data-link-look="outline"
       >
+        {/* The words stay on the page underneath; hovering or tabbing to it
+            says where it goes, so an outline is never a mystery box. */}
+        <span
+          aria-hidden
+          data-link-tip
+          className="pointer-events-none absolute bottom-full left-0 z-10 mb-1.5 hidden max-w-[260px] items-center gap-1.5 whitespace-nowrap rounded-full border-2 border-pine bg-white px-2.5 py-1 text-[15px] font-bold text-pine shadow-[2px_2px_0_0_var(--color-pine)] group-hover:flex group-focus-visible:flex"
+        >
+          <span className="truncate">{name}</span>
+          <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-60" strokeWidth={2.5} />
+        </span>
         <span
           aria-hidden
           className="absolute flex items-center justify-center rounded-full border-2 border-pine bg-white"

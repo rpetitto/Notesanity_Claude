@@ -205,8 +205,9 @@ const BODY = () => `
       [
         "Can I put a whole document into my page library?",
         `Yes. On the Library page, <b>Add pages</b> takes a PDF, Word or PowerPoint file, or one from
-         Google Drive, shows you every page in it, and saves the ones you tick. Each becomes its own entry,
-         named after the file and its page number, which you can rename afterwards.`,
+         Google Drive, shows you every page in it with none ticked, and saves the ones you tick (or
+         <b>Choose all</b>). Each becomes its own entry, named after the file and its page number;
+         rename one later from its <b>⋯</b> menu.`,
       ],
       [
         "Can I show a notebook on the projector?",

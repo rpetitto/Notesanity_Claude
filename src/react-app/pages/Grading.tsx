@@ -1153,16 +1153,30 @@ function GradePanel({
         className="mt-1 text-[16px] disabled:opacity-60"
       />
 
-      {!returned && (
-        <>
-          <Button variant="secondary" onClick={submit} disabled={saving} className="mt-3 w-full">
-            Save grade
-          </Button>
-          <Button variant="primary" onClick={() => { submit(); onReturn(); }} className="mt-2 w-full">
-            <Send className="h-4 w-4" strokeWidth={2.5} /> Save &amp; return
-          </Button>
-        </>
-      )}
+      {!returned && (() => {
+        // A graded assignment needs its grade before either button means
+        // anything; one graded on feedback alone can be saved as it is.
+        const hasGrade =
+          assignment.grading === "points" ? points.trim() !== "" && Number.isFinite(Number(points)) :
+          assignment.grading === "letter" ? !!letter :
+          assignment.grading === "complete" ? complete !== null :
+          true;
+        return (
+          <>
+            <Button variant="secondary" onClick={submit} disabled={saving || !hasGrade} className="mt-3 w-full">
+              Save grade
+            </Button>
+            <Button variant="primary" onClick={() => { submit(); onReturn(); }} disabled={saving || !hasGrade} className="mt-2 w-full">
+              <Send className="h-4 w-4" strokeWidth={2.5} /> Save &amp; return
+            </Button>
+            {!hasGrade && (
+              <p className="mt-2 text-[16px] text-pine/60">
+                {assignment.grading === "points" ? "Enter points to save." : assignment.grading === "letter" ? "Choose a grade to save." : "Choose Complete or Incomplete to save."}
+              </p>
+            )}
+          </>
+        );
+      })()}
 
       {returned && (
         <p className="mt-3 flex items-start gap-1.5 text-[16px] text-pine/70">

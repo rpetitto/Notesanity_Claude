@@ -11,12 +11,12 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, BookText, CheckSquare, ChevronDown, Plus, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
+import { Archive, BookText, CheckSquare, ChevronDown, LayoutGrid, Plus, Search, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import NewNotebookModal from "../components/NewNotebookModal";
 import PushToClassesModal from "../components/PushToClassesModal";
-import { Button, Chip, ConfirmModal, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
+import { Button, Chip, ConfirmModal, Input, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 import { NotebookCard, type ClassNotebook } from "./ClassView";
@@ -40,6 +40,8 @@ export default function TeacherNotebooks() {
   const [filter, setFilter] = useState<string>("all");
   const [blankOpen, setBlankOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [archivedClass, setArchivedClass] = useState("all");
+  const [archivedQuery, setArchivedQuery] = useState("");
   const [deleting, setDeleting] = useState<TeachingNotebook | null>(null);
   /** Template ids the push dialog is open for. */
   const [pushing, setPushing] = useState<string[] | null>(null);
@@ -104,6 +106,19 @@ export default function TeacherNotebooks() {
     () => all.filter((n) => n.kind !== "template" && !!n.class_archived),
     [all],
   );
+  // Years of archived classes add up, so the shelf can be narrowed by class
+  // and searched by name.
+  const archivedClasses = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const n of archivedNotebooks) if (!seen.has(n.class_id)) seen.set(n.class_id, n.class_name ?? "Class");
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [archivedNotebooks]);
+  const archivedShown = useMemo(() => {
+    const q = archivedQuery.trim().toLowerCase();
+    return archivedNotebooks.filter((n) =>
+      (archivedClass === "all" || n.class_id === archivedClass) &&
+      (!q || n.title.toLowerCase().includes(q) || (n.class_name ?? "").toLowerCase().includes(q)));
+  }, [archivedNotebooks, archivedClass, archivedQuery]);
 
   const templateMenu = (t: TeachingNotebook): MenuItem[] => {
     const pending = (t.copies ?? []).reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
@@ -229,7 +244,7 @@ export default function TeacherNotebooks() {
           <section>
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <h2 className="flex items-center gap-2 font-display text-[20px] text-pine">
-                In your classes
+                <LayoutGrid className="h-5 w-5" strokeWidth={2.5} /> In your classes
                 <Chip tone="quiet">{inClasses.length}</Chip>
               </h2>
               <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Show notebooks from" className="ml-auto h-11 w-auto min-w-[12rem]">
@@ -269,8 +284,30 @@ export default function TeacherNotebooks() {
               {showArchived && (
                 <div id="archived-notebooks">
                   <p className="mb-3 text-[16px] text-pine/70">From classes you've archived. Open one to look back at it; restore the class to work in it again.</p>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <div className="relative min-w-[12rem] flex-1">
+                      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-pine/50" strokeWidth={2.5} />
+                      <Input
+                        type="search"
+                        value={archivedQuery}
+                        onChange={(e) => setArchivedQuery(e.target.value)}
+                        placeholder="Search archived notebooks"
+                        aria-label="Search archived notebooks"
+                        className="h-11 pl-10"
+                      />
+                    </div>
+                    {archivedClasses.length > 1 && (
+                      <Select value={archivedClass} onChange={(e) => setArchivedClass(e.target.value)} aria-label="Archived class" className="h-11 w-auto min-w-[12rem]">
+                        <option value="all">All archived classes</option>
+                        {archivedClasses.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                      </Select>
+                    )}
+                  </div>
+                  {archivedShown.length === 0 && (
+                    <p className="py-4 text-center text-[16px] text-pine/60">No archived notebooks match.</p>
+                  )}
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {archivedNotebooks.map((n) => (
+                    {archivedShown.map((n) => (
                       <NotebookCard
                         key={n.id}
                         nb={n}

@@ -124,7 +124,7 @@ function ReadAloud({ notebookId, page }: { notebookId: string; page: PageRec }) 
       onClick={() => (speaking ? stop() : void start())}
       title={speaking ? "Stop reading" : "Read this page out loud"}
       aria-label={speaking ? "Stop reading this page" : "Read this page out loud"}
-      className="flex h-8 items-center gap-1.5 rounded-full px-2 text-pine/60 hover:bg-pine/8 hover:text-pine"
+      className="flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2 text-pine/60 hover:bg-pine/8 hover:text-pine"
     >
       {speaking ? <StopIcon className="h-3.5 w-3.5" strokeWidth={2.5} /> : <Volume2 className="h-3.5 w-3.5" strokeWidth={2.5} />}
       <span className="text-[15px]">{speaking ? "Stop" : "Read aloud"}</span>
@@ -230,9 +230,12 @@ export default function NotebookSurface({
             ref={(node) => { pageRefs.current[page.id] = node; }}
             data-page-id={page.id}
             className="relative mx-auto"
+            // As wide as its page and no wider: a long page name otherwise
+            // stretched the title row past the page's right edge.
+            style={{ width: page.width * scale }}
           >
-            <div className="mb-1.5 flex items-center justify-between gap-2 text-[16px] text-pine/70">
-              <span className="truncate">{page.label || `Page ${i + 1}`}</span>
+            <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2 text-[16px] text-pine/70">
+              <span className="min-w-0 truncate" title={page.label || undefined}>{page.label || `Page ${i + 1}`}</span>
               <ReadAloud notebookId={notebookId} page={page} />
             </div>
             <LazyPage width={page.width * scale} height={page.height * scale}>
