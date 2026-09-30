@@ -46,8 +46,8 @@ const CARD = `<!doctype html><html><head><meta charset="utf-8">
   <div class="brand">
     <svg width="46" height="46" viewBox="0 0 64 64" fill="none">
       <g stroke="${PINE}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="10" y="12" width="40" height="40" rx="10" fill="${OAT}" transform="rotate(-10 30 32)"/>
-        <rect x="18" y="14" width="38" height="40" rx="10" fill="${MINT}"/>
+        <rect x="13.5" y="10" width="33" height="44" rx="4.5" fill="${OAT}" transform="rotate(-10 30 32)"/>
+        <rect x="20.5" y="12" width="33" height="44" rx="4.5" fill="${MINT}"/>
         <path d="M27 34.5 33 40.5 46 27" stroke-width="4"/>
       </g>
     </svg>

@@ -63,8 +63,8 @@ export function Logo({ size = 28 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden>
       <g stroke="#20302C" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
-        <rect x="10" y="12" width="40" height="40" rx="10" fill="#F4EFE6" transform="rotate(-10 30 32)" />
-        <rect x="18" y="14" width="38" height="40" rx="10" fill="#7FD1AE" />
+        <rect x="13.5" y="10" width="33" height="44" rx="4.5" fill="#F4EFE6" transform="rotate(-10 30 32)" />
+        <rect x="20.5" y="12" width="33" height="44" rx="4.5" fill="#7FD1AE" />
         <path d="M27 34.5 33 40.5 46 27" strokeWidth={4} />
       </g>
     </svg>
