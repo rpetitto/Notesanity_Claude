@@ -20,7 +20,7 @@ import {
   PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
   renderPatternToCanvas, type PatternKey,
 } from "../lib/patterns";
-import { cn, formatDue, isOverdue } from "../lib/utils";
+import { cn, formatDue, isOverdue, dueLabel } from "../lib/utils";
 import GoogleIcon from "../components/GoogleIcon";
 import { confirmDialog } from "../components/ConfirmDialog";
 
@@ -950,7 +950,7 @@ export default function Workspace() {
                   isOverdue(assignment.dueAt) && !locked ? "font-display font-bold text-[#a3341f]" : "text-pine/60",
                 )}
               >
-                Due {formatDue(assignment.dueAt)}
+                {dueLabel(assignment.dueAt)}
               </span>
             )}
           </div>

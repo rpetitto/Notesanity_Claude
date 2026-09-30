@@ -6,7 +6,7 @@ import Shell, { Avatar, EmptyState, ErrorNote, Spinner } from "../components/She
 import PageThumb from "../components/PageThumb";
 import { ButtonLink, Card, Chip } from "../components/ui";
 import { api, pageSource, type PageRec } from "../lib/api";
-import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
+import { cn, isOverdue, relativeTime, DEFAULT_ACCENT, dueLabel } from "../lib/utils";
 import GoogleIcon from "../components/GoogleIcon";
 
 interface TeachingAssignment {
@@ -299,7 +299,7 @@ export function AssignmentCard({ a }: { a: AssignmentCardData }) {
                     {a.status === "draft" ? "Draft" : "Active"}
                   </Chip>
                   <span className={cn("text-[16px]", overdue ? "font-display text-[#a3341f]" : "text-pine/70")}>
-                    Due {formatDue(a.dueAt)}
+                    {dueLabel(a.dueAt)}
                   </span>
                   {a.googleCourseworkLink && (
                     <a

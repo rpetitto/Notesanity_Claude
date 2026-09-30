@@ -6,7 +6,7 @@ import { Chip, IconButton, ButtonLink } from "../components/ui";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
-import { cn, formatDue } from "../lib/utils";
+import { cn, dueLabel } from "../lib/utils";
 
 /** Page chrome when standalone; nothing when embedded inside the class tabs. */
 function Frame({ embedded, wide, children }: { embedded?: boolean; wide?: boolean; children: React.ReactNode }) {
@@ -158,7 +158,7 @@ function StudentGrades({ classId, embedded }: { classId: string; embedded?: bool
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-display text-pine">{a.title}</div>
-                      <div className="text-[16px] text-pine/70">Due {formatDue(a.dueAt)}</div>
+                      <div className="text-[16px] text-pine/70">{dueLabel(a.dueAt)}</div>
                     </div>
                     <div className="flex items-center gap-3">
                       <Chip tone={STATUS_TONE[a.status]}>{STATUS_LABEL[a.status]}</Chip>

@@ -19,7 +19,7 @@ import { ZoomSelect } from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { api, type FieldRec, type LayerRec, type PageRec } from "../lib/api";
 import { parseLayer, PEN_COLORS } from "../lib/ink";
-import { cn, formatDue } from "../lib/utils";
+import { cn, dueLabel } from "../lib/utils";
 
 interface Child {
   id: string;
@@ -315,7 +315,7 @@ function AssignmentRow({ a, studentId }: { a: FamilyAssignment; studentId: strin
               {a.className} · {a.notebookTitle} · {a.pageIds.length} page{a.pageIds.length === 1 ? "" : "s"}
             </div>
             <div className={cn("mt-1 text-[16px]", overdue ? "font-display text-[#a3341f]" : "text-pine/70")}>
-              {a.dueAt ? `Due ${formatDue(a.dueAt)}` : "No due date"}
+              {dueLabel(a.dueAt)}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">

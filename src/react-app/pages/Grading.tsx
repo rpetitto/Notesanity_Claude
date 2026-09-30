@@ -15,7 +15,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckCheck, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck,
-  History, Lock, Mail, MoreVertical, PanelLeft, Pencil, Send, Trash2, Type as TypeIcon,
+  History, Lock, Mail, MoreVertical, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Send, Trash2, Type as TypeIcon,
   Undo2, Unlock, Upload, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,7 +29,7 @@ import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
-import { cn, formatDue, relativeTime } from "../lib/utils";
+import { cn, relativeTime, dueLabel } from "../lib/utils";
 import { hasGoogleClientId, pushGrades, type ClassroomGrade, type GradePushResult } from "../lib/google";
 import GoogleIcon from "../components/GoogleIcon";
 
@@ -154,6 +154,28 @@ function PageRail({
 }
 
 /** Roster list, shared by the persistent left panel and its mobile drawer. */
+/**
+ * A side panel's header: its hide button on the left, where a notebook's page
+ * list keeps its own, and the panel's name. Same 48px band as the notebook's
+ * Pages/Assignments tabs, so the two screens line up.
+ */
+function PanelHeader({ label, onHide, hideLabel }: { label: string; onHide: () => void; hideLabel: string }) {
+  return (
+    <div className="flex h-12 shrink-0 items-center border-b-2 border-pine/12">
+      <button
+        type="button"
+        onClick={onHide}
+        title={hideLabel}
+        aria-label={hideLabel}
+        className="flex h-12 w-10 shrink-0 items-center justify-center text-pine/60 hover:bg-oat hover:text-pine"
+      >
+        <PanelLeftClose className="h-4 w-4" strokeWidth={2.5} />
+      </button>
+      <span className="min-w-0 truncate font-display text-[17px] font-bold text-pine">{label}</span>
+    </div>
+  );
+}
+
 function RosterList({
   rows, studentIdx, onSelect,
 }: {
@@ -612,30 +634,9 @@ export default function Grading() {
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
-        {/* Both panel toggles live together on the left, where the panels
-            themselves are — a "Roster" button living in the actions cluster on
-            the right was two screens' worth of eye travel from the thing it
-            opened. */}
-        <button
-          type="button"
-          onClick={() => setRosterOpen((v) => !v)}
-          className="hidden h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8 sm:inline-flex"
-          aria-label={rosterOpen ? "Hide roster" : "Show roster"}
-          aria-pressed={rosterOpen}
-          title="Roster"
-        >
-          <Users className="h-4 w-4" strokeWidth={2.5} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setRailOpen((v) => !v)}
-          className="hidden h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8 sm:inline-flex"
-          aria-label={railOpen ? "Hide pages" : "Show pages"}
-          aria-pressed={railOpen}
-          title="Pages"
-        >
-          <PanelLeft className="h-4 w-4" strokeWidth={2.5} />
-        </button>
+        {/* On a computer the panels hide and show from their own headers, the
+            way a notebook's page list does; on a phone they are drawers,
+            opened from here. */}
         <button
           type="button"
           onClick={() => setRosterMobileOpen(true)}
@@ -655,7 +656,7 @@ export default function Grading() {
         <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate font-display text-[16px] font-bold text-pine">{assignment.title}</div>
           <div className="truncate text-[16px] text-pine/70">
-            {formatPageNumbers(assignment.pageNumbers)} · Due {formatDue(assignment.dueAt)}
+            {formatPageNumbers(assignment.pageNumbers)} · {dueLabel(assignment.dueAt)}
           </div>
         </div>
 
@@ -853,13 +854,46 @@ export default function Grading() {
       {/* Roster sits to the left of the pages, matching the order you actually
           work in: pick a student, then a page, then look at it. */}
       <div className="flex min-h-0 flex-1">
+        {/* Hidden panels leave a slim strip with a button to bring each back —
+            the same strip, in the same place, as a notebook's page list. */}
+        {(!rosterOpen || !railOpen) && (
+          <aside className="hidden w-11 shrink-0 flex-col items-center gap-1 border-r-2 border-pine/12 bg-white pt-1 sm:flex">
+            {!rosterOpen && (
+              <button
+                type="button"
+                onClick={() => setRosterOpen(true)}
+                title="Show students"
+                aria-label="Show students"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-pine/70 hover:bg-oat hover:text-pine"
+              >
+                <Users className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            )}
+            {!railOpen && (
+              <button
+                type="button"
+                onClick={() => setRailOpen(true)}
+                title="Show pages"
+                aria-label="Show pages"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-pine/70 hover:bg-oat hover:text-pine"
+              >
+                <PanelLeftOpen className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            )}
+          </aside>
+        )}
         {rosterOpen && (
-          <aside className="hidden w-64 shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white sm:block">
-            <RosterList rows={rows} studentIdx={studentIdx} onSelect={setStudentIdx} />
+          <aside className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
+            <PanelHeader label="Students" onHide={() => setRosterOpen(false)} hideLabel="Hide students" />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <RosterList rows={rows} studentIdx={studentIdx} onSelect={setStudentIdx} />
+            </div>
           </aside>
         )}
         {railOpen && (
-          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 sm:block">
+          <aside className="hidden w-[112px] shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
+            <PanelHeader label="Pages" onHide={() => setRailOpen(false)} hideLabel="Hide pages" />
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
             <PageRail
               pages={assignedPages}
               pageNumbers={assignment.pageNumbers}
@@ -872,6 +906,7 @@ export default function Grading() {
                 teacher: notebookWork.teacherLayers,
               }}
             />
+            </div>
           </aside>
         )}
 

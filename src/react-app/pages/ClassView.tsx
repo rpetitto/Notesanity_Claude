@@ -18,7 +18,7 @@ import { AssignmentCard, type AssignmentCardData } from "./TeacherAssignments";
 import { Button, ButtonLink, buttonClass, Card, CardLink, Chip, ConfirmModal, IconButton, Input, Label, Menu, Modal, Select, Textarea, type MenuItem } from "../components/ui";
 import { api, assetUrl, pageSource, type AssignmentSummary, type PageRec } from "../lib/api";
 import { useSession } from "../lib/session";
-import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT } from "../lib/utils";
+import { cn, formatDue, isOverdue, relativeTime, DEFAULT_ACCENT, dueLabel } from "../lib/utils";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 import GoogleIcon from "../components/GoogleIcon";
 import FamilyAccessModal from "../components/FamilyAccessModal";
@@ -759,7 +759,7 @@ export function StudentAssignmentCard({ a }: { a: StudentAssignmentData }) {
               {STUDENT_STATUS_LABEL[a.status]}
             </Chip>
             <span className={cn("text-[16px]", overdue ? "font-display text-[#a3341f]" : "text-pine/70")}>
-              Due {formatDue(a.dueAt)}
+              {dueLabel(a.dueAt)}
             </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-[16px] text-pine/70">

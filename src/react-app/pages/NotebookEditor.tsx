@@ -135,7 +135,11 @@ function fieldPatch(f: FieldRow, d: FieldDraft): Record<string, unknown> {
   if (f.type === "richtext") out.content = d.content;
   // A link's address, as typed: the server stores its checked form, and the
   // inspector refuses Save on anything that wouldn't pass.
-  if (f.type === "link") out.content = d.content.trim();
+  if (f.type === "link") {
+    out.content = d.content.trim();
+    // The draft holds the look: "button", or nothing for an outline over the page.
+    out.options = d.options.trim() === "button" ? ["button"] : [];
+  }
   return out;
 }
 
@@ -458,6 +462,19 @@ export default function NotebookEditor() {
     return fitWidth * zoom;
   }, [page, containerHeight, zoom, fitWidth]);
   usePinchZoom(containerRef, scale / fitWidth, setZoom);
+
+  // The element panel floats over the right of the page. Room is made for it
+  // with padding — which leaves the measured width, and so the page's size,
+  // alone — and a box it would cover is scrolled out from under it, once.
+  useEffect(() => {
+    if (!selectedField) return;
+    const el = containerRef.current;
+    const box = el?.querySelector<HTMLElement>(`[data-field-box="${CSS.escape(selectedField)}"]`);
+    if (!el || !box || window.matchMedia("(max-width: 639px)").matches) return;
+    const panel = 18 * 16 + 16;
+    const over = box.getBoundingClientRect().right - (el.getBoundingClientRect().right - panel);
+    if (over > 0) el.scrollBy({ left: over + 12, behavior: "smooth" });
+  }, [selectedField]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["notebook", notebookId] });
@@ -1597,7 +1614,7 @@ export default function NotebookEditor() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {railOpen ? (
           <aside data-tour="nb-rail" className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
             {sidePanelBody(false)}
@@ -1636,7 +1653,10 @@ export default function NotebookEditor() {
           </div>
         )}
 
-        <div ref={containerRef} className="relative min-w-0 flex-1 overflow-auto bg-oat p-2 sm:p-4">
+        <div
+          ref={containerRef}
+          className={cn("relative min-w-0 flex-1 overflow-auto bg-oat p-2 sm:p-4", selectedField && "sm:pr-[19rem]")}
+        >
           {!page ? (
             <div className="py-20 text-center text-[16px] text-pine/70">
               Every page is archived. Restore one from the list to keep editing.
@@ -1719,7 +1739,9 @@ export default function NotebookEditor() {
                           ...size,
                           label: "",
                           prompt: "",
-                          options: tool === "choice" ? ["Option A", "Option B"] : [],
+                          // A link placed by hand is drawn as a button unless the teacher
+                          // lays it over the page's own words; links from a file never are.
+                          options: tool === "choice" ? ["Option A", "Option B"] : tool === "link" ? ["button"] : [],
                         });
                         setTool("none");
                       }}
@@ -1790,70 +1812,85 @@ export default function NotebookEditor() {
             );
           })()}
 
-          {/* Floating action bar for the current page multi-selection. */}
-          {selection.size > 0 && (
-            <div className="sticky bottom-4 z-20 mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-full border-[3px] border-pine bg-white px-3 py-2 shadow-[4px_4px_0_0_var(--color-pine)]">
-              <span className="whitespace-nowrap text-[16px] font-bold text-pine">
-                {selection.size} page{selection.size === 1 ? "" : "s"} selected
-              </span>
-              <button
-                onClick={createAssignmentFromSelection}
-                className="inline-flex h-11 items-center gap-2 rounded-full border-2 border-pine bg-white px-4 font-display text-[16px] font-bold text-pine hover:bg-oat"
+          {/* The selection bar: what can be done to every selected page at once.
+              A card rather than a pill, because on a narrower screen it wraps,
+              and a pill wrapped onto two rows is a lozenge with its buttons
+              adrift in it. Every action is the same 44px pill, and Archive and
+              Restore each appear only when they'd change something. */}
+          {selection.size > 0 && (() => {
+            const chosen = allPages.filter((p) => selection.has(p.id));
+            const anyLive = chosen.some((p) => !p.archived);
+            const anyArchived = chosen.some((p) => p.archived);
+            const action = "inline-flex h-11 shrink-0 items-center gap-2 rounded-full border-2 px-3.5 font-display text-[16px] font-bold transition-colors disabled:opacity-50";
+            const quiet = cn(action, "border-pine/25 bg-white text-pine hover:bg-oat");
+            return (
+              <div
+                role="toolbar"
+                aria-label="Selected pages"
+                className="sticky bottom-4 z-20 mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-[22px] border-[3px] border-pine bg-white p-2 pl-4 shadow-[4px_4px_0_0_var(--color-pine)]"
               >
-                <ClipboardList className="h-3.5 w-3.5" strokeWidth={2.5} /> Create assignment
-              </button>
-              <button
-                onClick={groupSelection}
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat"
-              >
-                <FolderPlus className="h-3.5 w-3.5" strokeWidth={2.5} /> Group
-              </button>
-              <button
-                onClick={() => duplicatePages.mutate(Array.from(selection))}
-                disabled={duplicatePages.isPending}
-                title="Copy each page, with its boxes, in behind the original"
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
-              >
-                <CopyPlus className="h-3.5 w-3.5" strokeWidth={2.5} /> Duplicate
-              </button>
-              <button
-                onClick={() => saveToLibrary.mutate(Array.from(selection))}
-                disabled={saveToLibrary.isPending}
-                title="Keep a copy in your page library, to reuse in any notebook"
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat disabled:opacity-50"
-              >
-                <LibraryBig className="h-3.5 w-3.5" strokeWidth={2.5} />
-                {saveToLibrary.isPending ? "Saving…" : "Save to library"}
-              </button>
-              <button
-                onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "archive" })}
-                title="Hide from students but keep their work"
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat"
-              >
-                <EyeOff className="h-3.5 w-3.5" strokeWidth={2.5} /> Archive
-              </button>
-              <button
-                onClick={() => confirmDelete(Array.from(selection))}
-                title="Delete permanently, including student work"
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-[#a3341f] px-3 py-1.5 text-[16px] font-bold text-[#a3341f] hover:bg-[#a3341f]/8"
-              >
-                <Trash2 className="h-3.5 w-3.5" strokeWidth={2.5} /> Delete
-              </button>
-              <button
-                onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "restore" })}
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-pine/20 px-3 py-1.5 text-[16px] font-bold text-pine hover:bg-oat"
-              >
-                <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.5} /> Restore
-              </button>
-              <button
-                onClick={() => setSelection(new Set())}
-                className="rounded-full p-1.5 text-pine/50 hover:bg-pine/8"
-                aria-label="Clear selection"
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={2.5} />
-              </button>
-            </div>
-          )}
+                <span className="mr-1 whitespace-nowrap text-[16px] font-bold text-pine" aria-live="polite">
+                  {selection.size} page{selection.size === 1 ? "" : "s"} selected
+                </span>
+                <button onClick={createAssignmentFromSelection} className={cn(action, "border-pine bg-mint text-pine hover:bg-mint/80")}>
+                  <ClipboardList className="h-4 w-4" strokeWidth={2.5} /> Create assignment
+                </button>
+                <button onClick={groupSelection} className={quiet}>
+                  <FolderPlus className="h-4 w-4" strokeWidth={2.5} /> Group
+                </button>
+                <button
+                  onClick={() => duplicatePages.mutate(Array.from(selection))}
+                  disabled={duplicatePages.isPending}
+                  title="Copy each page, with its boxes, in behind the original"
+                  className={quiet}
+                >
+                  <CopyPlus className="h-4 w-4" strokeWidth={2.5} /> Duplicate
+                </button>
+                <button
+                  onClick={() => saveToLibrary.mutate(Array.from(selection))}
+                  disabled={saveToLibrary.isPending}
+                  title="Keep a copy in your page library, to reuse in any notebook"
+                  className={quiet}
+                >
+                  <LibraryBig className="h-4 w-4" strokeWidth={2.5} />
+                  {saveToLibrary.isPending ? "Saving…" : "Save to library"}
+                </button>
+                {anyLive && (
+                  <button
+                    onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "archive" })}
+                    title="Hide from students but keep their work"
+                    className={quiet}
+                  >
+                    <EyeOff className="h-4 w-4" strokeWidth={2.5} /> Archive
+                  </button>
+                )}
+                {anyArchived && (
+                  <button
+                    onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "restore" })}
+                    title="Show to students again"
+                    className={quiet}
+                  >
+                    <RotateCcw className="h-4 w-4" strokeWidth={2.5} /> Restore
+                  </button>
+                )}
+                <button
+                  onClick={() => confirmDelete(Array.from(selection))}
+                  title="Delete permanently, including student work"
+                  className={cn(action, "border-[#a3341f] bg-white text-[#a3341f] hover:bg-[#a3341f]/8")}
+                >
+                  <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete
+                </button>
+                <button
+                  onClick={() => setSelection(new Set())}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-pine/60 hover:bg-oat hover:text-pine"
+                  aria-label="Clear selection"
+                  title="Clear selection"
+                >
+                  <X className="h-5 w-5" strokeWidth={2.5} />
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         {selectedField && (
@@ -2764,7 +2801,9 @@ function FieldInspector({
     }
   };
 
-  const body = (
+  // Rendered twice — the rail and the phone sheet — so anything grouped by name
+  // (the link's radios) is named per copy, or the hidden copy steals the check.
+  const body = (where: "rail" | "sheet") => (
     <>
       <div className="flex items-center justify-between">
         <h3 className="font-display text-[16px] font-bold text-pine">Field</h3>
@@ -2815,9 +2854,9 @@ function FieldInspector({
         const unusable = !!content.trim() && !href;
         return (
           <>
-            <label className="label-caps mt-4 block text-pine/70" htmlFor="link-href">Opens</label>
+            <label className="label-caps mt-4 block text-pine/70" htmlFor={`link-href-${where}`}>Opens</label>
             <Input
-              id="link-href"
+              id={`link-href-${where}`}
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="Paste a web address"
@@ -2844,17 +2883,51 @@ function FieldInspector({
               </a>
             ) : null}
 
-            <label className="label-caps mt-4 block text-pine/70" htmlFor="link-words">What it says</label>
+            <label className="label-caps mt-4 block text-pine/70" htmlFor={`link-words-${where}`}>What it says</label>
             <Input
-              id="link-words"
+              id={`link-words-${where}`}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="e.g. Watch the video"
               className="mt-1 text-[16px]"
             />
-            <p className="mt-1.5 text-[16px] leading-snug text-pine/60">
-              The words a screen reader says for it. Size the box over the words or picture on the page that
-              students should tap.
+
+            <fieldset className="mt-4">
+              <legend className="label-caps block text-pine/70">Students see</legend>
+              <div className="mt-1.5 space-y-2">
+                {([
+                  ["button", "A button", "The site's icon and what it says, drawn on the page."],
+                  ["", "An outline over the page", "For words or a picture already on the page: a dashed outline shows where to tap."],
+                ] as const).map(([value, title, hint]) => {
+                  const on = (options.trim() === "button" ? "button" : "") === value;
+                  return (
+                    <label
+                      key={value || "outline"}
+                      className={cn(
+                        "flex cursor-pointer items-start gap-2.5 rounded-[12px] border-2 p-2.5",
+                        on ? "border-pine bg-mint/20" : "border-pine/20 hover:bg-oat",
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name={`link-look-${where}-${field.id}`}
+                        checked={on}
+                        onChange={() => setOptions(value)}
+                        className="mt-1 h-5 w-5 shrink-0 accent-[#20302C]"
+                      />
+                      <span>
+                        <span className="block font-display text-[16px] font-bold text-pine">{title}</span>
+                        <span className="block text-[15px] leading-snug text-pine/65">{hint}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <p className="mt-2 text-[16px] leading-snug text-pine/60">
+              {options.trim() === "button"
+                ? "What it says is the button's words, and what a screen reader reads out."
+                : "Size the box over the words or picture students should tap. What it says is read out by screen readers."}
             </p>
           </>
         );
@@ -3022,8 +3095,15 @@ function FieldInspector({
 
   return (
     <>
-      <aside className="hidden w-64 shrink-0 border-l-2 border-pine/12 bg-white p-4 sm:block">
-        {body}
+      {/* Floats over the page rather than taking width from it. As a column it
+          narrowed the page area the moment a box was selected, the page re-fit
+          to the new width, and every page re-rendered at a new size — the jump
+          and re-sharpen people saw on every selection. */}
+      <aside
+        aria-label="Selected element"
+        className="absolute inset-y-0 right-0 z-30 hidden w-72 overflow-y-auto border-l-[3px] border-pine bg-white p-4 shadow-[-4px_0_0_0_rgb(32_48_44_/_0.12)] sm:block"
+      >
+        {body("rail")}
       </aside>
 
       {/* Bottom sheet on phones — there's no room for a fixed right rail. */}
@@ -3033,7 +3113,7 @@ function FieldInspector({
           className="relative flex max-h-[80vh] w-full flex-col overflow-y-auto rounded-t-[22px] border-[3px] border-pine bg-white p-4 shadow-xl"
           style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
         >
-          {body}
+          {body("sheet")}
         </div>
       </div>
     </>

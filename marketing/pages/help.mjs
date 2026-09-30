@@ -151,7 +151,8 @@ const BODY = () => `
       [
         "Do the links in my worksheet still work?",
         `Yes. Web and email links in a PDF, Word or PowerPoint file stay where they were, and open
-         in a new tab when a student taps them. Links from one page of the file to another (a
+         in a new tab when a student taps them; students see a dashed outline and the site's icon
+         on each one, so they know it's there. Links from one page of the file to another (a
          contents page, say) aren't kept. A notebook made before September 24, 2026 kept only the
          words: choose <b>Add element</b> &rarr; <b>Link</b> and it offers to put that page's links back.`,
       ],
@@ -164,10 +165,11 @@ const BODY = () => `
       ],
       [
         "Can I add a link of my own?",
-        `Two ways. <b>Add element</b> &rarr; <b>Link</b> makes anything already on the page open a
-         website: drag a box over the words or picture, then paste the address. In a <b>Text</b>
-         block, select words and press the link button. Addresses have to be web or email
-         addresses.`,
+        `Two ways. <b>Add element</b> &rarr; <b>Link</b>: drag a box, paste the address, and type
+         what it says. Under <b>Students see</b>, choose <b>A button</b> (the site's icon and your
+         words, drawn on the page) or <b>An outline over the page</b>, for words or a picture that are
+         already there. In a <b>Text</b> block, select words and press the link button. Addresses
+         have to be web or email addresses.`,
       ],
       [
         "Can I reuse a page in another notebook?",
