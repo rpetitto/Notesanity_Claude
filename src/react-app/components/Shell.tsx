@@ -1,7 +1,7 @@
-import { type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, BookText, ClipboardList, Eye, LayoutGrid, LibraryBig, LogOut, Settings, ShieldCheck, Users } from "lucide-react";
+import { Activity, BookOpen, BookText, ClipboardList, Eye, LayoutGrid, LibraryBig, LogOut, Megaphone, Settings, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { signOutHref, useSession } from "../lib/session";
 import { api } from "../lib/api";
 import { cn, initials } from "../lib/utils";
@@ -75,6 +75,128 @@ export function FlingBadge() {
   return null;
 }
 
+/**
+ * The avatar is the account menu, the way Google's is: who you're signed in
+ * as, your plan, Settings and Sign out, the public pages a signed-in person
+ * otherwise has no way back to, and the legal links along the foot.
+ *
+ * Sign out stays a plain link to /api/auth/leave — google.ts listens for a
+ * click on exactly that href to forget the account's Google tokens.
+ */
+function AccountMenu() {
+  const { user, plan } = useSession();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    // First item gets focus, so the keyboard lands inside the menu it opened.
+    panel.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const onDown = (e: PointerEvent) => { if (!wrap.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setOpen(false); trigger.current?.focus(); return; }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const items = [...(panel.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const next = e.key === "ArrowDown" ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+      items[next]?.focus();
+      e.preventDefault();
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("pointerdown", onDown); window.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  if (!user) return null;
+  const roleLabel = user.role === "guardian" ? "Parent or guardian" : user.role === "student" ? "Student" : null;
+  // Upgrade is offered to a teacher on Free. While in beta it says so: the
+  // link still goes to the plans, which show what's coming and when.
+  const offerUpgrade = user.role === "teacher" && plan?.source === "free";
+  const item = "flex min-h-[44px] w-full items-center gap-3 rounded-[12px] px-3 text-left font-display text-[16px] font-bold text-pine hover:bg-oat focus-visible:bg-oat focus-visible:outline-none";
+  const close = () => setOpen(false);
+
+  return (
+    <div ref={wrap} className="relative">
+      <button
+        ref={trigger}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Account: ${user.name}`}
+        title={user.email}
+        className={cn(
+          "flex h-11 w-11 items-center justify-center rounded-full transition-shadow",
+          "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-pine/40",
+          open ? "ring-[3px] ring-mint" : "hover:ring-[3px] hover:ring-pine/15",
+        )}
+      >
+        <Avatar name={user.name} picture={user.picture} size={32} />
+      </button>
+
+      {open && (
+        <div
+          ref={panel}
+          role="menu"
+          aria-label="Account"
+          className="absolute right-0 top-[calc(100%+8px)] z-50 w-[min(320px,calc(100vw-24px))] overflow-hidden rounded-[22px] border-[3px] border-pine bg-white shadow-[4px_4px_0_0_var(--color-pine)]"
+        >
+          <div className="flex items-center gap-3 border-b-2 border-pine/12 bg-oat/60 px-4 py-4">
+            <Avatar name={user.name} picture={user.picture} size={48} />
+            <div className="min-w-0">
+              <div className="truncate font-display text-[17px] font-bold text-pine">{user.name}</div>
+              <div className="truncate text-[16px] text-pine/70">{user.email}</div>
+              {(plan || roleLabel) && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {roleLabel && <span className="rounded-full border-2 border-pine/20 px-2.5 text-[16px] font-bold text-pine/75">{roleLabel}</span>}
+                  {plan && user.role === "teacher" && (
+                    <span className="rounded-full border-2 border-pine/20 px-2.5 text-[16px] font-bold text-pine/75">
+                      {plan.label} plan
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="p-2">
+            {offerUpgrade && (
+              <a role="menuitem" href="/pricing" onClick={close} className={cn(item, "mb-1 py-2 bg-mint/25 hover:bg-mint/40 focus-visible:bg-mint/40")}>
+                <Sparkles className="h-5 w-5 shrink-0" strokeWidth={2.5} />
+                <span className="min-w-0 flex-1">
+                  Upgrade to Pro
+                  {plan?.beta && <span className="block text-[16px] font-normal leading-snug text-pine/70">Free for everyone during the beta</span>}
+                </span>
+              </a>
+            )}
+            <Link role="menuitem" to="/settings" onClick={close} className={item}>
+              <Settings className="h-5 w-5 shrink-0" strokeWidth={2.5} /> Settings
+            </Link>
+            <a role="menuitem" href="/changelog" target="_blank" rel="noopener" onClick={close} className={item}>
+              <Megaphone className="h-5 w-5 shrink-0" strokeWidth={2.5} /> What's new
+            </a>
+            <a role="menuitem" href="/status" target="_blank" rel="noopener" onClick={close} className={item}>
+              <Activity className="h-5 w-5 shrink-0" strokeWidth={2.5} /> Status
+            </a>
+            <div className="my-1 border-t-2 border-pine/12" />
+            <a role="menuitem" href={signOutHref} className={item}>
+              <LogOut className="h-5 w-5 shrink-0" strokeWidth={2.5} /> Sign out
+            </a>
+          </div>
+
+          <div className="flex items-center justify-center gap-2 border-t-2 border-pine/12 bg-oat/60 px-4 py-2.5 text-[15px] text-pine/70">
+            <a href="/privacy" target="_blank" rel="noopener" className="rounded px-1 py-1 hover:text-pine hover:underline">Privacy Policy</a>
+            <span aria-hidden>•</span>
+            <a href="/terms" target="_blank" rel="noopener" className="rounded px-1 py-1 hover:text-pine hover:underline">Terms of Service</a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Shell({ children, wide }: { children: ReactNode; wide?: boolean }) {
   const { user, impersonating } = useSession();
   const { pathname } = useLocation();
@@ -135,10 +257,13 @@ export default function Shell({ children, wide }: { children: ReactNode; wide?: 
           </nav>
 
           <div className="ml-auto flex shrink-0 items-center gap-3">
-            {user && <Avatar name={user.name} picture={user.picture} size={30} />}
-            <a href={signOutHref} title="Sign out" className="flex h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8">
-              <LogOut className="h-4 w-4" />
-            </a>
+            {user ? (
+              <AccountMenu />
+            ) : (
+              <a href={signOutHref} title="Sign out" className="flex h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8">
+                <LogOut className="h-4 w-4" />
+              </a>
+            )}
           </div>
         </div>
         </header>
