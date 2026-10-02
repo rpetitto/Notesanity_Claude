@@ -1,0 +1,131 @@
+import { lazy, Suspense } from "react";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { useSession } from "./lib/session";
+import { Spinner, ErrorNote } from "./components/Shell";
+import { api } from "./lib/api";
+import Landing from "./pages/Landing";
+import RolePicker from "./pages/RolePicker";
+import { FamilyChild, FamilyHome, FamilyNotebookView } from "./pages/Family";
+import TeacherHome from "./pages/TeacherHome";
+import StudentHome from "./pages/StudentHome";
+import ClassView from "./pages/ClassView";
+import Gradebook from "./pages/Gradebook";
+import Settings from "./pages/Settings";
+// Loaded on demand: the admin console pulls in a canvas data grid that no
+// student or teacher has any reason to download.
+const Admin = lazy(() => import("./pages/Admin"));
+
+import NotebookEditor from "./pages/NotebookEditor";
+import UploadNotebook from "./pages/UploadNotebook";
+import Workspace from "./pages/Workspace";
+import AssignmentEditor from "./pages/AssignmentEditor";
+import Grading from "./pages/Grading";
+import TeacherAssignments from "./pages/TeacherAssignments";
+import PageLibrary from "./pages/PageLibrary";
+import TeacherNotebooks from "./pages/TeacherNotebooks";
+import StudentNotebook, { StudentNotebookList } from "./pages/StudentNotebook";
+
+/**
+ * A student who reaches `/assignments/:id` (e.g. a stale link, or a share) never
+ * belongs on the teacher grading screen — send them straight to their own
+ * workspace for that assignment's notebook instead.
+ */
+function StudentAssignmentRedirect() {
+  const { assignmentId } = useParams<{ assignmentId: string }>();
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["assignment", assignmentId],
+    queryFn: () => api.get<{ assignment: { notebookId: string } }>(`/api/assignments/${assignmentId}`),
+    enabled: !!assignmentId,
+  });
+
+  if (isLoading) return <Spinner label="Opening assignment…" />;
+  if (error || !data) return <ErrorNote error={(error as Error) ?? new Error("Assignment not found")} />;
+  return <Navigate to={`/notebooks/${data.assignment.notebookId}?assignment=${assignmentId}`} replace />;
+}
+
+/**
+ * Routes `/assignments/:id` by how the person is in *that* class — whoever
+ * teaches it grades, everyone else does the work. Asked of the class, not the
+ * account: a teacher can be enrolled as a student in someone else's class
+ * (trying it out, or taking a course), and sending them to grade a class they
+ * don't teach dead-ended.
+ */
+function AssignmentRoute() {
+  const { user } = useSession();
+  const { assignmentId } = useParams<{ assignmentId: string }>();
+  const probe = useQuery({
+    queryKey: ["assignment", assignmentId],
+    queryFn: () => api.get<{ isTeacher?: boolean; assignment: { notebookId: string } }>(`/api/assignments/${assignmentId}`),
+    enabled: !!assignmentId && user?.role === "teacher",
+  });
+  if (user?.role !== "teacher") return <StudentAssignmentRedirect />;
+  if (probe.isLoading) return <Spinner label="Opening assignment…" />;
+  return probe.data && probe.data.isTeacher === false ? <StudentAssignmentRedirect /> : <Grading />;
+}
+
+export default function App() {
+  const { user, isLoading, error } = useSession();
+
+  if (isLoading) return <Spinner label="Starting Notesanity…" />;
+  // A signed-in Google account can still be refused (wrong email domain), so the
+  // reason has to reach the landing page — otherwise sign-in silently loops.
+  if (!user) {
+    return (
+      <Routes>
+        <Route path="*" element={<Landing error={error} />} />
+      </Routes>
+    );
+  }
+  if (user.role === "pending") {
+    return (
+      <Routes>
+        <Route path="*" element={<RolePicker />} />
+      </Routes>
+    );
+  }
+
+  // A family account sees its children and its settings, and nothing else.
+  if (user.role === "guardian") {
+    return (
+      <Routes>
+        <Route path="/family" element={<FamilyHome />} />
+        <Route path="/family/:studentId" element={<FamilyChild />} />
+        <Route path="/family/:studentId/notebooks/:notebookId" element={<FamilyNotebookView />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="*" element={<Navigate to="/family" replace />} />
+      </Routes>
+    );
+  }
+
+  const home = user.role === "teacher" ? "/classes" : "/work";
+
+  return (
+    <Routes>
+      <Route path="/" element={<Navigate to={home} replace />} />
+      <Route path="/classes" element={<TeacherHome />} />
+      <Route path="/classes/:classId" element={<ClassView />} />
+      <Route path="/classes/:classId/upload" element={<UploadNotebook />} />
+      <Route path="/classes/:classId/gradebook" element={<Gradebook />} />
+      <Route path="/classes/:classId/assignments/new" element={<AssignmentEditor />} />
+      <Route path="/classes/:classId/students/:studentId" element={<StudentNotebookList />} />
+      <Route path="/classes/:classId/students/:studentId/notebooks/:notebookId" element={<StudentNotebook />} />
+      <Route path="/assignments" element={<TeacherAssignments />} />
+      <Route path="/library" element={<PageLibrary />} />
+      <Route path="/notebooks" element={<TeacherNotebooks />} />
+      <Route path="/templates/upload" element={<UploadNotebook />} />
+      <Route path="/assignments/:assignmentId" element={<AssignmentRoute />} />
+      <Route path="/assignments/:assignmentId/edit" element={<AssignmentEditor />} />
+      <Route path="/notebooks/:notebookId/edit" element={<NotebookEditor />} />
+      <Route path="/notebooks/:notebookId" element={<Workspace />} />
+      <Route path="/work" element={<StudentHome />} />
+      <Route path="/settings" element={<Settings />} />
+      {/* A teacher can be a parent at the school too. */}
+      <Route path="/family" element={<FamilyHome />} />
+      <Route path="/family/:studentId" element={<FamilyChild />} />
+      <Route path="/family/:studentId/notebooks/:notebookId" element={<FamilyNotebookView />} />
+      <Route path="/admin" element={<Suspense fallback={<Spinner label="Loading admin…" />}><Admin /></Suspense>} />
+      <Route path="*" element={<Navigate to={home} replace />} />
+    </Routes>
+  );
+}

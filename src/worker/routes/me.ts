@@ -1,0 +1,307 @@
+import { app, db } from "../platform";
+import { billingConfigured } from "../platform/billing";
+import { BETA_FREE, PLANS } from "../../shared/plans.mjs";
+import { currentUser, handler, now, requireUser, HttpError, activeImpersonation, orgForDomain, uid } from "../lib/session";
+import { linkGuardian, requireCode } from "../lib/family";
+import { planForUser, notebooksUsedStatement, quotaFrom, departmentFor, requirePlan } from "../lib/plans";
+
+/** Who am I? Returns null (200) when signed out so the client can show the landing page. */
+app.get("/api/me", handler(async (c) => {
+  const user = await currentUser(c);
+  if (!user) return c.json({ user: null });
+
+  // What they really have, and what that means today. The Settings card shows
+  // the real tier; `beta` is what tells it every gate is currently open.
+  const plan = await planForUser(user);
+  // Every app load asks for this, so the reads that don't depend on each other
+  // go together in one round trip. Tours ride along with the session rather
+  // than being fetched separately: a guide that arrives a moment after the
+  // screen does pops up over something the person had already started reading.
+  const [usedRes, customerRes, orgRes, toursRes, kidsRes] = await db.batch([
+    notebooksUsedStatement(user.id),
+    db.prepare(`SELECT 1 AS yes FROM billing_customers WHERE user_id = ?`).bind(user.id),
+    db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id),
+    db.prepare(`SELECT tour FROM user_tours WHERE user_id = ?`).bind(user.id),
+    db.prepare(`SELECT COUNT(*) AS n FROM guardian_links WHERE guardian_id = ?`).bind(user.id),
+  ]);
+  const quota = quotaFrom(plan, (usedRes.results?.[0] as { n: number } | undefined)?.n ?? 0);
+  const customer = customerRes.results?.[0] ?? null;
+  const org = (orgRes.results?.[0] ?? null) as any;
+  const tours = { results: (toursRes.results ?? []) as { tour: string }[] };
+  const department = user.is_admin ? await departmentFor(user.org_id) : null;
+  const seatsUsed = department
+    ? (await db.prepare(`SELECT COUNT(*) AS n FROM plan_seats WHERE subscription_id = ?`)
+        .bind(department.id).first<{ n: number }>())?.n ?? 0
+    : 0;
+
+  // The banner a superadmin sees while viewing as this account — never shown
+  // to the account itself, since currentUser() only sets impersonated_by
+  // when the *impersonation cookie* resolved this request in the first place.
+  let impersonating: { superadminEmail: string; reason: string; expiresAt: string } | null = null;
+  if (user.impersonated_by) {
+    const active = await activeImpersonation(c);
+    const superadmin = await db.prepare(`SELECT email FROM users WHERE id = ?`).bind(user.impersonated_by).first<{ email: string }>();
+    if (active && superadmin) {
+      impersonating = { superadminEmail: superadmin.email, reason: active.reason, expiresAt: active.expiresAt };
+    }
+  }
+
+  return c.json({
+    user: {
+      id: user.id, email: user.email, name: user.name, picture: user.picture,
+      role: user.role, requestedRole: user.requested_role ?? "", isAdmin: !!user.is_admin, isSuperadmin: !!user.is_superadmin,
+      toursSeen: (tours.results ?? []).map((r) => r.tour),
+      // A teacher can be a parent too; this is what puts "My children" in their menu.
+      childCount: (kidsRes.results?.[0] as { n: number } | undefined)?.n ?? 0,
+    },
+    org: org ? { name: org.name, primaryDomain: org.primary_domain } : null,
+    impersonating,
+    plan: {
+      tier: plan.tier,
+      source: plan.source,
+      label: PLANS[plan.source].label,
+      beta: BETA_FREE,
+      quota,
+      renewsAt: plan.renewsAt,
+      cancelAtPeriodEnd: plan.cancelAtPeriodEnd,
+      canUpgrade: !BETA_FREE && plan.tier === "free" && user.role === "teacher" && billingConfigured(),
+      hasPortal: !!customer,
+      seats: department ? { used: seatsUsed, total: department.seat_count ?? 0 } : null,
+      prices: {
+        pro: PLANS.pro.priceCents, department: PLANS.department.priceCents, school: PLANS.school.priceCents,
+      },
+    },
+  });
+}));
+
+/**
+ * Mark a guided tour finished or skipped.
+ *
+ * Idempotent, because the client calls it on the way out of the tour and that
+ * can happen twice — Escape and the Skip button both close it. Whichever
+ * arrives first wins, and the later one only moves `step` forward.
+ */
+app.post("/api/me/tours", handler(async (c) => {
+  const user = await requireUser(c);
+  const body = await c.req.json<{ tour?: string; status?: string; step?: number }>();
+  const tour = String(body.tour ?? "").trim().slice(0, 60);
+  if (!/^[a-z]+\.[a-z]+$/.test(tour)) throw new HttpError(400, "Unknown tour");
+  const status = body.status === "dismissed" ? "dismissed" : "completed";
+  const step = Number.isFinite(body.step) ? Math.max(0, Math.min(99, Math.floor(body.step as number))) : 0;
+
+  await db
+    .prepare(
+      `INSERT INTO user_tours (user_id, tour, status, step, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, tour) DO UPDATE SET
+         step = MAX(user_tours.step, excluded.step),
+         updated_at = excluded.updated_at`,
+    )
+    .bind(user.id, tour, status, step, now())
+    .run();
+  return c.json({ ok: true });
+}));
+
+/** Start the guides over — the way back from a tour someone skipped too early. */
+app.delete("/api/me/tours", handler(async (c) => {
+  const user = await requireUser(c);
+  await db.prepare(`DELETE FROM user_tours WHERE user_id = ?`).bind(user.id).run();
+  return c.json({ ok: true });
+}));
+
+/**
+ * For an account still 'pending' — made before sign-in asked who someone is,
+ * or on an address that can't say. The same rules as the sign-in doors:
+ * "student" needs an address the school owns, "teacher" becomes a request an
+ * admin confirms, and "family" needs a family code. Nobody picks a role that
+ * grants more than their address or their code already does.
+ */
+app.post("/api/me/role", handler(async (c) => {
+  const user = await requireUser(c);
+  const { role, familyCode } = await c.req.json<{ role: string; familyCode?: string }>();
+  if (user.role !== "pending") throw new HttpError(400, "Role is already set");
+  const domain = user.email.split("@")[1]?.toLowerCase() ?? "";
+  const schoolAddress = (await orgForDomain(domain))?.id === user.org_id;
+
+  if (role === "student") {
+    if (!schoolAddress) throw new HttpError(403, "Student accounts use a school email address.");
+    await db.prepare(`UPDATE users SET role = 'student', requested_role = '' WHERE id = ?`).bind(user.id).run();
+    return c.json({ ok: true, role: "student" });
+  }
+  if (role === "teacher") {
+    // On the school's own address, trusted, as at sign-in. Anywhere else, the
+    // account moves into a space of its own rather than staying in a school it
+    // only landed in by accident of its domain.
+    if (schoolAddress) {
+      await db.prepare(`UPDATE users SET role = 'teacher', requested_role = '' WHERE id = ?`).bind(user.id).run();
+    } else {
+      const orgId = uid();
+      await db.batch([
+        db.prepare(
+          `INSERT INTO orgs (id, name, primary_domain, teacher_domains, student_domains, solo, created_at)
+           VALUES (?, ?, ?, '', '', 1, ?)`,
+        ).bind(orgId, `${user.name || user.email.split("@")[0]}'s classroom`, `solo:${orgId}`, now()),
+        db.prepare(`UPDATE users SET role = 'teacher', requested_role = '', is_admin = 0, org_id = ? WHERE id = ?`).bind(orgId, user.id),
+      ]);
+    }
+    return c.json({ ok: true, role: "teacher" });
+  }
+  if (role === "guardian") {
+    const holder = await requireCode(familyCode);
+    // The account moves to the child's school: that's whose work it reads.
+    await db.prepare(`UPDATE users SET role = 'guardian', requested_role = '', org_id = ? WHERE id = ?`).bind(holder.orgId, user.id).run();
+    await linkGuardian(user.id, holder);
+    return c.json({ ok: true, role: "guardian" });
+  }
+  throw new HttpError(400, "Invalid role");
+}));
+
+/** Admin-only: manage which email domains may sign in, and which imply teacher/student. */
+app.get("/api/org", handler(async (c) => {
+  const user = await requireUser(c);
+  const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id).first<any>();
+  if (!org) throw new HttpError(404, "Org not found");
+  return c.json({
+    name: org.name,
+    primaryDomain: org.primary_domain,
+    teacherDomains: org.teacher_domains,
+    studentDomains: org.student_domains,
+    familyAccess: !!org.family_access,
+    canEdit: !!user.is_admin,
+  });
+}));
+
+app.patch("/api/org", handler(async (c) => {
+  const user = await requireUser(c);
+  if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  const body = await c.req.json<{ name?: string; teacherDomains?: string; studentDomains?: string; familyAccess?: boolean }>();
+  const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id).first<any>();
+  if (!org) throw new HttpError(404, "Org not found");
+  // A teacher's own space claims no domain — otherwise anyone could sign up
+  // and have a whole school's addresses land in their classroom.
+  if (org.solo && ((body.teacherDomains ?? "") !== "" || (body.studentDomains ?? "") !== "")) {
+    throw new HttpError(403, "A personal classroom can't claim email domains. Ask us to set up your school instead.");
+  }
+  await db
+    .prepare(`UPDATE orgs SET name = ?, teacher_domains = ?, student_domains = ?, family_access = ? WHERE id = ?`)
+    .bind(
+      body.name ?? org.name,
+      body.teacherDomains ?? org.teacher_domains,
+      body.studentDomains ?? org.student_domains,
+      body.familyAccess === undefined ? org.family_access ?? 1 : body.familyAccess ? 1 : 0,
+      org.id,
+    )
+    .run();
+  return c.json({ ok: true });
+}));
+
+/**
+ * Admin-only roster of the school, so an admin can promote a teacher.
+ *
+ * Searched and windowed rather than returned whole: an admin is looking for one
+ * person, and sending the entire school to find them cost 302 KB at two
+ * thousand users and would cross 3 MB at a district's worth.
+ */
+app.get("/api/org/users", handler(async (c) => {
+  const user = await requireUser(c);
+  if (!user.is_admin) throw new HttpError(403, "Admin access required");
+
+  const url = new URL(c.req.url);
+  const q = (url.searchParams.get("q") ?? "").trim().slice(0, 100);
+  const rawLimit = Number(url.searchParams.get("limit"));
+  const limit = Math.min(500, Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 100);
+  const rawOffset = Number(url.searchParams.get("offset"));
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+
+  const filter = q ? `AND (email LIKE ? OR name LIKE ?)` : "";
+  const params = q ? [`%${q}%`, `%${q}%`] : [];
+
+  const rows = await db
+    .prepare(
+      // Someone waiting to be confirmed as a teacher comes first — they can't
+      // do anything until an admin looks.
+      `SELECT id, email, name, picture, role, requested_role, is_admin, last_seen_at FROM users
+        WHERE org_id = ? ${filter}
+        ORDER BY (role = 'pending' AND requested_role = 'teacher') DESC, name LIMIT ? OFFSET ?`,
+    )
+    .bind(user.org_id, ...params, limit, offset)
+    .all();
+
+  const counted = await db
+    .prepare(`SELECT COUNT(*) AS n FROM users WHERE org_id = ? ${filter}`)
+    .bind(user.org_id, ...params)
+    .first<{ n: number }>();
+
+  return c.json({ users: rows.results ?? [], total: counted?.n ?? 0, limit, offset });
+}));
+
+/**
+ * Admin-only: the same at-a-glance counts the superadmin overview shows,
+ * scoped to the admin's own school. Notebooks/assignments don't carry
+ * `org_id` directly, so they're reached by joining back through the class
+ * (or, for a personal notebook with no class, through its owner).
+ */
+app.get("/api/org/overview", handler(async (c) => {
+  const user = await requireUser(c);
+  if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  await requirePlan(user, "school", "School-wide oversight");
+  const one = async (sql: string, ...params: unknown[]) =>
+    (await db.prepare(sql).bind(...params).first<{ n: number }>())?.n ?? 0;
+  return c.json({
+    users: await one(`SELECT COUNT(*) AS n FROM users WHERE org_id = ?`, user.org_id),
+    teachers: await one(`SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND role = 'teacher'`, user.org_id),
+    students: await one(`SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND role = 'student'`, user.org_id),
+    classes: await one(`SELECT COUNT(*) AS n FROM classes WHERE org_id = ?`, user.org_id),
+    notebooks: await one(
+      `SELECT COUNT(*) AS n FROM notebooks n2
+        LEFT JOIN classes cl ON cl.id = n2.class_id
+        LEFT JOIN users owner ON owner.id = n2.owner_id
+        WHERE COALESCE(cl.org_id, owner.org_id) = ?`,
+      user.org_id,
+    ),
+    assignments: await one(
+      `SELECT COUNT(*) AS n FROM assignments a JOIN classes cl ON cl.id = a.class_id WHERE cl.org_id = ?`,
+      user.org_id,
+    ),
+  });
+}));
+
+app.patch("/api/org/users/:id", handler(async (c) => {
+  const user = await requireUser(c);
+  if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  const { role } = await c.req.json<{ role: string }>();
+  if (!["teacher", "student"].includes(role)) throw new HttpError(400, "Invalid role");
+  const target = await db
+    .prepare(`SELECT * FROM users WHERE id = ? AND org_id = ?`)
+    .bind(c.req.param("id"), user.org_id)
+    .first<any>();
+  if (!target) throw new HttpError(404, "User not found");
+  // A family account is linked to children, not given a school role.
+  if (target.role === "guardian") throw new HttpError(400, "That's a family account — remove its links under Families instead.");
+  await db.prepare(`UPDATE users SET role = ?, requested_role = '' WHERE id = ?`).bind(role, target.id).run();
+  return c.json({ ok: true });
+}));
+
+export const touchedAt = now;
+
+/**
+ * Admin-only: what happened to recent sign-in emails.
+ *
+ * The request endpoint answers identically whatever the outcome, so this is the
+ * only place the difference between "refused", "rate limited" and "sent" is
+ * visible. Admin-only because it lists addresses that tried to sign in.
+ *
+ * Scoped to the admin's own school — a school admin has no business seeing
+ * another school's sign-in email history, and this endpoint used to return
+ * the whole platform's regardless of who asked.
+ */
+app.get("/api/org/mail", handler(async (c) => {
+  const user = await requireUser(c);
+  if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  await requirePlan(user, "school", "School-wide oversight");
+  const rows = await db
+    .prepare(`SELECT address, kind, status, detail, created_at FROM mail_log WHERE org_id = ? ORDER BY created_at DESC LIMIT 50`)
+    .bind(user.org_id)
+    .all<any>();
+  return c.json({ entries: rows.results ?? [] });
+}));

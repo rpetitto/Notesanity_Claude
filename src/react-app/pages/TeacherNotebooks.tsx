@@ -1,0 +1,372 @@
+/**
+ * Every notebook a teacher teaches from, in one place — and their templates.
+ *
+ * The class page shows one class's notebooks. This shows all of them, filtered
+ * by class, which is what a teacher with five sections wants on a Sunday night.
+ * It is also where templates live: a notebook built once, outside any class,
+ * pushed into whichever classes teach from it and topped up from here when the
+ * template grows.
+ */
+
+import { useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Archive, BookText, CheckSquare, ChevronDown, LayoutGrid, Plus, Search, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
+import { toast } from "sonner";
+import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
+import NewNotebookModal from "../components/NewNotebookModal";
+import PushToClassesModal from "../components/PushToClassesModal";
+import { Button, Chip, ConfirmModal, Input, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
+import { api, type ClassSummary } from "../lib/api";
+import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
+import { NotebookCard, type ClassNotebook } from "./ClassView";
+import GoogleIcon from "../components/GoogleIcon";
+
+interface TeachingNotebook extends ClassNotebook {
+  class_id: string;
+  class_name: string | null;
+  class_emoji?: string | null;
+  class_archived?: number | null;
+  template_id: string | null;
+  copies?: {
+    notebookId: string; classId: string; className: string; status: string; archived: boolean;
+    pendingPages: number; pendingFields: number;
+  }[];
+}
+
+export default function TeacherNotebooks() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [filter, setFilter] = useState<string>("all");
+  const [blankOpen, setBlankOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedClass, setArchivedClass] = useState("all");
+  const [archivedQuery, setArchivedQuery] = useState("");
+  const [deleting, setDeleting] = useState<TeachingNotebook | null>(null);
+  /** Template ids the push dialog is open for. */
+  const [pushing, setPushing] = useState<string[] | null>(null);
+  /** Picking several templates to push at once; null when not picking. */
+  const [picked, setPicked] = useState<Set<string> | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const list = useQuery({
+    queryKey: ["teaching-notebooks"],
+    queryFn: () => api.get<{ notebooks: TeachingNotebook[] }>("/api/my/teaching-notebooks"),
+  });
+  const classes = useQuery({
+    queryKey: ["classes", "active"],
+    queryFn: () => api.get<{ classes: ClassSummary[] }>("/api/classes"),
+  });
+  const refresh = () => qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
+
+  const sync = useMutation({
+    mutationFn: (templateId: string) =>
+      api.post<{ classes: number; pagesAdded: number; fieldsAdded: number }>(`/api/templates/${templateId}/sync`, {}),
+    onSuccess: (res) => {
+      refresh();
+      const bits = [];
+      if (res.pagesAdded) bits.push(`${res.pagesAdded} page${res.pagesAdded === 1 ? "" : "s"}`);
+      if (res.fieldsAdded) bits.push(`${res.fieldsAdded} answer box${res.fieldsAdded === 1 ? "" : "es"}`);
+      toast.success(bits.length
+        ? `Sent ${bits.join(" and ")} to ${res.classes} class${res.classes === 1 ? "" : "es"}`
+        : "Every class already has everything in this template");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/api/templates/${id}`),
+    onSuccess: () => { refresh(); setDeleting(null); toast.success("Template deleted — the notebooks it was pushed to are untouched"); },
+    onError: (e: Error) => { toast.error(e.message); setDeleting(null); },
+  });
+
+  const importFromDrive = async () => {
+    try {
+      const picked = await pickDriveFile();
+      if (!picked) return;
+      const blob = await driveFileAsPdf(picked);
+      const file = new File([blob], picked.name.replace(/\.[^.]+$/, "") + ".pdf", { type: "application/pdf" });
+      navigate("/templates/upload", { state: { file, template: true } });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  const all = list.data?.notebooks ?? [];
+  const hasClasses = (classes.data?.classes ?? []).some((c) => c.my_role === "teacher");
+  // Templates belong to no class, so the class filter only narrows the notebooks below them.
+  const templates = all.filter((n) => n.kind === "template");
+  const inClasses = useMemo(
+    () => all.filter((n) => n.kind !== "template" && !n.class_archived && (filter === "all" || n.class_id === filter)),
+    [all, filter],
+  );
+  // A class put away takes its notebooks with it: they leave the main list and
+  // wait on a shelf below, still openable.
+  const archivedNotebooks = useMemo(
+    () => all.filter((n) => n.kind !== "template" && !!n.class_archived),
+    [all],
+  );
+  // Years of archived classes add up, so the shelf can be narrowed by class
+  // and searched by name.
+  const archivedClasses = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const n of archivedNotebooks) if (!seen.has(n.class_id)) seen.set(n.class_id, n.class_name ?? "Class");
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [archivedNotebooks]);
+  const archivedShown = useMemo(() => {
+    const q = archivedQuery.trim().toLowerCase();
+    return archivedNotebooks.filter((n) =>
+      (archivedClass === "all" || n.class_id === archivedClass) &&
+      (!q || n.title.toLowerCase().includes(q) || (n.class_name ?? "").toLowerCase().includes(q)));
+  }, [archivedNotebooks, archivedClass, archivedQuery]);
+
+  const templateMenu = (t: TeachingNotebook): MenuItem[] => {
+    const pending = (t.copies ?? []).reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
+    return [
+      {
+        label: "Push to classes…",
+        icon: <Send className="h-5 w-5" strokeWidth={2.5} />,
+        disabled: !hasClasses,
+        hint: hasClasses
+          ? "Pick one class or several. Each gets a copy as a draft."
+          : "Make a class first, or join one as a teacher.",
+        onClick: () => setPushing([t.id]),
+      },
+      ...((t.copies ?? []).length > 0 ? [{
+        label: pending ? `Send updates to ${t.copies!.length} class${t.copies!.length === 1 ? "" : "es"}` : "Send updates",
+        icon: <RefreshCw className="h-5 w-5" strokeWidth={2.5} />,
+        disabled: !pending,
+        hint: pending
+          ? `${pending} new page${pending === 1 ? "" : "s"} or box${pending === 1 ? "" : "es"} waiting. Only what's new is added — nothing already in a class is changed.`
+          : "Every class already has everything in this template.",
+        onClick: () => sync.mutate(t.id),
+      }] : []),
+      {
+        label: "Delete template",
+        icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
+        danger: true,
+        hint: "The notebooks it was pushed to stay exactly as they are.",
+        onClick: () => setDeleting(t),
+      },
+    ];
+  };
+
+  const togglePicked = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  const allTemplates = all.filter((n) => n.kind === "template");
+
+  const byline = (t: TeachingNotebook) => {
+    const copies = t.copies ?? [];
+    if (copies.length === 0) return "Template · not in a class yet";
+    const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
+    return `Template · in ${copies.length} class${copies.length === 1 ? "" : "es"}${pending ? ` · ${pending} update${pending === 1 ? "" : "s"} to send` : ""}`;
+  };
+
+  return (
+    <Shell>
+      <div className="mb-6">
+        <h1 className="font-display text-[32px] text-pine">Notebooks</h1>
+        <p className="text-[16px] text-pine/70">Everything you teach from, in every class — and the templates you build them from.</p>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf,.docx,.doc,.pptx,.ppt,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) navigate("/templates/upload", { state: { file: f, template: true } });
+        }}
+      />
+
+      {list.isLoading && <Spinner label="Loading your notebooks…" />}
+      {list.error && <ErrorNote error={list.error as Error} />}
+
+      {!list.isLoading && !list.error && (
+        <>
+          <section className="mb-8">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h2 className="flex items-center gap-2 font-display text-[20px] text-pine">
+                <BookText className="h-5 w-5" strokeWidth={2.5} /> Templates
+                <Chip tone="quiet">{templates.length}</Chip>
+              </h2>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                {templates.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant={picked ? "primary" : "secondary"}
+                    onClick={() => setPicked(picked ? null : new Set())}
+                    aria-pressed={!!picked}
+                  >
+                    {picked ? <X className="h-4 w-4" strokeWidth={2.5} /> : <CheckSquare className="h-4 w-4" strokeWidth={2.5} />}
+                    {picked ? "Done selecting" : "Select"}
+                  </Button>
+                )}
+                <Menu
+                  label="New template"
+                  triggerClassName={buttonClass("primary", "sm")}
+                  trigger={<><Plus className="h-5 w-5" strokeWidth={2.5} /> New template <ChevronDown className="h-4 w-4" strokeWidth={2.5} /></>}
+                  items={[
+                    { label: "Blank pages", icon: <Rows3 className="h-5 w-5" strokeWidth={2.5} />, hint: "Lined, graph, dot grid, staves…", onClick: () => setBlankOpen(true) },
+                    { label: "Upload a file", icon: <Upload className="h-5 w-5" strokeWidth={2.5} />, hint: "PDF, Word or PowerPoint", onClick: () => fileRef.current?.click() },
+                    ...(hasDrivePicker ? [{ label: "From Google Drive", icon: <GoogleIcon product="drive" />, hint: "Pick a file without downloading it", onClick: () => void importFromDrive() }] : []),
+                  ]}
+                />
+              </div>
+            </div>
+            {templates.length === 0 ? (
+              <EmptyState
+                title="No templates yet"
+                body="Build a notebook once, then push it into every class that uses it. When you add pages to the template later, send just the new ones to all of them at once."
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {templates.map((t) => (
+                  <NotebookCard
+                    key={t.id}
+                    nb={t}
+                    to={`/notebooks/${t.id}/edit`}
+                    byline={byline(t)}
+                    menu={templateMenu(t)}
+                    selected={picked?.has(t.id)}
+                    onSelect={picked ? () => togglePicked(t.id) : undefined}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h2 className="flex items-center gap-2 font-display text-[20px] text-pine">
+                <LayoutGrid className="h-5 w-5" strokeWidth={2.5} /> In your classes
+                <Chip tone="quiet">{inClasses.length}</Chip>
+              </h2>
+              <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Show notebooks from" className="ml-auto h-11 w-auto min-w-[12rem]">
+                <option value="all">All classes</option>
+                {(classes.data?.classes ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </div>
+            {inClasses.length === 0 ? (
+              <EmptyState title="Nothing here yet" body="Notebooks you make inside a class, or push from a template, show up here." />
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {inClasses.map((n) => (
+                  <NotebookCard
+                    key={n.id}
+                    nb={n}
+                    to={`/notebooks/${n.id}/edit`}
+                    byline={`${n.class_emoji ? `${n.class_emoji} ` : ""}${n.class_name ?? ""}${n.template_id ? " · from a template" : ""}`}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {archivedNotebooks.length > 0 && (
+            <section className="mt-8">
+              <button
+                type="button"
+                onClick={() => setShowArchived((v) => !v)}
+                aria-expanded={showArchived}
+                aria-controls="archived-notebooks"
+                className="mb-3 flex min-h-[44px] items-center gap-2 rounded-[12px] font-display text-[20px] text-pine hover:text-pine/80 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-pine"
+              >
+                <Archive className="h-5 w-5" strokeWidth={2.5} /> Archived notebooks
+                <Chip tone="quiet">{archivedNotebooks.length}</Chip>
+                <ChevronDown className={`h-5 w-5 transition-transform ${showArchived ? "rotate-180" : ""}`} strokeWidth={2.5} />
+              </button>
+              {showArchived && (
+                <div id="archived-notebooks">
+                  <p className="mb-3 text-[16px] text-pine/70">From classes you've archived. Open one to look back at it; restore the class to work in it again.</p>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <div className="relative min-w-[12rem] flex-1">
+                      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-pine/50" strokeWidth={2.5} />
+                      <Input
+                        type="search"
+                        value={archivedQuery}
+                        onChange={(e) => setArchivedQuery(e.target.value)}
+                        placeholder="Search archived notebooks"
+                        aria-label="Search archived notebooks"
+                        className="h-11 pl-10"
+                      />
+                    </div>
+                    {archivedClasses.length > 1 && (
+                      <Select value={archivedClass} onChange={(e) => setArchivedClass(e.target.value)} aria-label="Archived class" className="h-11 w-auto min-w-[12rem]">
+                        <option value="all">All archived classes</option>
+                        {archivedClasses.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                      </Select>
+                    )}
+                  </div>
+                  {archivedShown.length === 0 && (
+                    <p className="py-4 text-center text-[16px] text-pine/60">No archived notebooks match.</p>
+                  )}
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {archivedShown.map((n) => (
+                      <NotebookCard
+                        key={n.id}
+                        nb={n}
+                        to={`/notebooks/${n.id}/edit`}
+                        byline={`${n.class_emoji ? `${n.class_emoji} ` : ""}${n.class_name ?? ""} · archived class`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+        </>
+      )}
+
+      {/* The selection's actions stay in reach however far down the list goes. */}
+      {picked && (
+        <div className="sticky bottom-4 z-30 mt-6 flex flex-wrap items-center gap-3 rounded-[22px] border-[3px] border-pine bg-white p-3 shadow-[4px_4px_0_0_var(--color-pine)]">
+          <span className="pl-2 font-display text-[17px] text-pine">
+            {picked.size === 0 ? "Tap templates to select them" : `${picked.size} selected`}
+          </span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {picked.size < allTemplates.length ? (
+              <Button variant="ghost" onClick={() => setPicked(new Set(allTemplates.map((t) => t.id)))}>Select all</Button>
+            ) : (
+              <Button variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
+            )}
+            <Button variant="primary" disabled={picked.size === 0 || !hasClasses} onClick={() => setPushing([...picked])}>
+              <Send className="h-5 w-5" strokeWidth={2.5} /> Push to classes…
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {pushing && (
+        <PushToClassesModal
+          templates={allTemplates.filter((t) => pushing.includes(t.id))}
+          onClose={() => setPushing(null)}
+          onDone={() => setPicked(null)}
+        />
+      )}
+      {blankOpen && (
+        <NewNotebookModal
+          destination={{ kind: "template" }}
+          onClose={() => setBlankOpen(false)}
+          onCreated={(id) => { setBlankOpen(false); navigate(`/notebooks/${id}/edit`); }}
+        />
+      )}
+      {deleting && (
+        <ConfirmModal
+          title={`Delete “${deleting.title}”?`}
+          body="The template goes for good. Any notebook you pushed from it stays in its class, exactly as it is, and stops receiving updates."
+          confirmLabel="Delete template"
+          tone="danger"
+          busy={remove.isPending}
+          onClose={() => setDeleting(null)}
+          onConfirm={() => remove.mutate(deleting.id)}
+        />
+      )}
+    </Shell>
+  );
+}
