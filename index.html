@@ -27,6 +27,9 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- The Admin page's data grid draws its cell editors here; without it a
+         double-click opens an editor with nowhere to appear. -->
+    <div id="portal" style="position: fixed; left: 0; top: 0; z-index: 9999"></div>
     <script type="module" src="/src/react-app/main.tsx"></script>
   </body>
 </html>
