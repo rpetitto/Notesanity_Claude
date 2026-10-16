@@ -44,12 +44,8 @@ const CARD = `<!doctype html><html><head><meta charset="utf-8">
         to bottom,transparent 0 38px,rgba(32,48,44,.14) 38px 40px)}
 </style></head><body>
   <div class="brand">
-    <svg width="46" height="46" viewBox="0 0 64 64" fill="none">
-      <g stroke="${PINE}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="10" y="12" width="40" height="40" rx="10" fill="${OAT}" transform="rotate(-10 30 32)"/>
-        <rect x="18" y="14" width="38" height="40" rx="10" fill="${MINT}"/>
-        <path d="M27 34.5 33 40.5 46 27" stroke-width="4"/>
-      </g>
+    <svg width="46" height="46" viewBox="95 95 320 320" fill="none">
+      <g stroke="${PINE}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"><rect x="134" y="118" width="196" height="260" rx="26" fill="${OAT}" transform="rotate(-10 232 248)"/><rect x="184" y="130" width="196" height="260" rx="26" fill="${MINT}"/><path d="M222 262 268 308 344 218" fill="none" stroke-width="30"/></g>
     </svg>
     <span>Notesanity</span>
   </div>

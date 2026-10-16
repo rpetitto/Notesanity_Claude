@@ -110,12 +110,8 @@ section{padding:56px 0}
 `;
 
 /** The mark, drawn inline so no request is needed to paint the header. */
-export const LOGO = `<svg width="30" height="30" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-  <g stroke="${PINE}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="10" y="12" width="40" height="40" rx="10" fill="${OAT}" transform="rotate(-10 30 32)"></rect>
-    <rect x="18" y="14" width="38" height="40" rx="10" fill="${MINT}"></rect>
-    <path d="M27 34.5 33 40.5 46 27" stroke-width="4"></path>
-  </g>
+export const LOGO = `<svg width="30" height="30" viewBox="95 95 320 320" fill="none" aria-hidden="true">
+  <g stroke="${PINE}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"><rect x="134" y="118" width="196" height="260" rx="26" fill="${OAT}" transform="rotate(-10 232 248)"></rect><rect x="184" y="130" width="196" height="260" rx="26" fill="${MINT}"></rect><path d="M222 262 268 308 344 218" fill="none" stroke-width="30"></path></g>
 </svg>`;
 
 /**
