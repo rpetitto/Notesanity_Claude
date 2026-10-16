@@ -1152,3 +1152,22 @@ migrate("034_trash", async () => {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash(purge_after) WHERE restored_at IS NULL AND purged_at IS NULL`),
   ]);
 });
+
+/**
+ * The getting-started guide: which template every teacher gets a copy of,
+ * and when each teacher got theirs. Schema only. `guide_given_at` stays NULL
+ * until a copy is made, so a guide appointed later still reaches teachers
+ * who signed up before it existed — once.
+ */
+migrate("035_guide", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(users)`).all<{ name: string }>();
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`).run();
+  if (!(cols.results ?? []).some((c) => c.name === "guide_given_at")) {
+    await db.prepare(`ALTER TABLE users ADD COLUMN guide_given_at TEXT`).run();
+  }
+});

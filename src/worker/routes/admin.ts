@@ -20,6 +20,7 @@ import {
 } from "../lib/session";
 import { SUPERADMIN_EMAILS } from "../schema";
 import { page } from "../lib/paging";
+import { guideMasterId } from "./templates";
 import { PLANS, type PlanKey } from "../../shared/plans.mjs";
 import { PUBLIC_MAIL_DOMAINS } from "../lib/session";
 import { TRASH_DAYS, purgeExpired, restore, trashNotebook, trashOrg, trashUser } from "../lib/trash";
@@ -458,4 +459,39 @@ app.post("/api/admin/trash/:id/restore", handler(async (c) => {
   await requireSuperadmin(c);
   await restore(param(c, "id"));
   return c.json({ ok: true });
+}));
+
+/**
+ * Which template is the getting-started guide every teacher gets a copy of.
+ * Only a superadmin's own template can be appointed, so the master is never
+ * someone else's notebook that they might change or delete.
+ */
+app.get("/api/admin/guide", handler(async (c) => {
+  await requireSuperadmin(c);
+  const id = await guideMasterId();
+  const nb = id ? await db.prepare(`SELECT id, title FROM notebooks WHERE id = ?`).bind(id).first<{ id: string; title: string }>() : null;
+  const given = await db.prepare(`SELECT COUNT(*) AS n FROM users WHERE guide_given_at IS NOT NULL`).first<{ n: number }>();
+  return c.json({ guide: nb, copiesGiven: given?.n ?? 0 });
+}));
+
+app.put("/api/admin/guide", handler(async (c) => {
+  const user = await requireSuperadmin(c);
+  const { notebookId } = await c.req.json<{ notebookId?: string | null }>();
+  if (!notebookId) {
+    await db.prepare(`DELETE FROM app_settings WHERE key = 'guide_notebook_id'`).run();
+    return c.json({ ok: true, guide: null });
+  }
+  const nb = await db
+    .prepare(`SELECT id, title FROM notebooks WHERE id = ? AND kind = 'template' AND owner_id = ? AND archived = 0`)
+    .bind(notebookId, user.id)
+    .first<{ id: string; title: string }>();
+  if (!nb) throw new HttpError(400, "Choose one of your own templates to be the guide.");
+  await db
+    .prepare(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ('guide_notebook_id', ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    .bind(nb.id, now())
+    .run();
+  return c.json({ ok: true, guide: nb });
 }));

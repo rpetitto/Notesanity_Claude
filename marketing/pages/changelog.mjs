@@ -38,6 +38,17 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "October 16, 2026",
+    "A notebook that teaches you Notesanity by having you use it, and a new logo.",
+    [
+      ["new", "<b>A getting-started notebook for every teacher.</b> <b>Getting started with Notesanity</b> is waiting in <b>Notebooks</b> &rarr; <b>Templates</b>: sixteen short pages, each with one thing to try right on the page, from the pen to handing out a notebook to grading. The first section takes about ten minutes. It's yours to edit or delete, and <b>Settings</b> &rarr; <b>Get the latest guide</b> gives you a fresh copy."],
+      ["fixed", "<b>Text blocks, pictures and links showed as empty frames in the editor.</b> You now see what they say and show while you're building the page, not only in the preview."],
+      ["fixed", "<b>Text blocks overflowed on an iPad or a phone.</b> Their text now shrinks with the page when it's drawn smaller than full size, so a block that fits on a laptop fits there too."],
+      ["better", "<b>A new logo.</b> Taller cards, the same check mark."],
+      ["better", "The arrows above the page in the editor are bigger, and screen readers now name them <b>Previous page</b> and <b>Next page</b>."],
+    ],
+  ],
+  [
     "September 29, 2026",
     "Families can follow along, and sign-in asks who you are before it makes an account.",
     [

@@ -1659,6 +1659,10 @@ function FieldControl({
       >
         <div
           className="rich-text h-full w-full overflow-hidden text-pine"
+          // Shrinks with the page when it's drawn below full size (an iPad,
+          // a phone), so a block that fits at 100% still fits; it never grows
+          // past 15px, so blocks sized on a large screen read as they always did.
+          style={{ fontSize: 15 * Math.min(1, scale) }}
           // Already sanitised server-side against a strict allowlist; see
           // worker/lib/richtext.ts for what survives and why.
           dangerouslySetInnerHTML={{ __html: field.content ?? "" }}

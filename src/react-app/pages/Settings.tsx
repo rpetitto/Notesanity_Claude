@@ -1,7 +1,7 @@
 import { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
-import { CreditCard, LogOut, RotateCcw } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { BookOpen, CreditCard, LogOut, RotateCcw } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { useSession, signOutHref, type Plan } from "../lib/session";
@@ -78,6 +78,39 @@ function PlanCard({ plan, isTeacher }: { plan: Plan; isTeacher: boolean }) {
           Manage billing
         </Button>
       )}
+    </Card>
+  );
+}
+
+/**
+ * Every teacher gets the getting-started notebook once. This is how they get
+ * it again — after deleting it, or to see what's been added since.
+ */
+function GuideCard() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ["guide-available"], queryFn: () => api.get<{ available: boolean }>("/api/my/guide") });
+  const get = useMutation({
+    mutationFn: () => api.post<{ notebook: { id: string } }>("/api/my/guide", {}),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
+      toast.success("A fresh copy of the guide is in your templates");
+      navigate(`/notebooks/${r.notebook.id}/edit`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  if (!status.data?.available) return null;
+  return (
+    <Card className="mb-6 p-5">
+      <h2 className="font-display text-[17px] text-pine">Getting-started guide</h2>
+      <p className="mt-1 text-[16px] text-pine/70">
+        A notebook that shows you each feature by having you try it. Get a fresh copy any time — it goes in
+        Notebooks → Templates, and your old copy stays as it is.
+      </p>
+      <Button variant="secondary" className="mt-3" disabled={get.isPending} onClick={() => get.mutate()}>
+        <BookOpen className="h-4 w-4" strokeWidth={2.5} />
+        {get.isPending ? "Copying…" : "Get the latest guide"}
+      </Button>
     </Card>
   );
 }
@@ -169,6 +202,8 @@ export default function Settings() {
 
       {/* Students have nothing to buy and nothing to manage, so the card is theirs to not see. */}
       {plan && user.role === "teacher" && <PlanCard plan={plan} isTeacher />}
+
+      {user.role === "teacher" && <GuideCard />}
 
       {user.role !== "guardian" && <Card className="mb-6 p-5">
         <h2 className="font-display text-[17px] text-pine">Guided tours</h2>

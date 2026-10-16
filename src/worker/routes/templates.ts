@@ -42,6 +42,9 @@ const flatten = (key: string) => key.replace(/[^A-Za-z0-9._-]/g, "-").slice(-100
  */
 app.get("/api/my/teaching-notebooks", handler(async (c) => {
   const user = await requireTeacher(c);
+  // A teacher who hasn't had the guide yet gets it here, before the list is
+  // read, so it's there the first time they look. Never blocks the page.
+  await giveGuideOnce(user).catch(() => {});
   const rows = await db
     .prepare(
       `SELECT n.id, n.title, n.status, n.page_count, n.updated_at, n.created_at, n.kind, n.archived,
@@ -493,4 +496,97 @@ app.delete("/api/templates/:id", handler(async (c) => {
   await db.prepare(`UPDATE notebooks SET template_id = NULL WHERE template_id = ?`).bind(template.id).run();
   await deleteNotebookCascade(template.id);
   return c.json({ ok: true });
+}));
+
+// ---------------------------------------------------------------------------
+// The getting-started guide.
+//
+// One template, appointed by a superadmin, is "the guide". Every teacher gets
+// their own copy of it once — a template of theirs to try things on, edit or
+// delete. A copy is a fresh template, not a mirror: it doesn't remember the
+// master, so improving the master never changes anyone's copy (they can ask
+// for the latest from Settings instead).
+// ---------------------------------------------------------------------------
+
+const GUIDE_KEY = "guide_notebook_id";
+
+export async function guideMasterId(): Promise<string | null> {
+  const row = await db.prepare(`SELECT value FROM app_settings WHERE key = ?`).bind(GUIDE_KEY).first<{ value: string }>();
+  if (!row?.value) return null;
+  const nb = await db
+    .prepare(`SELECT id FROM notebooks WHERE id = ? AND kind = 'template' AND archived = 0`)
+    .bind(row.value)
+    .first<{ id: string }>();
+  return nb?.id ?? null;
+}
+
+/** Copy the guide into a teacher's templates. Returns the new template's id. */
+async function copyGuideFor(userId: string, masterId: string): Promise<string> {
+  const master = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(masterId).first<any>();
+  if (!master) throw new HttpError(404, "The guide isn't available right now.");
+  const contents = await templateContents(masterId);
+  const copyId = uid();
+  let coverKey: string | null = null;
+  if (master.cover_key) {
+    coverKey = `notebooks/${copyId}/cover-${uid()}`;
+    await storage.copy(master.cover_key, coverKey);
+  }
+  await db
+    .prepare(
+      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind,
+                              accent_color, cover_key, created_at, updated_at)
+       VALUES (?, '', ?, ?, ?, '', ?, 'draft', 'template', ?, ?, ?, ?)`,
+    )
+    .bind(copyId, userId, master.title, master.source_name ?? "", contents.pages.length,
+      master.accent_color ?? "#2E7D6B", coverKey, now(), now())
+    .run();
+  const order = new Map(contents.pages.map((tp, i) => [tp.id, i + 1]));
+  await copyPages(contents, copyId, contents.pages, (tp) => order.get(tp.id)!);
+  // A copy stands on its own: nothing in it points back at the master, so a
+  // later push from this template mirrors the teacher's pages, not ours.
+  await db.batch([
+    db.prepare(`UPDATE pages SET template_page_id = NULL WHERE notebook_id = ?`).bind(copyId),
+    db.prepare(`UPDATE fields SET template_field_id = NULL WHERE notebook_id = ?`).bind(copyId),
+  ]);
+  return copyId;
+}
+
+/**
+ * Give a teacher their copy, if they haven't had one. Safe to call on every
+ * request: the conditional update is what decides, so two arriving together
+ * make one copy. A failed copy un-marks them so the next visit tries again.
+ */
+export async function giveGuideOnce(user: { id: string; role: string }): Promise<void> {
+  if (user.role !== "teacher") return;
+  const masterId = await guideMasterId();
+  if (!masterId) return;
+  const owner = await db.prepare(`SELECT owner_id FROM notebooks WHERE id = ?`).bind(masterId).first<{ owner_id: string }>();
+  if (owner?.owner_id === user.id) return; // the master is already theirs
+  const claim = await db
+    .prepare(`UPDATE users SET guide_given_at = ? WHERE id = ? AND guide_given_at IS NULL`)
+    .bind(now(), user.id)
+    .run();
+  if (!claim.meta?.changes) return;
+  try {
+    await copyGuideFor(user.id, masterId);
+  } catch (e) {
+    await db.prepare(`UPDATE users SET guide_given_at = NULL WHERE id = ?`).bind(user.id).run();
+    throw e;
+  }
+}
+
+/** "Get the latest guide": a fresh copy, whatever they did with the last one. */
+app.post("/api/my/guide", handler(async (c) => {
+  const user = await requireTeacher(c);
+  const masterId = await guideMasterId();
+  if (!masterId) throw new HttpError(404, "There's no getting-started guide yet.");
+  const id = await copyGuideFor(user.id, masterId);
+  await db.prepare(`UPDATE users SET guide_given_at = COALESCE(guide_given_at, ?) WHERE id = ?`).bind(now(), user.id).run();
+  return c.json({ notebook: { id } });
+}));
+
+/** Whether a guide exists, for the Settings button. */
+app.get("/api/my/guide", handler(async (c) => {
+  await requireTeacher(c);
+  return c.json({ available: !!(await guideMasterId()) });
 }));

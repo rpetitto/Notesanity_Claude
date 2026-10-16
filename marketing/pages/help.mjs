@@ -62,6 +62,14 @@ const BODY = () => `
 
     ${group("Getting started", [
       [
+        "Is there a quick way to learn it?",
+        `Yes. Every teacher gets a notebook called <b>Getting started with Notesanity</b> under
+         <b>Notebooks</b> &rarr; <b>Templates</b>. Each page has one thing to try right on the page:
+         writing, adding pages and answer boxes, handing a notebook out, assigning and grading. The
+         first section takes about ten minutes. It's yours to edit or delete, and
+         <b>Settings</b> &rarr; <b>Get the latest guide</b> gives you a fresh copy any time.`,
+      ],
+      [
         "How do I sign in?",
         `Three ways: <b>Continue with Google</b> using your school account, a
          <b>sign-in link</b> emailed to you, or an email and password. They all reach the same

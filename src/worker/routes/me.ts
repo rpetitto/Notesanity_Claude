@@ -1,4 +1,5 @@
-import { app, db } from "../platform";
+import { app, currentScope, db } from "../platform";
+import { giveGuideOnce } from "./templates";
 import { billingConfigured } from "../platform/billing";
 import { BETA_FREE, PLANS } from "../../shared/plans.mjs";
 import { currentUser, handler, now, requireUser, HttpError, activeImpersonation, orgForDomain, uid } from "../lib/session";
@@ -9,6 +10,11 @@ import { planForUser, notebooksUsedStatement, quotaFrom, departmentFor, requireP
 app.get("/api/me", handler(async (c) => {
   const user = await currentUser(c);
   if (!user) return c.json({ user: null });
+  // A new teacher's getting-started guide is made in the background on their
+  // first load, so it's waiting under Templates before they go looking.
+  if (user.role === "teacher" && !(user as any).guide_given_at && !user.impersonated_by) {
+    currentScope().ctx.waitUntil(giveGuideOnce(user).catch(() => {}));
+  }
 
   // What they really have, and what that means today. The Settings card shows
   // the real tier; `beta` is what tells it every gate is currently open.

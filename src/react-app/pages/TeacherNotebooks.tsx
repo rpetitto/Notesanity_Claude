@@ -11,13 +11,14 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, BookText, CheckSquare, ChevronDown, LayoutGrid, Plus, Search, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
+import { Archive, BookOpen, BookText, CheckSquare, ChevronDown, LayoutGrid, Plus, Search, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import NewNotebookModal from "../components/NewNotebookModal";
 import PushToClassesModal from "../components/PushToClassesModal";
 import { Button, Chip, ConfirmModal, Input, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
+import { useSession } from "../lib/session";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 import { NotebookCard, type ClassNotebook } from "./ClassView";
 import GoogleIcon from "../components/GoogleIcon";
@@ -58,6 +59,22 @@ export default function TeacherNotebooks() {
     queryFn: () => api.get<{ classes: ClassSummary[] }>("/api/classes"),
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
+  // A superadmin appoints the getting-started guide from their own templates.
+  const { user } = useSession();
+  const guide = useQuery({
+    queryKey: ["admin-guide"],
+    queryFn: () => api.get<{ guide: { id: string; title: string } | null; copiesGiven: number }>("/api/admin/guide"),
+    enabled: !!user?.isSuperadmin,
+  });
+  const guideId = guide.data?.guide?.id ?? null;
+  const appoint = useMutation({
+    mutationFn: (notebookId: string | null) => api.put("/api/admin/guide", { notebookId }),
+    onSuccess: (_r, id) => {
+      qc.invalidateQueries({ queryKey: ["admin-guide"] });
+      toast.success(id ? "This is now the teacher guide — teachers who haven't had one get a copy next visit" : "No teacher guide now");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const sync = useMutation({
     mutationFn: (templateId: string) =>
@@ -141,6 +158,14 @@ export default function TeacherNotebooks() {
           : "Every class already has everything in this template.",
         onClick: () => sync.mutate(t.id),
       }] : []),
+      ...(user?.isSuperadmin ? [{
+        label: guideId === t.id ? "Stop using as the teacher guide" : "Make this the teacher guide",
+        icon: <BookOpen className="h-5 w-5" strokeWidth={2.5} />,
+        hint: guideId === t.id
+          ? "Teachers keep the copies they have; nobody new gets one."
+          : "Every teacher who hasn't had the guide gets a copy of this, once.",
+        onClick: () => appoint.mutate(guideId === t.id ? null : t.id),
+      }] : []),
       {
         label: "Delete template",
         icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
@@ -161,6 +186,7 @@ export default function TeacherNotebooks() {
 
   const byline = (t: TeachingNotebook) => {
     const copies = t.copies ?? [];
+    if (t.id === guideId) return `Teacher guide · copied to ${guide.data?.copiesGiven ?? 0} teacher${guide.data?.copiesGiven === 1 ? "" : "s"}`;
     if (copies.length === 0) return "Template · not in a class yet";
     const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
     return `Template · in ${copies.length} class${copies.length === 1 ? "" : "es"}${pending ? ` · ${pending} update${pending === 1 ? "" : "s"} to send` : ""}`;

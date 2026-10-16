@@ -1668,9 +1668,12 @@ export default function NotebookEditor() {
             <div className="mx-auto" style={{ width: page.width * scale }}>
               <div className="mb-2 flex items-center justify-between">
                 <button
+                  type="button"
                   onClick={() => setPageIdx((i) => Math.max(0, i - 1))}
                   disabled={pageIdx === 0}
-                  className="rounded-full p-1.5 text-pine hover:bg-white disabled:opacity-30"
+                  aria-label="Previous page"
+                  title="Previous page"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30"
                 >
                   <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
                 </button>
@@ -1679,9 +1682,12 @@ export default function NotebookEditor() {
                   <span className="shrink-0 whitespace-pre"> · {pageIdx + 1} of {livePages.length}</span>
                 </span>
                 <button
+                  type="button"
                   onClick={() => setPageIdx((i) => Math.min(livePages.length - 1, i + 1))}
                   disabled={pageIdx >= livePages.length - 1}
-                  className="rounded-full p-1.5 text-pine hover:bg-white disabled:opacity-30"
+                  aria-label="Next page"
+                  title="Next page"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-pine hover:bg-white disabled:opacity-30"
                 >
                   <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
                 </button>
@@ -1708,11 +1714,17 @@ export default function NotebookEditor() {
                   />
                 ) : (
                   <>
+                    {/* The page as it will read: text blocks, pictures and
+                        links drawn under their frames. They used to be left
+                        out here, so a teacher's instructions showed as an
+                        empty "Rich text" box until they previewed. Answer
+                        boxes stay out: their frames are the editor's picture
+                        of them. */}
                     <PageCanvas
                       {...pageSource(notebookId, page)}
                       notebookId={notebookId}
                       scale={scale}
-                      fields={[]}
+                      fields={fields.filter((f) => f.type === "richtext" || f.type === "figure" || f.type === "link")}
                       fieldValues={{}}
                       studentLayer={emptyLayer()}
                       teacherLayer={annotationLayer}
