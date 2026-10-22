@@ -144,7 +144,7 @@ export interface LayerRec {
 }
 
 export interface WorkResponse {
-  notebook: { id: string; title: string; classId: string; kind?: "class" | "personal" | "student" };
+  notebook: { id: string; title: string; classId: string; kind?: "class" | "personal" | "student"; allowExport?: boolean };
   instanceId: string;
   pages: PageRec[];
   fields: FieldRec[];

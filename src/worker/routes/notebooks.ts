@@ -191,6 +191,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
       pageCount: nb.page_count, assetKey: nb.asset_key, lastPublishedAt: nb.last_published_at,
       accentColor: nb.accent_color ?? "#2E7D6B", hasCover: !!nb.cover_key,
       kind: nb.kind ?? "class", ownerId: nb.owner_id, archived: !!nb.archived,
+      allowExport: nb.allow_export !== 0,
       // Where a class copy came from, so the editor can say so.
       templateId: nb.template_id ?? null,
     },
@@ -1107,11 +1108,13 @@ app.patch("/api/notebooks/:id", handler(async (c) => {
     title?: string; accentColor?: string; clearCover?: boolean;
     /** Put the notebook away (or bring it back) for the whole class at once. */
     archived?: boolean;
+    /** Whether students may print and download its pages. */
+    allowExport?: boolean;
   }>();
   if (b.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(b.accentColor)) throw new HttpError(400, "Invalid color");
   await db
     .prepare(
-      `UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, archived = ?, updated_at = ?
+      `UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, archived = ?, allow_export = ?, updated_at = ?
         WHERE id = ?`,
     )
     .bind(
@@ -1119,6 +1122,7 @@ app.patch("/api/notebooks/:id", handler(async (c) => {
       b.accentColor ?? nb.accent_color ?? "#2E7D6B",
       b.clearCover ? null : nb.cover_key,
       b.archived === undefined ? (nb.archived ?? 0) : b.archived ? 1 : 0,
+      b.allowExport === undefined ? (nb.allow_export ?? 1) : b.allowExport ? 1 : 0,
       now(),
       nb.id,
     )

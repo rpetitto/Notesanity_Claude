@@ -39,9 +39,11 @@ const release = (date, summary, items) => `
 const RELEASES = [
   [
     "October 22, 2026",
-    "Describe a worksheet, and get one with the answer boxes already on it.",
+    "Describe a worksheet and get one with the answer boxes on it, and print any pages you like.",
     [
       ["new", "<b>Design a page with AI.</b> In the editor, <b>Add page</b> &rarr; <b>Design with AI</b>: pick a kind of page (exit ticket, reading with questions, vocabulary, graphic organizer, math practice, lab sheet), say what it should cover, and get a finished page with a box on every answer line. Build it from text you paste, a PDF or photo, or the page you're on. Look it over, ask for changes in plain words (&ldquo;make the last one a word problem&rdquo;) or try again, then add it after the current page, where it's an ordinary page you can edit. One to three pages at a time; no answer key. Free includes 1 page a month and Pro 50, and that limit applies during the beta too, since each page costs us to make. Changes and retries are free."],
+      ["new", "<b>Print or download any pages.</b> The printer button, or Ctrl/&#8984;+P, opens <b>Print or download</b>: this page, the pages you've selected, all of them, or a range like 1-3, 5, then print them, download a PDF, or save it to Drive. You can print from the editor too, and from a student's work. Students can print and download their own work unless you switch it off in a class notebook's &#8943; menu with <b>Stop students printing and downloading</b>."],
+      ["fixed", "<b>Exported pages left out typed answers.</b> A downloaded notebook showed the ink but not what was typed into boxes, the ticks, or your text blocks and pictures. They're all on the page now, where they sit on screen, and a dropdown nobody answered prints its choices so it can be circled."],
     ],
   ],
   [

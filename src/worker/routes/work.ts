@@ -290,7 +290,11 @@ app.get("/api/notebooks/:id/work", handler(async (c) => {
   const { pages, fields, layers, values, masterAnnotations, student } = await workPayload(nb, instance.id, studentId, wanted);
 
   return c.json({
-    notebook: { id: nb.id, title: nb.title, classId: nb.class_id, kind: nb.kind ?? "class" },
+    notebook: {
+      id: nb.id, title: nb.title, classId: nb.class_id, kind: nb.kind ?? "class",
+      // Students' print and download, which only a class notebook can switch off.
+      allowExport: nb.kind !== "class" || nb.allow_export !== 0,
+    },
     instanceId: instance.id,
     pages, fields, layers, values, masterAnnotations,
     student,

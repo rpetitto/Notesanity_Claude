@@ -263,10 +263,13 @@ const BODY = () => `
          it's published, and deleting a class asks you to type its name first.`,
       ],
       [
-        "Can I get a notebook out as a file?",
-        `Yes — <b>Export</b> in a notebook gives you a PDF, either downloaded or saved straight to
-         your Google Drive. It's every page as it looks on screen, with the writing on it.
-         Students can export their own notebooks the same way.`,
+        "Can I print pages, or get them out as a PDF?",
+        `Yes. <b>Print or download</b> (the printer button, or Ctrl/⌘+P) lets you pick this page,
+         the pages you've selected, all of them, or a range like 1-3, 5, then print them, download a
+         PDF or save it to Google Drive. Pages come out as they look on screen, with the writing,
+         typed answers and ticks on them, or turn that off to print them as handed out. Students
+         can do the same, unless you've chosen <b>Stop students printing and downloading</b> in a
+         class notebook's ⋯ menu. That hides the button, but it can't stop a screenshot.`,
       ],
       [
         "Can students see a notebook I'm still building?",
@@ -445,7 +448,7 @@ const BODY = () => `
       ],
       [
         "Can we export our work?",
-        `A notebook can be exported to PDF from inside it. If you need a bulk export of a whole
+        `Any notebook's pages can be downloaded as a PDF from inside it. If you need a bulk export of a whole
          school's data, email <a href="mailto:support@notesanity.com">support@notesanity.com</a>
          and we'll arrange it.`,
       ],

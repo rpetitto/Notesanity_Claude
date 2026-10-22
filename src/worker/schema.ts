@@ -1209,3 +1209,16 @@ migrate("036_ai_pages", async () => {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_ai_designs_user ON ai_designs(user_id, created_at)`),
   ]);
 });
+
+/**
+ * Whether students may print and download a class notebook's pages. Schema
+ * only; every notebook starts allowed, which is how it behaved before the
+ * switch existed. Only class notebooks read it — a student's own and a
+ * personal notebook are theirs to print.
+ */
+migrate("037_allow_export", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(notebooks)`).all<{ name: string }>();
+  if (!(cols.results ?? []).some((c) => c.name === "allow_export")) {
+    await db.prepare(`ALTER TABLE notebooks ADD COLUMN allow_export INTEGER NOT NULL DEFAULT 1`).run();
+  }
+});

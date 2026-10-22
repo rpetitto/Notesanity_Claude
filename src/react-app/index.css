@@ -197,3 +197,15 @@ a {
   from { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
+
+/* Printing from Notesanity prints the pages and nothing else: the rendered
+   sheets go into #print-root (see lib/exportPdf.ts), one per sheet, edge to
+   edge, and everything else on screen is hidden for the duration. */
+#print-root { display: none; }
+@media print {
+  @page { margin: 0; }
+  body > *:not(#print-root) { display: none !important; }
+  #print-root { display: block; }
+  #print-root img { display: block; width: 100%; height: auto; break-after: page; page-break-after: always; }
+  #print-root img:last-child { break-after: auto; page-break-after: auto; }
+}

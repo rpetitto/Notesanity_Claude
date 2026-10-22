@@ -6,7 +6,7 @@ import {
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
   LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
-  Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal, FilePlus2, SquarePlus, Sparkles,
+  Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal, FilePlus2, SquarePlus, Sparkles, Printer, Ban,
 } from "lucide-react";
 import { type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, pointFor, watchLongPress } from "../components/ContextMenu";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import { usePersistedBool } from "../lib/usePersisted";
 import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
 import { AiPageDesigner } from "../components/AiPageDesigner";
+import { ExportPagesDialog } from "../components/ExportPagesDialog";
 import { useSession } from "../lib/session";
 import { emptyLayer, markRefAt, parseLayer, PEN_COLORS, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
 import { usePinchZoom } from "../lib/usePinchZoom";
@@ -63,6 +64,8 @@ interface NotebookResponse {
     /** 'class', 'template', 'personal' or 'student' — a template has no class and is pushed into them. */
     kind?: string;
     templateId?: string | null;
+    /** Whether students may print and download it. Only a class notebook has the switch. */
+    allowExport?: boolean;
   };
   pages: EditorPage[];
   fields: FieldRow[];
@@ -228,6 +231,7 @@ export default function NotebookEditor() {
   const [blankOpen, setBlankOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   /** A page just added that the editor should show once the notebook reloads with it. */
   const [jumpTo, setJumpTo] = useState<string | null>(null);
   const { user: me } = useSession();
@@ -345,6 +349,14 @@ export default function NotebookEditor() {
     return () => window.removeEventListener("keydown", onKey);
   }, [tool]);
   const page = livePages[Math.min(pageIdx, Math.max(0, livePages.length - 1))];
+  // Printing the editor itself would print its toolbars; Ctrl/Cmd+P prints pages.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") { e.preventDefault(); setExportOpen(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   useEffect(() => {
     if (!jumpTo) return;
     const i = livePages.findIndex((p) => p.id === jumpTo);
@@ -826,7 +838,7 @@ export default function NotebookEditor() {
   });
 
   const patchNotebook = useMutation({
-    mutationFn: (body: { title?: string; accentColor?: string; clearCover?: boolean; archived?: boolean }) =>
+    mutationFn: (body: { title?: string; accentColor?: string; clearCover?: boolean; archived?: boolean; allowExport?: boolean }) =>
       api.patch(`/api/notebooks/${notebookId}`, body),
     onSuccess: () => {
       invalidate();
@@ -1361,6 +1373,26 @@ export default function NotebookEditor() {
               onClick: openPreview,
             },
             {
+              label: "Print or download",
+              icon: <Printer className="h-5 w-5" strokeWidth={2.5} />,
+              hint: "One page, some or all of them, as a PDF or on paper.",
+              disabled: livePages.length === 0,
+              onClick: () => setExportOpen(true),
+            },
+            ...((notebook.kind ?? "class") === "class" ? [{
+              label: notebook.allowExport === false ? "Let students print and download" : "Stop students printing and downloading",
+              icon: notebook.allowExport === false
+                ? <Printer className="h-5 w-5" strokeWidth={2.5} />
+                : <Ban className="h-5 w-5" strokeWidth={2.5} />,
+              hint: notebook.allowExport === false
+                ? "Off now: students can't print or download this notebook's pages."
+                : "On now: students can print or download pages with their work on them.",
+              onClick: () => patchNotebook.mutate(
+                { allowExport: notebook.allowExport === false },
+                { onSuccess: () => toast.success(notebook.allowExport === false ? "Students can print and download this notebook" : "Students can no longer print or download this notebook") },
+              ),
+            }] : []),
+            {
               label: "Rename",
               icon: <Pencil className="h-5 w-5" strokeWidth={2.5} />,
               hint: "What it's called for you and your students.",
@@ -1552,6 +1584,20 @@ export default function NotebookEditor() {
           busy={addBlankPages.isPending}
           onClose={() => setBlankOpen(false)}
           onInsert={(body) => addBlankPages.mutate(body)}
+        />
+      )}
+
+      {exportOpen && (
+        <ExportPagesDialog
+          notebookId={notebookId}
+          title={notebook.title}
+          pages={livePages}
+          currentPageId={page?.id}
+          selectedIds={Array.from(selection)}
+          layersFor={(id) => (railAnnotations[id] ? [railAnnotations[id]] : [])}
+          content={{ fields: query.data?.fields ?? [], values: {} }}
+          includeLabel="your markup"
+          onClose={() => setExportOpen(false)}
         />
       )}
 
@@ -1902,6 +1948,11 @@ export default function NotebookEditor() {
                   {saveToLibrary.isPending ? "Saving…" : "Save to library"}
                 </button>
                 {anyLive && (
+                  <button onClick={() => setExportOpen(true)} title="Print the selected pages or download them as a PDF" className={quiet}>
+                    <Printer className="h-4 w-4" strokeWidth={2.5} /> Print
+                  </button>
+                )}
+                {anyLive && (
                   <button
                     onClick={() => bulkPages.mutate({ pageIds: Array.from(selection), action: "archive" })}
                     title="Hide from students but keep their work"
@@ -2015,7 +2066,7 @@ export default function NotebookEditor() {
         />
       )}
 
-      {!blankOpen && !libraryOpen && !aiOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && !previewing && !presenting && (
+      {!blankOpen && !libraryOpen && !aiOpen && !exportOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && !previewing && !presenting && (
         <Tour place="notebook" />
       )}
     </div>

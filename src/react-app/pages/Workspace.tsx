@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowLeft, Check, CheckCheck, ChevronRight, Download, Eye, PanelLeft, Pencil, PenSquare, Plus, Send, Undo2 } from "lucide-react";
+import { Archive, ArrowLeft, Check, CheckCheck, ChevronRight, Eye, PanelLeft, Pencil, PenSquare, Plus, Printer, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
-import { emptyLayer, parseLayer, TEACHER_COLORS } from "../lib/ink";
+import { emptyLayer, parseLayer, TEACHER_COLORS, type LayerData } from "../lib/ink";
+import { ExportPagesDialog } from "../components/ExportPagesDialog";
 import { STUDENT_COURSEWORK_SCOPE, getToken, hasGoogleClientId, preloadGoogle, reclaimOnClassroom, turnInOnClassroom } from "../lib/google";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
@@ -15,7 +16,7 @@ import InkToolbar from "../components/InkToolbar";
 import Tour from "../components/Tour";
 import type { ToolState } from "../components/PageCanvas";
 import { ErrorNote, Spinner, FlingBadge } from "../components/Shell";
-import { Button, Chip, IconButton, Input, Menu, Modal, type MenuItem } from "../components/ui";
+import { Button, Chip, IconButton, Input, Modal } from "../components/ui";
 import {
   PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
   renderPatternToCanvas, type PatternKey,
@@ -809,7 +810,7 @@ export default function Workspace() {
   );
 
   const [blankOpen, setBlankOpen] = useState(false);
-  const [exporting, setExporting] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
 
   const addPages = useMutation({
     mutationFn: (body: { pattern: string; color: string; count: number }) =>
@@ -823,65 +824,21 @@ export default function Workspace() {
   });
 
   /**
-   * Take the notebook out of the app, to the machine or to Drive.
-   *
-   * Both destinations render exactly the same PDF — pages composited with
-   * every layer over them, the way the screen shows it — and differ only in
-   * where the finished file goes. Rendering is the slow part, so the progress
-   * counter covers it and the destination is a single step at the end.
+   * Print or download, through the one dialog every notebook view shares. A
+   * class notebook's teacher can switch it off for students; a student's own
+   * notebook and a personal one are always theirs to print.
    */
-  const exportTo = async (destination: "download" | "drive") => {
-    if (!data) return;
-    try {
-      setExporting("Preparing…");
-      const { renderNotebookPdf, exportNotebookPdf, pdfFileName, layersForPage } =
-        await import("../lib/exportPdf");
-      const exportPages = pages.map((page) => ({
-        page,
-        layers: layersForPage(page.id, data.layers as any),
-      }));
-      const onProgress = (done: number, total: number) => setExporting(`Page ${done} of ${total}…`);
-
-      if (destination === "download") {
-        await exportNotebookPdf(notebookId, data.notebook.title, exportPages, onProgress);
-        toast.success("Downloaded");
-        return;
-      }
-
-      const blob = await renderNotebookPdf(notebookId, exportPages, onProgress);
-      setExporting("Saving to Drive…");
-      const { uploadPdfToDrive } = await import("../lib/google");
-      const file = await uploadPdfToDrive(blob, pdfFileName(data.notebook.title));
-      toast.success("Saved to your Google Drive", {
-        duration: 8000,
-        action: { label: "Open", onClick: () => window.open(file.link, "_blank", "noopener") },
-      });
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setExporting("");
-    }
-  };
-
-  /** Offered wherever there are pages to export, which is everywhere but an empty notebook. */
-  const exportMenu: MenuItem[] = [
-    {
-      label: "Download as PDF",
-      icon: <Download className="h-5 w-5" strokeWidth={2.5} />,
-      hint: "Every page, with everything written on it.",
-      disabled: !!exporting,
-      onClick: () => void exportTo("download"),
-    },
-    ...(hasGoogleClientId
-      ? [{
-          label: "Save to Google Drive",
-          icon: <GoogleIcon product="drive" />,
-          hint: "The same PDF, straight into your Drive.",
-          disabled: !!exporting,
-          onClick: () => void exportTo("drive"),
-        }]
-      : []),
-  ];
+  const canExport = !!data && (data.isTeacher || data.notebook.allowExport !== false);
+  const exportLayers = (pageId: string) =>
+    [masterLayers[pageId], work.teacherLayers[pageId], work.studentLayers[pageId]].filter(Boolean) as LayerData[];
+  useEffect(() => {
+    if (!canExport) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") { e.preventDefault(); setExportOpen(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canExport]);
 
   // Keyboard: undo/redo on the page currently in view.
   useEffect(() => {
@@ -957,10 +914,22 @@ export default function Workspace() {
         </div>
 
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {pages.length > 0 && (
-            exporting
-              ? <Chip tone="quiet">{exporting}</Chip>
-              : <Menu label="Export notebook" items={exportMenu} trigger={<Download className="h-5 w-5" strokeWidth={2.5} />} />
+          {pages.length > 0 && canExport && (
+            <IconButton label="Print or download" variant="secondary" onClick={() => setExportOpen(true)}>
+              <Printer className="h-5 w-5" strokeWidth={2.5} />
+            </IconButton>
+          )}
+          {exportOpen && data && (
+            <ExportPagesDialog
+              notebookId={notebookId}
+              title={data.notebook.title}
+              pages={pages}
+              currentPageId={visiblePage}
+              layersFor={exportLayers}
+              content={{ fields: data.fields, values: work.fieldValues, studentId: data.student?.id }}
+              includeLabel={data.isTeacher && !isStudentOwned ? `${data.student?.name ?? "the student"}'s writing and answers` : "your writing and answers"}
+              onClose={() => setExportOpen(false)}
+            />
           )}
           {ownsStudentNotebook && (
             <Button variant="secondary" onClick={() => setAccessOpen(true)}>
