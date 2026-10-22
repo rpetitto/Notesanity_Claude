@@ -28,6 +28,17 @@ export const FREE_NOTEBOOK_LIMIT = 5;
 export const FREE_STUDENT_LIMIT = 35;
 
 /**
+ * Pages a teacher can have designed with AI each calendar month.
+ *
+ * Unlike every other limit here, this one applies during the beta too: each
+ * design is a paid call to the model, so "free while in beta" can't extend to
+ * it. Free gets a taste; any paid plan, including a comp, gets enough for a
+ * page most school days. Refining a design doesn't spend any of it.
+ */
+export const AI_PAGES_FREE = 1;
+export const AI_PAGES_PAID = 50;
+
+/**
  * `seats`: how many people one purchase covers — null means everyone in the
  * school. `notebookLimit`, `studentLimit` (per class): null means unlimited. `selfServe`: whether there is
  * a Checkout button, or a conversation and an invoice.

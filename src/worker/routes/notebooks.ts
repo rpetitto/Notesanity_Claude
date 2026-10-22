@@ -38,7 +38,7 @@ const OTHERS_NOTEBOOK =
 const FAMILY_READS = "Families can look at a child's work, not change it.";
 
 /** Teacher-or-enrolled-student access to a notebook, resolved via its class. */
-async function notebookAccess(c: any, notebookId: string) {
+export async function notebookAccess(c: any, notebookId: string) {
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
   if (!nb) throw new HttpError(404, "Notebook not found");
 
@@ -102,7 +102,7 @@ async function notebookAccess(c: any, notebookId: string) {
  * why it withheld authoring rights, and this is what carries that reason out to
  * the person instead of flattening every case into "Teacher access required".
  */
-function requireNotebookTeacher<T extends { isTeacher: boolean; denied?: string }>(access: T): T {
+export function requireNotebookTeacher<T extends { isTeacher: boolean; denied?: string }>(access: T): T {
   if (!access.isTeacher) throw new HttpError(403, access.denied ?? "Teacher access required");
   return access;
 }

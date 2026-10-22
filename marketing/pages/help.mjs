@@ -157,6 +157,15 @@ const BODY = () => `
          also pick a file straight out of Drive, or start from blank paper.`,
       ],
       [
+        "Can AI make a worksheet for me?",
+        `Yes: <b>Add page</b> &rarr; <b>Design with AI</b>. Describe the page, optionally attach a
+         passage, a PDF, a photo or the page you're on, and you get a page with answer boxes already
+         placed; ask for changes in plain words before you add it. Free includes 1 AI page a month
+         and Pro 50, during the beta too; changes and retries don't count. It draws simple diagrams,
+         tables and organizers but not pictures, and it doesn't make answer keys. Only your
+         description and what you attach are sent to Anthropic, never anything about your students.`,
+      ],
+      [
         "Do the links in my worksheet still work?",
         `Yes. Web and email links in a PDF, Word or PowerPoint file stay where they were, and open
          in a new tab when a student taps them; students see a dashed outline and the site's icon

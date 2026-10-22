@@ -6,7 +6,7 @@ import {
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
   LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
-  Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal, FilePlus2, SquarePlus,
+  Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal, FilePlus2, SquarePlus, Sparkles,
 } from "lucide-react";
 import { type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, pointFor, watchLongPress } from "../components/ContextMenu";
 import { toast } from "sonner";
@@ -25,6 +25,8 @@ import InkToolbar, { ZoomSelect } from "../components/InkToolbar";
 import { usePersistedBool } from "../lib/usePersisted";
 import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
+import { AiPageDesigner } from "../components/AiPageDesigner";
+import { useSession } from "../lib/session";
 import { emptyLayer, markRefAt, parseLayer, PEN_COLORS, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
 import { usePinchZoom } from "../lib/usePinchZoom";
 import { detectFieldsOnPage, type FieldCandidate } from "../lib/formFields";
@@ -225,6 +227,10 @@ export default function NotebookEditor() {
   const addPagesRef = useRef<HTMLInputElement>(null);
   const [blankOpen, setBlankOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  /** A page just added that the editor should show once the notebook reloads with it. */
+  const [jumpTo, setJumpTo] = useState<string | null>(null);
+  const { user: me } = useSession();
   const [busyMessage, setBusyMessage] = useState("");
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [coverBump, setCoverBump] = useState(0);
@@ -339,6 +345,11 @@ export default function NotebookEditor() {
     return () => window.removeEventListener("keydown", onKey);
   }, [tool]);
   const page = livePages[Math.min(pageIdx, Math.max(0, livePages.length - 1))];
+  useEffect(() => {
+    if (!jumpTo) return;
+    const i = livePages.findIndex((p) => p.id === jumpTo);
+    if (i >= 0) { setPageIdx(i); setJumpTo(null); }
+  }, [jumpTo, livePages]);
   const fields = useMemo(
     () => (query.data?.fields ?? []).filter((f) => page && f.page_id === page.id),
     [query.data?.fields, page],
@@ -1161,6 +1172,9 @@ export default function NotebookEditor() {
       { label: "From your library…", icon: <LibraryBig />, hint: "A page you saved", disabled: busy, onSelect: () => setLibraryOpen(true) },
       { label: "Copy of this page", icon: <CopyPlus />, hint: "With its boxes, not students' work", disabled: busy || !page, onSelect: () => { if (page) duplicatePages.mutate([page.id]); } },
     );
+    if (me?.role === "teacher") {
+      entries.push({ label: "Design with AI…", icon: <Sparkles />, badge: "Pro", hint: "Describe it, and get a page with answer boxes", disabled: busy, onSelect: () => setAiOpen(true) });
+    }
     openContextMenu({ ...pointFor(btn), title: "Add page", onClose: () => setAddMenu(null), entries });
   };
 
@@ -1538,6 +1552,22 @@ export default function NotebookEditor() {
           busy={addBlankPages.isPending}
           onClose={() => setBlankOpen(false)}
           onInsert={(body) => addBlankPages.mutate(body)}
+        />
+      )}
+
+      {aiOpen && (
+        <AiPageDesigner
+          notebookId={notebookId}
+          insertAfterPageId={addAt === "after" && page ? page.id : null}
+          page={page ?? null}
+          pdfUrl={page && page.asset_key ? assetUrl(notebookId, page.asset_key) : null}
+          onClose={() => setAiOpen(false)}
+          onAdded={(ids) => {
+            setAiOpen(false);
+            toast.success(`Added ${ids.length} page${ids.length === 1 ? "" : "s"}`);
+            setJumpTo(ids[0] ?? null);
+            invalidate();
+          }}
         />
       )}
 
@@ -1985,7 +2015,7 @@ export default function NotebookEditor() {
         />
       )}
 
-      {!blankOpen && !libraryOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && !previewing && !presenting && (
+      {!blankOpen && !libraryOpen && !aiOpen && !pagesDrawerOpen && !appearanceOpen && !selectedField && !candidates && !previewing && !presenting && (
         <Tour place="notebook" />
       )}
     </div>

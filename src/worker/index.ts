@@ -29,6 +29,7 @@ import "./routes/billing";
 import "./routes/billing-webhooks";
 import "./routes/status";
 import "./routes/contact";
+import "./routes/ai";
 import { drainMailQueue } from "./lib/mailqueue";
 import { purgeExpired } from "./lib/trash";
 

@@ -40,6 +40,8 @@ npm run deploy     build then deploy
 npx wrangler d1 execute notesanity --remote --command "SELECT ..."
 npx wrangler secret put STRIPE_SECRET_KEY        Stripe; also STRIPE_WEBHOOK_SECRET (test mode until launch)
 npx wrangler secret put AWS_ACCESS_KEY_ID        SES, if switching mail off Cloudflare; also AWS_SECRET_ACCESS_KEY
+npx wrangler secret put ANTHROPIC_API_KEY        Design with AI (Claude); without it the feature says it isn't switched on
+npx wrangler dev --var AI_STANDIN:1              Design with AI against a free stand-in instead of Claude (tests use this)
 ```
 
 Deploying needs Cloudflare credentials in `.cf-credentials` (gitignored):
@@ -69,6 +71,11 @@ names.
   is a static file and never reaches the Worker.
 - **Marketing pages are static HTML, not app routes**, so a reader doesn't
   download the app bundle and link previews still work.
+- **Design with AI is metered even in the beta.** `AI_PAGES_FREE` / `AI_PAGES_PAID`
+  in `src/shared/plans.mjs`, counted per teacher per month in `ai_usage` when a
+  design is made (refunded if it fails); refining a design is free, up to ten
+  changes. Only the teacher's description and chosen source material go to
+  Anthropic — keep it that way, and keep the privacy page's list in step.
 - **`/api/status` really probes.** Keep it that way — a status page that reports
   a value someone set by hand is worse than none.
 

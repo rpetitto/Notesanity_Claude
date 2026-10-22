@@ -1171,3 +1171,41 @@ migrate("035_guide", async () => {
     await db.prepare(`ALTER TABLE users ADD COLUMN guide_given_at TEXT`).run();
   }
 });
+
+/**
+ * Designing pages with AI. Schema only.
+ *
+ * `ai_usage` is the monthly allowance: one row per teacher per calendar month
+ * (UTC, "2026-10"), holding how many pages they have had designed. A month
+ * nobody used has no row, and a new month starts from nothing without a job
+ * to reset anything.
+ *
+ * `ai_designs` holds each design while the teacher looks at it, so refining
+ * one works from what the server actually produced (not a copy the browser
+ * sends back) and refinements can be counted without counting against the
+ * allowance.
+ */
+migrate("036_ai_pages", async () => {
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_usage (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        month TEXT NOT NULL,
+        pages INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, month)
+      )`),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_designs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        notebook_id TEXT,
+        request TEXT NOT NULL,
+        result TEXT NOT NULL,
+        refinements INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_ai_designs_user ON ai_designs(user_id, created_at)`),
+  ]);
+});

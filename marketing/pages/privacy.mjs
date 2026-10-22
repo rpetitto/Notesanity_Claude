@@ -15,7 +15,7 @@ import { layout } from "../layout.mjs";
  * processing agreement is offered as standard.
  */
 
-const UPDATED = "September 29, 2026";
+const UPDATED = "October 22, 2026";
 
 export default () =>
   layout({
@@ -179,7 +179,16 @@ export default () =>
             <td>All data, as our infrastructure provider</td></tr>
         <tr><td>Google</td><td>Optional "Sign in with Google"</td>
             <td>That an account signed in. Only if that method is used.</td></tr>
+        <tr><td>Anthropic</td><td>Designing worksheet pages with AI, when a teacher asks for one</td>
+            <td>Only what the teacher types or attaches for that page. Never student information.</td></tr>
       </table>
+      <p>
+        When a teacher uses <b>Design with AI</b>, the description they write, the grade and subject,
+        and any source material they choose to attach (pasted text, a PDF or photo, or the page they
+        are on) are sent to Anthropic's Claude to lay out the page. Nothing about students, rosters,
+        grades or students' work is sent. Anthropic does not use data sent through its commercial API
+        to train its models.
+      </p>
       <p>
         When a teacher imports a Word or PowerPoint file, or picks a file out of Google Drive, that
         conversion happens in their own browser with their own Google account. The file reaches us

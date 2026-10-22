@@ -4,6 +4,8 @@
 export const BETA_FREE: boolean;
 export const FREE_NOTEBOOK_LIMIT: number;
 export const FREE_STUDENT_LIMIT: number;
+export const AI_PAGES_FREE: number;
+export const AI_PAGES_PAID: number;
 
 export type PlanKey = "free" | "pro" | "department" | "school";
 

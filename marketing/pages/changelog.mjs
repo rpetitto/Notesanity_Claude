@@ -38,6 +38,13 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "October 22, 2026",
+    "Describe a worksheet, and get one with the answer boxes already on it.",
+    [
+      ["new", "<b>Design a page with AI.</b> In the editor, <b>Add page</b> &rarr; <b>Design with AI</b>: pick a kind of page (exit ticket, reading with questions, vocabulary, graphic organizer, math practice, lab sheet), say what it should cover, and get a finished page with a box on every answer line. Build it from text you paste, a PDF or photo, or the page you're on. Look it over, ask for changes in plain words (&ldquo;make the last one a word problem&rdquo;) or try again, then add it after the current page, where it's an ordinary page you can edit. One to three pages at a time; no answer key. Free includes 1 page a month and Pro 50, and that limit applies during the beta too, since each page costs us to make. Changes and retries are free."],
+    ],
+  ],
+  [
     "October 16, 2026",
     "A notebook that teaches you Notesanity by having you use it, and a new logo.",
     [
