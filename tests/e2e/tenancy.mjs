@@ -378,6 +378,44 @@ await denied("a teacher who isn't an admin can't read the school's grades", TA2,
   check("…but does include their own", JSON.stringify(theirs).includes("SA2 private journal"));
 }
 
+// ------------------------------------------------------------------ rostering ahead of time
+
+{
+  const rows = [
+    { email: "kid@a.edu", name: "Kid On Staff Domain", role: "student" },     // a.edu says "teacher" — the roster says otherwise
+    { email: "newteacher@a.edu", name: "New Teacher", role: "Teacher" },
+    { email: "sa2@students.a.edu", name: "", role: "student" },                // already right
+    { email: "sb@students.b.edu", name: "", role: "student" },                 // another school's account
+    { email: "stranger@b.edu", name: "", role: "teacher" },                    // another school's domain
+    { email: "parent1@gmail.com", name: "", role: "teacher" },                 // a family account
+    { email: "not-an-email", name: "", role: "student" },
+    { email: "x@a.edu", name: "", role: "principal" },
+  ];
+  const preview = await TA1("POST", "/api/org/roster", { rows, apply: false });
+  const by = Object.fromEntries(preview.rows.map((r) => [r.email, r]));
+  check("roster preview: adds the new people", by["kid@a.edu"].outcome === "create" && by["newteacher@a.edu"].outcome === "create");
+  check("roster preview: someone already right is left alone", by["sa2@students.a.edu"].outcome === "same");
+  check("roster preview: never another school's account or domain, one reason for both",
+    by["sb@students.b.edu"].outcome === "skip" && by["stranger@b.edu"].outcome === "skip" && by["sb@students.b.edu"].detail === by["stranger@b.edu"].detail);
+  check("roster preview: never a family account, a bad address or an unknown role",
+    by["parent1@gmail.com"].outcome === "skip" && by["not-an-email"].outcome === "skip" && by["x@a.edu"].outcome === "skip");
+  let emails = (await SA("GET", "/api/admin/users?limit=200")).rows.map((u) => u.email);
+  check("roster preview changes nothing", !emails.includes("kid@a.edu"));
+  await denied("a teacher who isn't an admin can't import a roster", TA2, "POST", "/api/org/roster", { rows, apply: true });
+  await denied("a student can't import a roster", SA1, "POST", "/api/org/roster", { rows, apply: true });
+  const other = await TB("POST", "/api/org/roster", { rows: [{ email: "ta2@a.edu", role: "student" }], apply: true });
+  check("another school's admin can't change this school's people", other.rows[0].outcome === "skip");
+  const done = await TA1("POST", "/api/org/roster", { rows, apply: true });
+  emails = (await SA("GET", "/api/admin/users?limit=200")).rows.map((u) => u.email);
+  check("roster import adds them", done.applied && done.summary.create === 2 && emails.includes("kid@a.edu") && emails.includes("newteacher@a.edu"));
+  const KID = session("rosteredKid");
+  await signUp(KID, { email: "kid@a.edu", password: PW, name: "Kid", door: "teacher" });
+  check("someone rostered as a student stays a student even if they pick Teacher", (await KID("GET", "/api/me")).user.role === "student");
+  const NEW = session("rosteredTeacher");
+  await signUp(NEW, { email: "newteacher@a.edu", password: PW, name: "New Teacher", door: "teacher" });
+  check("someone rostered as a teacher is a teacher when they sign in", (await NEW("GET", "/api/me")).user.role === "teacher");
+}
+
 // ------------------------------------------------------------------ result
 
 const passed = results.filter(Boolean).length;

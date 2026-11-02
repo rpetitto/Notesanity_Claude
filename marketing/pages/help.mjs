@@ -453,6 +453,15 @@ const BODY = () => `
          spreadsheet.`,
       ],
       [
+        "Can I set up everyone's accounts before they sign in?",
+        `Yes. On the <b>Admin</b> page, <b>People</b> &rarr; <b>Import from CSV</b> takes a spreadsheet
+         with email, name and role (teacher or student). You see what it would do — who's added, whose
+         role changes, who's skipped and why — before anything changes. Someone on your roster keeps the
+         role you gave them whichever button they pick at sign-in, which matters most when staff and
+         students share one email domain: without a roster, a person who picks Teacher on that domain
+         becomes a teacher. Addresses that belong to another school are never imported.`,
+      ],
+      [
         "Is there a limit on how many notebooks I can make?",
         `Not during the beta. When paid plans arrive, the Free plan will allow five class notebooks
          at a time and 35 students in each class — archived notebooks don't count, nothing is ever

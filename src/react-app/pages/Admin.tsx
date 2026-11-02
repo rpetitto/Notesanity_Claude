@@ -25,6 +25,7 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { toast } from "sonner";
 import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { Button, Card, Input, Label, Modal, Select } from "../components/ui";
+import { RosterImport } from "../components/RosterImport";
 import { openContextMenu, type ContextEntry } from "../components/ContextMenu";
 import { Archive, ArchiveRestore, ArrowRightLeft, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
@@ -1004,6 +1005,7 @@ function MailLog() {
 
 function OrgUsers() {
   const qc = useQueryClient();
+  const [importing, setImporting] = useState(false);
   const [term, setTerm] = useState("");
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
@@ -1062,6 +1064,7 @@ function OrgUsers() {
 
   return (
     <Card className="mt-6">
+      {importing && <RosterImport onClose={() => setImporting(false)} />}
       <div className="flex flex-wrap items-center gap-3 p-5 pb-0">
         <h2 className="font-display text-[17px] text-pine">People</h2>
         {department && (
@@ -1078,6 +1081,7 @@ function OrgUsers() {
           {total === 0 ? "No matches" : `${(offset + 1).toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setImporting(true)}>Import from CSV</Button>
           <Button variant="secondary" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
             Previous
           </Button>

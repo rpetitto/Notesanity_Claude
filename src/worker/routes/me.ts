@@ -292,6 +292,106 @@ app.patch("/api/org/users/:id", handler(async (c) => {
   return c.json({ ok: true });
 }));
 
+/**
+ * Roster a school ahead of time from a spreadsheet.
+ *
+ * On a domain staff and students share, the sign-in page can't tell them
+ * apart and trusts the door each person picks. An account that already exists
+ * keeps its role whichever door is used, so an admin who rosters the school
+ * first decides who is a teacher — before anyone gets to choose.
+ *
+ * Two passes over the same rows: `apply: false` says what would happen, line
+ * by line, and changes nothing; `apply: true` does it. Rows are kept to this
+ * school: an address on another school's domain, or an account that belongs
+ * to another school, is skipped with one reason either way, and family and
+ * platform accounts are never changed from here.
+ */
+const ROSTER_MAX = 5000;
+const ROSTER_ELSEWHERE = "That address can't be added to this school.";
+app.post("/api/org/roster", handler(async (c) => {
+  const user = await requireUser(c);
+  if (!user.is_admin) throw new HttpError(403, "Admin access required");
+  const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id).first<any>();
+  if (!org || org.solo) throw new HttpError(403, "Rostering is for a school's admins");
+  const body = await c.req.json<{ rows?: { email?: unknown; name?: unknown; role?: unknown }[]; apply?: boolean }>();
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if (!rows.length) throw new HttpError(400, "No rows to import");
+  if (rows.length > ROSTER_MAX) throw new HttpError(400, `Import at most ${ROSTER_MAX.toLocaleString()} people at a time`);
+
+  type Outcome = { line: number; email: string; name: string; role: string; outcome: "create" | "change" | "same" | "skip"; detail: string };
+  const out: Outcome[] = [];
+  const seen = new Map<string, number>();
+  rows.forEach((r, i) => {
+    const email = String(r?.email ?? "").trim().toLowerCase();
+    const name = String(r?.name ?? "").trim().slice(0, 120);
+    const roleRaw = String(r?.role ?? "").trim().toLowerCase();
+    const role = ["teacher", "staff", "faculty"].includes(roleRaw) ? "teacher" : roleRaw === "student" ? "student" : "";
+    const line = i + 1;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { out.push({ line, email, name, role, outcome: "skip", detail: "Not an email address" }); return; }
+    if (!role) { out.push({ line, email, name, role, outcome: "skip", detail: "Role must be teacher or student" }); return; }
+    if (seen.has(email)) out[seen.get(email)!] = { ...out[seen.get(email)!], outcome: "skip", detail: `Listed again on line ${line}; that row is used` };
+    seen.set(email, out.length);
+    out.push({ line, email, name, role, outcome: "create", detail: "" });
+  });
+
+  const live = out.filter((o) => o.outcome === "create");
+  // Who already exists, in one query per few hundred addresses.
+  const existing = new Map<string, any>();
+  for (let i = 0; i < live.length; i += 90) {
+    const part = live.slice(i, i + 90).map((o) => o.email);
+    const res = await db
+      .prepare(`SELECT id, email, org_id, role, name, is_superadmin FROM users WHERE email IN (${part.map(() => "?").join(",")})`)
+      .bind(...part)
+      .all<any>();
+    for (const u of res.results ?? []) existing.set(u.email, u);
+  }
+  const domainSchool = new Map<string, string | null>();
+  for (const o of live) {
+    const domain = o.email.split("@")[1];
+    if (!domainSchool.has(domain)) domainSchool.set(domain, (await orgForDomain(domain))?.id ?? null);
+    const u = existing.get(o.email);
+    if (!u) {
+      const school = domainSchool.get(domain);
+      if (school && school !== org.id) { o.outcome = "skip"; o.detail = ROSTER_ELSEWHERE; }
+      // Allowed — plenty of students use personal addresses — but worth a look.
+      else if (school !== org.id) o.detail = "Not one of your school's domains — they'll join your school";
+      continue;
+    }
+    if (u.org_id !== org.id) { o.outcome = "skip"; o.detail = ROSTER_ELSEWHERE; continue; }
+    if (u.role === "guardian") { o.outcome = "skip"; o.detail = "That's a family account"; continue; }
+    if (u.is_superadmin) { o.outcome = "skip"; o.detail = "That's a Notesanity staff account"; continue; }
+    if (u.role === o.role) { o.outcome = "same"; o.detail = `Already a ${o.role}`; continue; }
+    o.outcome = "change";
+    o.detail = u.role === "pending" ? `Sets their role to ${o.role}` : `${u.role} → ${o.role}`;
+  }
+
+  if (body.apply) {
+    const statements: D1PreparedStatement[] = [];
+    for (const o of out) {
+      if (o.outcome === "create") {
+        statements.push(
+          db.prepare(`INSERT OR IGNORE INTO users (id, org_id, email, name, role, is_admin, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)`)
+            .bind(uid(), org.id, o.email, o.name || o.email, o.role, now()),
+        );
+      } else if (o.outcome === "change") {
+        const u = existing.get(o.email);
+        statements.push(
+          db.prepare(`UPDATE users SET role = ?, requested_role = '', name = CASE WHEN name = email AND ? <> '' THEN ? ELSE name END WHERE id = ? AND org_id = ?`)
+            .bind(o.role, o.name, o.name, u.id, org.id),
+        );
+      }
+    }
+    for (let i = 0; i < statements.length; i += 80) await db.batch(statements.slice(i, i + 80));
+  }
+
+  const count = (k: Outcome["outcome"]) => out.filter((o) => o.outcome === k).length;
+  return c.json({
+    applied: !!body.apply,
+    summary: { create: count("create"), change: count("change"), same: count("same"), skip: count("skip") },
+    rows: out,
+  });
+}));
+
 export const touchedAt = now;
 
 /**
