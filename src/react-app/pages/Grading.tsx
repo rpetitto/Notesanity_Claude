@@ -32,6 +32,7 @@ import { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
 import { cn, relativeTime, dueLabel } from "../lib/utils";
 import { hasGoogleClientId, pushGrades, type ClassroomGrade, type GradePushResult } from "../lib/google";
+import { letterPercent } from "../../shared/grades.mjs";
 import GoogleIcon from "../components/GoogleIcon";
 
 /** Header controls share one height so a row of them lines up. */
@@ -402,10 +403,9 @@ export default function Grading() {
   /**
    * The same grades, in the only shape Classroom understands.
    *
-   * Points go across as they are and complete/incomplete as the one-point
-   * assignment it was posted as. A letter grade has no numeric form worth
-   * inventing, so those assignments simply don't push — the letter stays here,
-   * which is what the teacher was told when they posted it.
+   * Points go across as they are, complete/incomplete as the one-point
+   * assignment it was posted as, and a letter as its value out of 100 (A 95,
+   * B 85 … shared/grades.mjs) — the number Notesanity's own averages use.
    */
   const classroomGradesFor = (target: GradeRow[]): ClassroomGrade[] => {
     if (assignment?.grading === "points") {
@@ -418,8 +418,15 @@ export default function Grading() {
         .filter((r) => r.grade.complete !== null)
         .map((r) => ({ email: r.student.email, points: r.grade.complete ? 1 : 0 }));
     }
+    if (assignment?.grading === "letter") {
+      return target
+        .filter((r) => letterPercent(r.grade.letter) !== null)
+        .map((r) => ({ email: r.student.email, points: letterPercent(r.grade.letter)! }));
+    }
     return [];
   };
+  /** Letters need the coursework graded out of 100, which older posts weren't. */
+  const classroomOpts = () => (assignment?.grading === "letter" ? { maxPoints: 100 } : {});
 
   const returnWork = useMutation({
     mutationFn: async (body: { studentId?: string; all?: boolean }) => {
@@ -438,7 +445,7 @@ export default function Grading() {
       // Classroom is the mirror. A failure to mirror is reported, not thrown,
       // or the teacher would think the grades hadn't gone out at all.
       try {
-        return { classroom: await pushGrades(courseId, courseworkId, grades), classroomError: null };
+        return { classroom: await pushGrades(courseId, courseworkId, grades, classroomOpts()), classroomError: null };
       } catch (e) {
         return { classroom: null, classroomError: (e as Error).message };
       }
@@ -465,7 +472,7 @@ export default function Grading() {
       const grades = classroomGradesFor(rows.filter((r) => r.graded && r.returnedAt));
       if (grades.length === 0) return { classroom: null, classroomError: "No returned grades to send yet." };
       try {
-        return { classroom: await pushGrades(courseId, courseworkId, grades), classroomError: null };
+        return { classroom: await pushGrades(courseId, courseworkId, grades, classroomOpts()), classroomError: null };
       } catch (e) {
         return { classroom: null, classroomError: (e as Error).message };
       }

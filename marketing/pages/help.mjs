@@ -311,8 +311,9 @@ const BODY = () => `
         `For an assignment you posted from here, yes: returning the work sends the grade to your
          Classroom gradebook. Only an assignment Notesanity posted can take a grade \u2014 Google
          doesn't let one app change another's \u2014 so one you made in Classroom by hand can't.
-         Points and complete/incomplete go across as numbers; a letter grade stays here, because
-         Classroom only accepts numbers. If the work was never turned in on Classroom, the grade
+         Points and complete/incomplete go across as numbers. Classroom only takes numbers, so a
+         letter grade goes out of 100 as A 95, B 85, C 75, D 65, F 59 — the same values your
+         averages use here. If the work was never turned in on Classroom, the grade
          waits in your Classroom gradebook until you return it there.`,
       ],
       [
