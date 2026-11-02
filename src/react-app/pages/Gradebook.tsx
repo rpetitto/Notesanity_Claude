@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { LETTER_PERCENT, gradeContribution, letterPercent } from "../../shared/grades.mjs";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, MessageSquare } from "lucide-react";
@@ -199,7 +200,10 @@ function gradeCell(a: GbAssignment, sub: GbSubmission | undefined): { text: stri
     const low = max > 0 && sub.grade_points / max < 0.6;
     return { text: String(sub.grade_points), state: low ? "low" : "graded", score: max > 0 ? sub.grade_points / max : null };
   }
-  if (sub && a.grading === "letter" && sub.grade_letter) return { text: sub.grade_letter, state: "graded", score: null };
+  if (sub && a.grading === "letter" && sub.grade_letter) {
+    const pct = letterPercent(sub.grade_letter);
+    return { text: sub.grade_letter, state: pct !== null && pct < 60 ? "low" : "graded", score: pct === null ? null : pct / 100 };
+  }
   if (sub && a.grading === "complete" && sub.grade_complete !== null) {
     return sub.grade_complete
       ? { text: "✓", state: "graded", score: 1 }
@@ -253,24 +257,25 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
   const cell = (a: GbAssignment, studentId: string) => gradeCell(a, subs.get(`${a.id}:${studentId}`));
 
   /**
-   * The running grade: points earned over points possible, across work that
-   * has a points or complete/incomplete grade. Letter grades and ungraded
-   * work don't count, and nothing is weighted — it's a guide, not the
-   * gradebook of record.
+   * The running grade: points earned over points possible, with letters and
+   * ticks turned into points the way shared/grades.mjs says — the same rule
+   * the student's own grades page and the CSV use.
    */
   const average = (studentId: string): number | null => {
     let earned = 0;
     let possible = 0;
     for (const a of assignments) {
       const sub = subs.get(`${a.id}:${studentId}`);
-      if (!sub || !a.points_max) continue;
-      if (a.grading === "points" && sub.grade_points !== null) { earned += sub.grade_points; possible += a.points_max; }
-      if (a.grading === "complete" && sub.grade_complete !== null) { earned += sub.grade_complete ? a.points_max : 0; possible += a.points_max; }
+      if (!sub) continue;
+      const counts = gradeContribution({
+        grading: a.grading, pointsMax: a.points_max, points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete,
+      });
+      if (counts) { earned += counts.earned; possible += counts.possible; }
     }
     return possible ? (earned / possible) * 100 : null;
   };
 
-  /** Per column: points as raw scores, complete/incomplete as the share complete. */
+  /** Per column: points as raw scores; complete/incomplete and letters as percentages. */
   const columnStats = (a: GbAssignment) => {
     const xs: number[] = [];
     for (const st of students) {
@@ -278,9 +283,10 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
       if (!sub) continue;
       if (a.grading === "points" && sub.grade_points !== null) xs.push(sub.grade_points);
       if (a.grading === "complete" && sub.grade_complete !== null) xs.push(sub.grade_complete ? 100 : 0);
+      if (a.grading === "letter") { const pct = letterPercent(sub.grade_letter); if (pct !== null) xs.push(pct); }
     }
     if (!xs.length) return { avg: "", med: "" };
-    const suffix = a.grading === "complete" ? "%" : "";
+    const suffix = a.grading === "points" ? "" : "%";
     return {
       avg: `${round1(xs.reduce((n, x) => n + x, 0) / xs.length)}${suffix}`,
       med: `${round1(median(xs)!)}${suffix}`,
@@ -409,7 +415,7 @@ function TeacherGradebook({ classId, embedded }: { classId: string; embedded?: b
             </table>
           </div>
           <p className="mt-2 text-[15px] text-pine/60">
-            Average is points earned out of points possible on graded work (complete counts as full marks, incomplete as none). Letter grades and ungraded work aren't counted. Click a score to open that student's work.
+            Average is points earned out of points possible on graded work. Complete counts as full marks and incomplete as none; letter grades count as {Object.entries(LETTER_PERCENT).map(([l, v]) => `${l} ${v}`).join(", ")}. Click a score to open that student's work.
           </p>
         </>
       )}

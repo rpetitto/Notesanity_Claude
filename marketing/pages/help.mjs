@@ -445,7 +445,9 @@ const BODY = () => `
          first, with its date, title and maximum score. A yellow cell has been handed in and is
          waiting for a grade, a red one is past due with nothing handed in, and a red number is
          under 60%. <b>Average</b> is points earned out of points possible on graded work —
-         complete counts as full marks, incomplete as none, and letter grades aren't averaged. Click
+         complete counts as full marks and incomplete as none, and a letter grade counts out of
+         100 as A 95, B 85, C 75, D 65, F 59. Students see their own total worked out the same
+         way, from grades you've returned. Click
          any cell to open that student's work on that assignment, or <b>Download CSV</b> for a
          spreadsheet.`,
       ],

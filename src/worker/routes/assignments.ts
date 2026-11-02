@@ -1,6 +1,7 @@
 import { app, db } from "../platform";
 import {
   handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+import { gradeContribution } from "../../shared/grades.mjs";
 import { logActivity } from "../lib/activity";
 import { HAS_INK_BYTES } from "../lib/ink";
 
@@ -846,9 +847,13 @@ app.get("/api/classes/:id/my-grades", handler(async (c) => {
     // Only returned work counts — a grade the teacher hasn't released yet must
     // stay invisible to the student.
     const released = !!r.returned_at;
-    if (released && r.grading === "points" && r.grade_points !== null) {
-      earned += r.grade_points;
-      possible += r.points_max;
+    // Counted the same way the teacher's gradebook counts it — see shared/grades.mjs.
+    const counts = released
+      ? gradeContribution({ grading: r.grading, pointsMax: r.points_max, points: r.grade_points, letter: r.grade_letter, complete: r.grade_complete })
+      : null;
+    if (counts) {
+      earned += counts.earned;
+      possible += counts.possible;
     }
     return {
       id: r.id,
@@ -875,7 +880,9 @@ app.get("/api/classes/:id/my-grades", handler(async (c) => {
     className: cls?.name ?? "",
     accentColor: cls?.accent_color ?? "#2E7D6B",
     assignments,
-    totals: possible > 0 ? { earned, possible, percent: Math.round((earned / possible) * 100) } : null,
+    totals: possible > 0
+      ? { earned: Math.round(earned * 10) / 10, possible, percent: Math.round((earned / possible) * 100) }
+      : null,
   });
 }));
 
@@ -914,11 +921,18 @@ app.get("/api/classes/:id/gradebook.csv", handler(async (c) => {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
 
-  const header = ["Student", "Email", ...(assignments.results ?? []).map((a: any) =>
+  const header = ["Student", "Email", "Average %", ...(assignments.results ?? []).map((a: any) =>
     a.grading === "points" ? `${a.title} (/${a.points_max})` : a.title)];
   const lines = [header.map(esc).join(",")];
   for (const st of students.results ?? []) {
-    const row = [st.name, st.email];
+    let earned = 0;
+    let possible = 0;
+    for (const a of assignments.results ?? []) {
+      const s = map.get(key(a.id, st.id));
+      const counts = s && gradeContribution({ grading: a.grading, pointsMax: a.points_max, points: s.grade_points, letter: s.grade_letter, complete: s.grade_complete });
+      if (counts) { earned += counts.earned; possible += counts.possible; }
+    }
+    const row = [st.name, st.email, possible ? Math.round((earned / possible) * 1000) / 10 : ""];
     for (const a of assignments.results ?? []) {
       const s = map.get(key(a.id, st.id));
       let cell = "";
