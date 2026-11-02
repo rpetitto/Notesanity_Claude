@@ -17,8 +17,9 @@
  * and page-ordering helper.
  */
 
+import { notebookAccess, requireNotebookTeacher } from "./notebooks";
 import { app, db, storage } from "../platform";
-import { handler, now, uid, requireTeacher, HttpError, param } from "../lib/session";
+import { fileHeaders, handler, now, uid, requireTeacher, HttpError, param } from "../lib/session";
 import {
   MAX_LIBRARY_PAGES, libraryAssetKey, libraryMediaKey, type LibraryField,
 } from "../lib/page-library";
@@ -71,10 +72,7 @@ app.get("/api/my/page-library/:id/asset", handler(async (c) => {
   const obj = await storage.get(entry.asset_key);
   if (!obj) throw new HttpError(404, "Asset not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Cache-Control": "private, max-age=31536000, immutable",
-    },
+    headers: fileHeaders("application/pdf", "private, max-age=31536000, immutable"),
   });
 }));
 
@@ -91,6 +89,9 @@ app.post("/api/my/page-library", handler(async (c) => {
   if (!nb) throw new HttpError(404, "Notebook not found");
   // The owner, deliberately, not any co-teacher: a library belongs to a person.
   if (nb.owner_id !== user.id) throw new HttpError(403, "You can only save pages from your own notebooks");
+  // And only while they can still author it: a co-teacher who made a notebook
+  // and was later removed from the class doesn't keep a way to copy it out.
+  requireNotebookTeacher(await notebookAccess(c, nb.id));
 
   const page = await db
     .prepare(`SELECT * FROM pages WHERE id = ? AND notebook_id = ?`)
@@ -113,6 +114,7 @@ app.post("/api/my/page-library", handler(async (c) => {
   // instant rather than another 25 MB round trip.
   let assetKey = "";
   if (page.asset_key) {
+    if (!String(page.asset_key).startsWith(`notebooks/${nb.id}/`)) throw new HttpError(400, "That page's document doesn't belong to this notebook");
     assetKey = libraryAssetKey(user.id, page.asset_key);
     await storage.copy(page.asset_key, assetKey);
   }
@@ -239,7 +241,7 @@ app.get("/api/my/page-library/asset", handler(async (c) => {
   const obj = await storage.get(key);
   if (!obj) throw new HttpError(404, "Document not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: { "Content-Type": "application/pdf", "Cache-Control": "private, max-age=31536000, immutable" },
+    headers: fileHeaders("application/pdf", "private, max-age=31536000, immutable"),
   });
 }));
 

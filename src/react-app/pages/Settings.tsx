@@ -1,12 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { BookOpen, CreditCard, LogOut, RotateCcw } from "lucide-react";
+import { BookOpen, CreditCard, KeyRound, LogOut, RotateCcw } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { useSession, signOutHref, type Plan } from "../lib/session";
 import { api } from "../lib/api";
-import { Button, ButtonLink, Card, Chip } from "../components/ui";
+import { Button, ButtonLink, Card, Chip, Input } from "../components/ui";
 import { FREE_NOTEBOOK_LIMIT, FREE_STUDENT_LIMIT } from "../../shared/plans.mjs";
 
 const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
@@ -115,6 +115,63 @@ function GuideCard() {
   );
 }
 
+/**
+ * Set, change or reset a password.
+ *
+ * A reset link lands here with ?reset=1, and for twenty minutes that session
+ * may choose a new password without the old one — the link already proved
+ * the address. Saving signs out every other device.
+ */
+function PasswordCard({ resetting, onDone }: { resetting: boolean; onDone: () => void }) {
+  const methods = useQuery({ queryKey: ["auth-methods"], queryFn: () => api.get<{ password: boolean; local: boolean }>("/api/auth/methods") });
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const save = useMutation({
+    mutationFn: () => api.post("/api/auth/password/change", { currentPassword: current, newPassword: next }),
+    onSuccess: () => {
+      setCurrent(""); setNext("");
+      methods.refetch();
+      toast.success("Password saved. Any other devices were signed out.");
+      onDone();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  if (!methods.data?.local) return null;
+  const has = methods.data.password;
+  const askCurrent = has && !resetting;
+  return (
+    <Card className="mb-6 p-5" data-testid="password-card">
+      <h2 className="font-display text-[17px] text-pine">{resetting ? "Choose a new password" : has ? "Password" : "Add a password"}</h2>
+      <p className="mt-1 text-[16px] text-pine/70">
+        {resetting
+          ? "You came here from a reset link, so you don't need the old one."
+          : has
+            ? "Change the password you sign in with. Saving signs you out on every other device."
+            : "You sign in with Google or an email link. Add a password if you'd like another way in."}
+      </p>
+      <form className="mt-3 grid gap-3 sm:max-w-md" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        {askCurrent && (
+          <label className="block">
+            <span className="label-caps mb-1 block text-pine/70">Current password</span>
+            <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+          </label>
+        )}
+        <label className="block">
+          <span className="label-caps mb-1 block text-pine/70">New password</span>
+          <Input type="password" autoComplete="new-password" minLength={10} value={next} onChange={(e) => setNext(e.target.value)} />
+          <span className="mt-1 block text-[15px] text-pine/60">At least 10 characters.</span>
+        </label>
+        <div>
+          <Button type="submit" variant="secondary" disabled={save.isPending || next.length < 10 || (askCurrent && !current)}>
+            <KeyRound className="h-4 w-4" strokeWidth={2.5} />
+            {save.isPending ? "Saving…" : "Save password"}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { user, plan, isLoading } = useSession();
   const qc = useQueryClient();
@@ -187,6 +244,11 @@ export default function Settings() {
           Sign out
         </ButtonLink>
       </Card>
+
+      <PasswordCard
+        resetting={params.get("reset") === "1"}
+        onDone={() => { if (params.get("reset")) setParams({}, { replace: true }); }}
+      />
 
       {/* A teacher who is also a parent here: the way to their children, kept
           off the main menu, which is already full for a teacher. */}

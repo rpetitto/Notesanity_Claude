@@ -1222,3 +1222,24 @@ migrate("037_allow_export", async () => {
     await db.prepare(`ALTER TABLE notebooks ADD COLUMN allow_export INTEGER NOT NULL DEFAULT 1`).run();
   }
 });
+
+/**
+ * Signing up proves the address before anything is made. Schema only.
+ *
+ * `auth_tokens.pending_password` holds the chosen password, already hashed,
+ * between "Create account" and the click on the confirmation link; it is
+ * cleared the moment the link is used and swept with expired tokens.
+ * `sessions.reset_until` marks a session opened by a password-reset link, for
+ * the few minutes in which it may set a new password without the old one.
+ */
+migrate("038_verified_signup", async () => {
+  const tokens = await db.prepare(`PRAGMA table_info(auth_tokens)`).all<{ name: string }>();
+  if (!(tokens.results ?? []).some((c) => c.name === "pending_password")) {
+    await db.prepare(`ALTER TABLE auth_tokens ADD COLUMN pending_password TEXT`).run();
+  }
+  const sessions = await db.prepare(`PRAGMA table_info(sessions)`).all<{ name: string }>();
+  if (!(sessions.results ?? []).some((c) => c.name === "reset_until")) {
+    await db.prepare(`ALTER TABLE sessions ADD COLUMN reset_until TEXT`).run();
+  }
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`).run();
+});

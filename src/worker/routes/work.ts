@@ -1,5 +1,5 @@
 import { app, db, storage } from "../platform";
-import { handler, now, uid, requireUser, HttpError, param} from "../lib/session";
+import { fileHeaders, handler, now, uid, requireUser, HttpError, param} from "../lib/session";
 import { childrenInClass } from "../lib/family";
 import { coalesceStatement, insertActivity, lockFrom, logActivity, pageLock, pageLockStatement, type LogInput } from "../lib/activity";
 import {
@@ -378,11 +378,14 @@ app.put("/api/notebooks/:id/layers/:pageId", handler(async (c) => {
   // reopens it. That closes the window where a page could be changed after
   // marking and passed off as the original. Asked in the same round trip as
   // the layer's current row.
-  const [layerRes, lockRes] = await db.batch([
+  const [pageRes, layerRes, lockRes] = await db.batch([
+    // Ink goes on a page of this notebook, not on any id a client names.
+    db.prepare(`SELECT 1 AS yes FROM pages WHERE id = ? AND notebook_id = ?`).bind(pageId, instance.notebook_id),
     db.prepare(`SELECT id, rev, data FROM layers WHERE instance_id = ? AND page_id = ? AND kind = ?`)
       .bind(instance.id, pageId, kind),
     ...(kind === "student" ? [pageLockStatement(instance.student_id, instance.notebook_id, pageId)] : []),
   ]);
+  if (!pageRes.results?.length) throw new HttpError(404, "Page not found");
   if (kind === "student") {
     const lock = lockFrom(lockRes?.results?.[0]);
     if (lock) {
@@ -524,13 +527,16 @@ app.post("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   }
   const fieldId = param(c, "fieldId");
   const field = await db
-    .prepare(`SELECT id, type FROM fields WHERE id = ? AND notebook_id = ? AND archived = 0`)
+    .prepare(`SELECT id, type, page_id FROM fields WHERE id = ? AND notebook_id = ? AND archived = 0`)
     .bind(fieldId, nb.id)
     .first<any>();
   if (!field) throw new HttpError(404, "Field not found");
   if (field.type !== "image" && field.type !== "audio") {
     throw new HttpError(400, "That field doesn't accept a file");
   }
+  // Handed in means handed in: a photo or recording can't be swapped under a grade.
+  const lock = await pageLock(instance.student_id, nb.id, field.page_id);
+  if (lock) throw new HttpError(423, `This page is locked — you handed it in for "${lock.title}".`);
 
   const form = await c.req.parseBody();
   const file = form["file"] as File | undefined;
@@ -590,18 +596,22 @@ app.get("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   const obj = await storage.get(row.asset_key);
   if (!obj) throw new HttpError(404, "File not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: {
-      "Content-Type": row.content_type ?? obj.contentType ?? "application/octet-stream",
-      "Cache-Control": "private, max-age=300",
-    },
+    headers: fileHeaders(row.content_type ?? obj.contentType, "private, max-age=300"),
   });
 }));
 
 app.delete("/api/notebooks/:id/responses/:fieldId", handler(async (c) => {
   const studentParam = c.req.query("student") || undefined;
-  const { user, isTeacher, instance, readOnly, readOnlyReason } = await resolveInstance(c, param(c, "id"), studentParam);
+  const { nb, user, isTeacher, instance, readOnly, readOnlyReason } = await resolveInstance(c, param(c, "id"), studentParam);
   if (readOnly) throw new HttpError(403, readOnlyReason || OTHERS_NOTEBOOK_REASON);
   if (isTeacher && instance.student_id !== user.id) throw new HttpError(403, "Not your response to remove");
+  const field = await db
+    .prepare(`SELECT page_id FROM fields WHERE id = ? AND notebook_id = ?`)
+    .bind(param(c, "fieldId"), nb.id)
+    .first<{ page_id: string }>();
+  if (!field) throw new HttpError(404, "Field not found");
+  const lock = await pageLock(instance.student_id, nb.id, field.page_id);
+  if (lock) throw new HttpError(423, `This page is locked — you handed it in for "${lock.title}".`);
   await db
     .prepare(`UPDATE field_values SET asset_key = NULL, content_type = NULL, updated_at = ? WHERE instance_id = ? AND field_id = ?`)
     .bind(now(), instance.id, param(c, "fieldId"))

@@ -12,13 +12,13 @@
  * becomes a way to find out which pupils and staff have accounts.
  */
 
-import { app, db } from "../platform";
+import { app, currentEnv, db } from "../platform";
 import { email as mailer } from "../platform/email";
 import { renderEmail } from "../lib/email";
 import { logMail } from "../lib/maillog";
 import { SUPERADMIN_EMAILS } from "../schema";
 import type { Context } from "hono";
-import { HttpError, PUBLIC_MAIL_DOMAINS, handler, noOrgsYet, now, orgForDomain, roleForDomain, setLocalSessionResolver, uid } from "../lib/session";
+import { HttpError, PUBLIC_MAIL_DOMAINS, clearImpersonateCookie, handler, noOrgsYet, now, orgForDomain, roleForDomain, setLocalSessionResolver, throttle, uid } from "../lib/session";
 import { NO_CODE_MESSAGE, linkGuardian, lookupCode, requireCode } from "../lib/family";
 import { joinClass } from "./classes";
 
@@ -94,12 +94,15 @@ function clearSessionCookie(c: Context) {
   );
 }
 
-async function startSession(c: Context, userId: string) {
+async function startSession(c: Context, userId: string, opts: { reset?: boolean } = {}) {
   const id = randomToken(32);
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000).toISOString();
+  // A session opened by a reset link may set a new password without the old
+  // one — for as long as the link itself would have lasted, and no longer.
+  const resetUntil = opts.reset ? new Date(Date.now() + TOKEN_MINUTES * 60_000).toISOString() : null;
   await db
-    .prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`)
-    .bind(id, userId, now(), expires)
+    .prepare(`INSERT INTO sessions (id, user_id, created_at, expires_at, reset_until) VALUES (?, ?, ?, ?, ?)`)
+    .bind(id, userId, now(), expires, resetUntil)
     .run();
   setSessionCookie(c, id, SESSION_DAYS * 86400);
 }
@@ -233,12 +236,17 @@ async function soloClassFor(code: string | undefined) {
     .first<{ id: string; org_id: string }>();
 }
 
-/** Would this address get an account through this door? No side effects beyond `resolveOrgFor`'s bootstrap. */
+/**
+ * Would this address get an account through this door? No side effects: it
+ * runs before a link is sent, and the school-founding first sign-in must
+ * happen when the link is opened, so that person is the one made its admin.
+ */
 async function canCreate(email: string, intent: Intent): Promise<boolean> {
   if (intent.door === "family" || (!intent.door && intent.familyCode)) {
     const holder = await lookupCode(intent.familyCode);
     return !!holder?.familyAccess;
   }
+  if (await noOrgsYet()) return true;
   const resolved = await resolveOrgFor(email).catch(() => null);
   if (intent.door === "teacher") return !resolved || resolved.role !== "student";
   if (resolved) return true;
@@ -378,6 +386,17 @@ function appOrigin(c: Context): string {
 
 // ---------------------------------------------------------------- password
 
+/**
+ * Sign up with a password.
+ *
+ * Nothing is made until the address is proven. The password is hashed now and
+ * held with a single-use link sent to the address; the account, the password
+ * and the session only come into being when that link is opened. Before this,
+ * signing up for an address that already had an account (one that signs in
+ * with Google or a link) set a password on it and signed the caller in — so
+ * anyone could become anyone. The reply is the same whether or not the
+ * address has an account, so this can't be used to find out either.
+ */
 app.post("/api/auth/password/register", handler(async (c) => {
   const body = await c.req.json<{ email: string; password: string; name?: string }>();
   const { email, password, name } = body;
@@ -387,24 +406,23 @@ app.post("/api/auth/password/register", handler(async (c) => {
   if (!password || password.length < MIN_PASSWORD) {
     throw new HttpError(400, `Choose a password of at least ${MIN_PASSWORD} characters.`);
   }
+  await throttle(c, "strict", "register", address);
 
-  const user = await findOrCreateUser(address, name, intent);
-  const existing = await db.prepare(`SELECT user_id FROM credentials WHERE user_id = ?`).bind(user.id).first();
-  if (existing) {
-    throw new HttpError(409, "That account already has a password. Sign in instead, or use a sign-in link.");
-  }
-
+  const user = await db.prepare(`SELECT id, org_id FROM users WHERE email = ?`).bind(address).first<{ id: string; org_id: string }>();
+  const allowed = user ? true : await canCreate(address, intent);
   const salt = randomToken(16);
-  const iterations = PBKDF2_ITERATIONS;
-  await db
-    .prepare(`INSERT INTO credentials (user_id, password_hash, salt, iterations, updated_at) VALUES (?, ?, ?, ?, ?)`)
-    .bind(user.id, await derive(password, salt, iterations), salt, iterations, now())
-    .run();
-
-  await claimCode(user, intent);
-  await joinWithCode(user, intent);
-  await startSession(c, user.id);
-  return c.json({ ok: true });
+  const pending = JSON.stringify({
+    hash: await derive(password, salt, PBKDF2_ITERATIONS), salt, iterations: PBKDF2_ITERATIONS,
+    name: (name ?? "").trim().slice(0, 120),
+  });
+  const devLink = allowed
+    ? await sendLink(c, address, "verify", intent, user?.org_id ?? (await orgForDomain(address.split("@")[1] ?? ""))?.id ?? null, pending)
+    : null;
+  if (!allowed) {
+    await logMail({ address, kind: "verify", status: "refused_domain", orgId: null,
+      detail: "Address is not on the org's allowed domains, so no email was sent." });
+  }
+  return c.json({ ok: true, verify: true, ...(devLink ? { devLink } : {}) });
 }));
 
 app.post("/api/auth/password/login", handler(async (c) => {
@@ -412,6 +430,7 @@ app.post("/api/auth/password/login", handler(async (c) => {
   const { email, password } = body;
   const intent = readIntent(body);
   const address = normalize(email);
+  await throttle(c, "strict", "login", address);
   const user = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(address).first<any>();
   const cred = user
     ? await db.prepare(`SELECT * FROM credentials WHERE user_id = ?`).bind(user.id).first<any>()
@@ -436,12 +455,18 @@ app.post("/api/auth/password/login", handler(async (c) => {
 app.post("/api/auth/password/change", handler(async (c) => {
   const userId = await localSessionUserId(c);
   if (!userId) throw new HttpError(401, "Sign in first.");
+  const sessionId = sessionCookie(c);
   const { currentPassword, newPassword } = await c.req.json<{ currentPassword?: string; newPassword: string }>();
   if (!newPassword || newPassword.length < MIN_PASSWORD) {
     throw new HttpError(400, `Choose a password of at least ${MIN_PASSWORD} characters.`);
   }
+  await throttle(c, "strict", "password-change", userId);
   const cred = await db.prepare(`SELECT * FROM credentials WHERE user_id = ?`).bind(userId).first<any>();
-  if (cred) {
+  // Someone who came in through a reset link has just proven the address, and
+  // forgot the old password — that's why they're here.
+  const session = await db.prepare(`SELECT reset_until FROM sessions WHERE id = ?`).bind(sessionId).first<{ reset_until: string | null }>();
+  const resetting = !!session?.reset_until && new Date(session.reset_until).getTime() > Date.now();
+  if (cred && !resetting) {
     const attempt = await derive(currentPassword ?? "", cred.salt, cred.iterations);
     if (!timingSafeEqual(attempt, cred.password_hash)) throw new HttpError(401, "That current password isn't right.");
   }
@@ -460,29 +485,107 @@ app.post("/api/auth/password/change", handler(async (c) => {
       .bind(userId, hash, salt, iterations, now())
       .run();
   }
+  // A new password signs out every other device, and closes the reset window.
+  await db.batch([
+    db.prepare(`DELETE FROM sessions WHERE user_id = ? AND id <> ?`).bind(userId, sessionId),
+    db.prepare(`UPDATE sessions SET reset_until = NULL WHERE id = ?`).bind(sessionId),
+  ]);
   return c.json({ ok: true });
 }));
 
 // ------------------------------------------------------------- magic link
 
-async function issueToken(address: string, purpose: string, intent: Intent = {}): Promise<string> {
+async function issueToken(address: string, purpose: string, intent: Intent = {}, pendingPassword: string | null = null): Promise<string> {
   const token = randomToken(32);
   await db
     .prepare(
-      `INSERT INTO auth_tokens (id, token_hash, email, purpose, intent, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO auth_tokens (id, token_hash, email, purpose, intent, pending_password, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uid(),
       await sha256(token),
       address,
       purpose,
-      intent.door || intent.familyCode ? JSON.stringify(intent) : "",
+      intent.door || intent.familyCode || intent.classCode ? JSON.stringify(intent) : "",
+      pendingPassword,
       new Date(Date.now() + TOKEN_MINUTES * 60_000).toISOString(),
       now(),
     )
     .run();
   return token;
+}
+
+/**
+ * Local testing only: hand the link back in the response instead of making
+ * someone read a mailbox. Needs both the AUTH_DEV_LINKS var (never set in
+ * production) and a request to localhost, so a stray var can't turn it on
+ * for the real site.
+ */
+function devLinks(c: Context): boolean {
+  const env = currentEnv() as Record<string, unknown>;
+  const host = new URL(c.req.url).hostname;
+  return env.AUTH_DEV_LINKS === "1" && (host === "localhost" || host === "127.0.0.1");
+}
+
+const LINK_COPY: Record<string, { subject: string; preheader: string; heading: string; body: string; action: string }> = {
+  magic: {
+    subject: "Your Notesanity sign-in link",
+    preheader: "Sign in — the link works once and expires in 20 minutes.",
+    heading: "Sign in to Notesanity",
+    body: "Use the button below to sign in. It works once, and only for the next 20 minutes.",
+    action: "Sign in to Notesanity",
+  },
+  reset: {
+    subject: "Reset your Notesanity password",
+    preheader: "Set a new password — the link works once and expires in 20 minutes.",
+    heading: "Set a new password",
+    body: "Someone asked to reset the password for this address. Use the button below to choose a new one.",
+    action: "Set a new password",
+  },
+  verify: {
+    subject: "Confirm your email for Notesanity",
+    preheader: "One click to finish signing up — the link works once and expires in 20 minutes.",
+    heading: "Confirm your email",
+    body: "Someone signed up for Notesanity with this address. Use the button below to confirm it's you and finish — your account and password are set up only once you do.",
+    action: "Confirm and sign in",
+  },
+};
+
+/** Make a single-use link and mail it. Returns the link itself only when testing locally. */
+async function sendLink(c: Context, address: string, kind: string, intent: Intent, orgId: string | null, pendingPassword: string | null = null): Promise<string | null> {
+  const token = await issueToken(address, kind, intent, pendingPassword);
+  const link = `${appOrigin(c)}/api/auth/magic/callback?token=${token}`;
+  if (devLinks(c)) return link;
+  const copy = LINK_COPY[kind] ?? LINK_COPY.magic;
+  const { html, text } = renderEmail({
+    preheader: copy.preheader,
+    heading: copy.heading,
+    body: [copy.body],
+    action: { label: copy.action, url: link },
+    note: "If you didn't ask for this, you can ignore this email — nothing will change.",
+  });
+  try {
+    const result = await mailer.send({ to: address, subject: copy.subject, text, html });
+    // The provider reports failure by return value as well as by throwing.
+    if (result && result.success === false) {
+      await logMail({ address, kind, status: "failed", orgId, detail: "Provider reported the send as unsuccessful." });
+    } else {
+      await logMail({ address, kind, status: "sent", orgId, detail: result?.messageId ?? "" });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Three sends a minute, per project — a staff room signing in together
+    // hits it easily, and the failure is otherwise completely silent.
+    const limited = message.includes("PLUGIN_RATE_LIMIT_EXCEEDED");
+    await logMail({
+      address, kind, orgId,
+      status: limited ? "rate_limited" : "failed",
+      detail: limited ? "Hit the 3-per-minute send limit. Ask them to try again in a minute." : message,
+    });
+    console.error("link send failed", message);
+  }
+  return null;
 }
 
 app.post("/api/auth/magic/request", handler(async (c) => {
@@ -492,11 +595,12 @@ app.post("/api/auth/magic/request", handler(async (c) => {
   const address = normalize(raw);
   const kind = purpose === "reset" ? "reset" : "magic";
   if (!address.includes("@")) throw new HttpError(400, "Enter a valid email address.");
+  await throttle(c, "strict", "magic", address);
 
   // Only send when the address could actually sign in, but never say which.
   const user = await db.prepare(`SELECT id, org_id FROM users WHERE email = ?`).bind(address).first<{ id: string; org_id: string }>();
-  const resolved = user ? null : await resolveOrgFor(address).catch(() => null);
   const allowed = user ? true : await canCreate(address, intent);
+  const resolved = user || !allowed ? null : await orgForDomain(address.split("@")[1] ?? "").then((o) => (o ? { orgId: o.id } : null));
   const orgId = user?.org_id ?? resolved?.orgId ?? (await lookupCode(intent.familyCode))?.orgId ?? null;
 
   if (!allowed) {
@@ -507,53 +611,11 @@ app.post("/api/auth/magic/request", handler(async (c) => {
       detail: "Address is not on the org's allowed domains, so no email was sent." });
   }
 
-  if (allowed) {
-    const token = await issueToken(address, kind, intent);
-    const link = `${appOrigin(c)}/api/auth/magic/callback?token=${token}`;
-    const reset = kind === "reset";
-    const { html, text } = renderEmail({
-      preheader: reset
-        ? "Set a new password — the link works once and expires in 20 minutes."
-        : "Sign in — the link works once and expires in 20 minutes.",
-      heading: reset ? "Set a new password" : "Sign in to Notesanity",
-      body: [
-        reset
-          ? "Someone asked to reset the password for this address. Use the button below to choose a new one."
-          : "Use the button below to sign in. It works once, and only for the next 20 minutes.",
-      ],
-      action: { label: reset ? "Set a new password" : "Sign in to Notesanity", url: link },
-      note: "If you didn't ask for this, you can ignore this email — nothing will change.",
-    });
-    try {
-      const result = await mailer.send({
-        to: address,
-        subject: reset ? "Reset your Notesanity password" : "Your Notesanity sign-in link",
-        text,
-        html,
-      });
-      // The provider reports failure by return value as well as by throwing.
-      if (result && result.success === false) {
-        await logMail({ address, kind, status: "failed", orgId, detail: "Provider reported the send as unsuccessful." });
-      } else {
-        await logMail({ address, kind, status: "sent", orgId, detail: result?.messageId ?? "" });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // Three sends a minute, per project — a staff room signing in together
-      // hits it easily, and the failure is otherwise completely silent.
-      const limited = message.includes("PLUGIN_RATE_LIMIT_EXCEEDED");
-      await logMail({
-        address, kind, orgId,
-        status: limited ? "rate_limited" : "failed",
-        detail: limited ? "Hit the 3-per-minute send limit. Ask them to try again in a minute." : message,
-      });
-      console.error("magic link send failed", message);
-    }
-  }
+  const devLink = allowed ? await sendLink(c, address, kind, intent, orgId) : null;
 
   // Same answer either way — whether the address can sign in is not something
   // this endpoint will reveal. It no longer claims to have *sent* anything.
-  return c.json({ ok: true });
+  return c.json({ ok: true, ...(devLink ? { devLink } : {}) });
 }));
 
 app.get("/api/auth/magic/callback", handler(async (c) => {
@@ -568,20 +630,36 @@ app.get("/api/auth/magic/callback", handler(async (c) => {
     return c.redirect("/?auth_error=link_expired", 302);
   }
 
-  await db.prepare(`UPDATE auth_tokens SET used_at = ? WHERE id = ?`).bind(now(), row.id).run();
+  // Claimed in one statement, so two clicks at once can't both get in. The
+  // held password leaves the table with it.
+  const claimed = await db
+    .prepare(`UPDATE auth_tokens SET used_at = ?, pending_password = NULL WHERE id = ? AND used_at IS NULL`)
+    .bind(now(), row.id)
+    .run();
+  if (!(claimed.meta?.changes ?? 0)) return c.redirect("/?auth_error=link_expired", 302);
 
   let user;
   let intent: Intent = {};
   try { intent = row.intent ? readIntent(JSON.parse(row.intent)) : {}; } catch { /* an old token: no door */ }
+  let pending: { hash: string; salt: string; iterations: number; name?: string } | null = null;
+  try { pending = row.purpose === "verify" && row.pending_password ? JSON.parse(row.pending_password) : null; } catch { pending = null; }
   try {
-    user = await findOrCreateUser(row.email, undefined, intent);
+    user = await findOrCreateUser(row.email, pending?.name || undefined, intent);
     await claimCode(user, intent);
     await joinWithCode(user, intent);
   } catch {
     return c.redirect("/?auth_error=not_allowed", 302);
   }
+  // Signing up: the address is proven now, so the password chosen with it is
+  // kept — unless the account already has one, which a sign-up never replaces.
+  if (pending) {
+    await db
+      .prepare(`INSERT OR IGNORE INTO credentials (user_id, password_hash, salt, iterations, updated_at) VALUES (?, ?, ?, ?, ?)`)
+      .bind(user.id, pending.hash, pending.salt, pending.iterations, now())
+      .run();
+  }
   await db.prepare(`UPDATE users SET last_seen_at = ? WHERE id = ?`).bind(now(), user.id).run();
-  await startSession(c, user.id);
+  await startSession(c, user.id, { reset: row.purpose === "reset" });
 
   // A reset link lands on the page where a new password can be chosen.
   return c.redirect(row.purpose === "reset" ? "/settings?reset=1" : "/", 302);
@@ -589,10 +667,28 @@ app.get("/api/auth/magic/callback", handler(async (c) => {
 
 // ---------------------------------------------------------------- session
 
+function sessionCookie(c: Context): string {
+  const raw = c.req.header("Cookie") ?? "";
+  return raw.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`))?.[1] ?? "";
+}
+
+/**
+ * Signing out of a support session ends it too, so a shared machine isn't left
+ * showing someone else's account for the rest of its half hour.
+ */
+async function endImpersonation(c: Context) {
+  const raw = c.req.header("Cookie") ?? "";
+  const id = raw.match(/(?:^|;\s*)notesanity_impersonate=([^;]+)/)?.[1];
+  if (!id) return;
+  await db.prepare(`UPDATE impersonation_sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL`).bind(now(), id).run();
+  clearImpersonateCookie(c);
+}
+
 app.post("/api/auth/signout", handler(async (c) => {
   const raw = c.req.header("Cookie") ?? "";
   const match = raw.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
   if (match) await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(match[1]).run();
+  await endImpersonation(c);
   clearSessionCookie(c);
   return c.json({ ok: true });
 }));
@@ -610,6 +706,7 @@ app.get("/api/auth/leave", handler(async (c) => {
   const raw = c.req.header("Cookie") ?? "";
   const match = raw.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
   if (match) await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(match[1]).run();
+  await endImpersonation(c);
   clearSessionCookie(c);
   return c.redirect("/", 302);
 }));

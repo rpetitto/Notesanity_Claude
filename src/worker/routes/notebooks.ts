@@ -1,6 +1,6 @@
 import { app, db, storage } from "../platform";
 import {
-  handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, requireTeacher, HttpError, param,} from "../lib/session";
+  fileHeaders, handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, requireTeacher, HttpError, param,} from "../lib/session";
 import { fieldContent, importedLinks, linkLabel } from "../lib/links";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import type { LibraryField } from "../lib/page-library";
@@ -153,17 +153,24 @@ app.post("/api/notebooks/:id/assets", handler(async (c) => {
 
 /** Stream a source PDF to any class member. */
 app.get("/api/notebooks/:id/asset", handler(async (c) => {
-  const { nb } = await notebookAccess(c, param(c, "id"));
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
   const key = c.req.query("key") || nb.asset_key;
   if (!key || !String(key).startsWith(`notebooks/${nb.id}/`)) throw new HttpError(400, "Invalid asset key");
+  // This route serves page documents. To anyone but a teacher of the
+  // notebook that means the document behind a page they can see — not ink,
+  // uploads or recordings that happen to share the prefix.
+  if (!isTeacher) {
+    const shown = await db
+      .prepare(`SELECT 1 AS yes FROM pages WHERE notebook_id = ? AND asset_key = ? AND archived = 0 LIMIT 1`)
+      .bind(nb.id, key)
+      .first();
+    if (!shown) throw new HttpError(404, "Asset not found");
+  }
   const obj = await storage.get(key);
   if (!obj) throw new HttpError(404, "Asset not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: {
-      "Content-Type": "application/pdf",
-      // Immutable: asset keys are content-addressed by uuid and never rewritten.
-      "Cache-Control": "private, max-age=31536000, immutable",
-    },
+    // Immutable: asset keys are content-addressed by uuid and never rewritten.
+    headers: fileHeaders("application/pdf", "private, max-age=31536000, immutable"),
   });
 }));
 
@@ -263,6 +270,14 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
   }>();
   const assetKey = body.assetKey || nb.asset_key;
   if (!assetKey) throw new HttpError(400, "No asset to draw pages from");
+  // A page draws on a document this notebook owns: one just uploaded to it,
+  // or one its pages already use. Any other key would let a page — and
+  // everything that copies pages — reach into another notebook's files.
+  if (assetKey !== nb.asset_key && !new RegExp(`^notebooks/${nb.id}/[0-9a-f-]{36}\\.pdf$`).test(assetKey)) {
+    const used = await db.prepare(`SELECT 1 AS yes FROM pages WHERE notebook_id = ? AND asset_key = ? LIMIT 1`).bind(nb.id, assetKey).first();
+    if (!used) throw new HttpError(400, "That document doesn't belong to this notebook");
+  }
+  if ((body.pages?.length ?? 0) > 500) throw new HttpError(400, "Add at most 500 pages at a time");
 
   const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, body.pages?.length ?? 1);
 
@@ -844,8 +859,9 @@ app.get("/api/notebooks/:id/assignments", handler(async (c) => {
 app.post("/api/notebooks/:id/reorder", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const { pageIds } = await c.req.json<{ pageIds: string[] }>();
+  if (!Array.isArray(pageIds) || pageIds.length > 2000) throw new HttpError(400, "Send the notebook's pages in order");
   let seq = 1;
-  for (const pid of pageIds ?? []) {
+  for (const pid of pageIds) {
     await db.prepare(`UPDATE pages SET seq = ? WHERE id = ? AND notebook_id = ?`).bind(seq++, pid, nb.id).run();
   }
   await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
@@ -1039,10 +1055,7 @@ app.get("/api/notebooks/:id/comment-audio", handler(async (c) => {
   const obj = await storage.get(key);
   if (!obj) throw new HttpError(404, "Recording not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: {
-      "Content-Type": obj.contentType || "audio/webm",
-      "Cache-Control": "private, max-age=31536000, immutable",
-    },
+    headers: fileHeaders(obj.contentType || "audio/webm", "private, max-age=31536000, immutable"),
   });
 }));
 
@@ -1058,7 +1071,8 @@ app.post("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
   const form = await c.req.parseBody();
   const file = form["file"] as File | undefined;
   if (!file) throw new HttpError(400, "No image uploaded");
-  if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) throw new HttpError(400, "That needs to be an image file");
+  // No SVG: it's a document that can carry script, not a picture.
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new HttpError(400, "That needs to be a PNG, JPEG, WebP or GIF image");
   if (file.size > MAX_FIELD_MEDIA_BYTES) throw new HttpError(413, "Images are limited to 6MB");
 
   const key = `notebooks/${nb.id}/fields/${fieldId}-${uid()}`;
@@ -1080,7 +1094,7 @@ app.get("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
   const obj = await storage.get(field.media_key);
   if (!obj) throw new HttpError(404, "Image not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: { "Content-Type": obj.contentType ?? "image/png", "Cache-Control": "private, max-age=3600" },
+    headers: fileHeaders(obj.contentType ?? "image/png", "private, max-age=3600"),
   });
 }));
 
@@ -1187,10 +1201,7 @@ app.get("/api/notebooks/:id/cover", handler(async (c) => {
   const obj = await storage.get(nb.cover_key);
   if (!obj) throw new HttpError(404, "Cover not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: {
-      "Content-Type": obj.contentType ?? "image/png",
-      "Cache-Control": "private, max-age=3600",
-    },
+    headers: fileHeaders(obj.contentType ?? "image/png", "private, max-age=3600"),
   });
 }));
 
@@ -1284,6 +1295,9 @@ app.post("/api/notebooks/:id/discard-drafts", handler(async (c) => {
  */
 app.post("/api/notebooks/:id/publish", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
+  // Publishing hands a copy to every student in the class — a class notebook's
+  // business only. A student's own notebook is already theirs.
+  if ((nb.kind ?? "class") !== "class") throw new HttpError(400, "Only a class notebook is published to students");
 
   const since = nb.last_published_at ?? "";
   const stamp = now();
@@ -1329,14 +1343,16 @@ app.get("/api/my/notebooks", handler(async (c) => {
   const rows = await db
     .prepare(
       `SELECT n.id, n.title, n.page_count, n.updated_at, n.accent_color AS notebook_color,
-              n.cover_key, c.id AS class_id, c.name AS class_name, c.accent_color
+              n.cover_key IS NOT NULL AS has_cover, c.id AS class_id, c.name AS class_name, c.accent_color
          FROM notebooks n
          JOIN classes c ON c.id = n.class_id
          JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active'
-        WHERE n.status = 'published' AND c.archived = 0
+        WHERE n.status = 'published' AND n.archived = 0 AND c.archived = 0
+          -- The class's notebooks, and the caller's own book — never a classmate's.
+          AND (COALESCE(n.kind, 'class') = 'class' OR (n.kind = 'student' AND n.owner_id = ?))
         ORDER BY n.updated_at DESC`,
     )
-    .bind(user.id)
+    .bind(user.id, user.id)
     .all();
   return c.json({ notebooks: rows.results ?? [] });
 }));

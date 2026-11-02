@@ -1,6 +1,6 @@
 import { app, db } from "../platform";
 import { email as mailer } from "../platform/email";
-import { HttpError, handler, param, requireClassTeacher, requireUser } from "../lib/session";
+import { HttpError, handler, param, requireClassTeacher, requireUser, throttle } from "../lib/session";
 import { renderEmail } from "../lib/email";
 import { logMail } from "../lib/maillog";
 import {
@@ -30,6 +30,7 @@ const familyLink = (c: any, code: string) => `${appOrigin(c)}/family?code=${form
 
 /** Checked before anyone signs in, so the page can say whose code it is. */
 app.get("/api/family/code/:code", handler(async (c) => {
+  await throttle(c, "strict", "family-code");
   const holder = await lookupCode(param(c, "code"));
   if (!holder) return c.json({ valid: false });
   if (!holder.familyAccess) return c.json({ valid: false, reason: "Your child's school hasn't turned on family access yet." });
@@ -42,6 +43,7 @@ app.post("/api/family/link", handler(async (c) => {
   const user = await requireUser(c);
   if (user.role === "student") throw new HttpError(403, "Family codes are for parents and guardians, not student accounts.");
   const { code } = await c.req.json<{ code?: string }>();
+  await throttle(c, "strict", "family-link", user.id);
   const holder = await requireCode(code);
   await linkGuardian(user.id, holder);
   return c.json({ ok: true, studentId: holder.studentId });
@@ -103,6 +105,7 @@ async function requireChild(c: any, studentId: string) {
       `SELECT u.name, o.family_access FROM guardian_links g
          JOIN users u ON u.id = g.student_id
          JOIN orgs o ON o.id = g.org_id
+         JOIN users p ON p.id = g.guardian_id AND p.role IN ('guardian', 'teacher')
         WHERE g.guardian_id = ? AND g.student_id = ?`,
     )
     .bind(user.id, studentId)

@@ -155,7 +155,8 @@ export default function Landing({ error }: { error?: Error | null }) {
       register
         ? api.post("/api/auth/password/register", { email, password, name, ...intent() })
         : api.post("/api/auth/password/login", { email, password, ...intent() }),
-    onSuccess: () => { window.location.href = "/"; },
+    // Signing up mails a link that proves the address; signing in goes straight in.
+    onSuccess: () => { if (register) setLinkSent(true); else window.location.href = "/"; },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -222,11 +223,18 @@ export default function Landing({ error }: { error?: Error | null }) {
                 <Check className="h-7 w-7 text-pine" strokeWidth={2.5} />
               </div>
               <h1 className="mt-4 text-[22px]">Check your email</h1>
-              <p className="measure mx-auto mt-2 text-pine/75">
-                If <span className="font-bold">{email}</span> can sign in, there's a link waiting. It works once and
-                expires in 20 minutes.
-              </p>
-              <Button className="mt-5" onClick={() => { setLinkSent(false); sendLink.reset(); }}>
+              {register ? (
+                <p className="measure mx-auto mt-2 text-pine/75">
+                  To finish signing up, open the link we sent to <span className="font-bold">{email}</span>. Your
+                  account and password are set up when you do. The link works once and expires in 20 minutes.
+                </p>
+              ) : (
+                <p className="measure mx-auto mt-2 text-pine/75">
+                  If <span className="font-bold">{email}</span> can sign in, there's a link waiting. It works once and
+                  expires in 20 minutes.
+                </p>
+              )}
+              <Button className="mt-5" onClick={() => { setLinkSent(false); sendLink.reset(); withPassword.reset(); }}>
                 Use a different address
               </Button>
             </div>

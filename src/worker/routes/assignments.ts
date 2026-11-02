@@ -8,6 +8,14 @@ async function loadAssignment(c: any, assignmentId: string) {
   const a = await db.prepare(`SELECT * FROM assignments WHERE id = ?`).bind(assignmentId).first<any>();
   if (!a) throw new HttpError(404, "Assignment not found");
   const { user, isTeacher } = await requireClassMember(c, a.class_id);
+  // To a student, an assignment exists once it's live: active, past its
+  // release time, on a published notebook. Before then its id opens nothing —
+  // the same rule the class's assignment list already follows.
+  if (!isTeacher) {
+    const released = !a.release_at || new Date(String(a.release_at).includes("T") ? a.release_at : `${a.release_at.replace(" ", "T")}Z`).getTime() <= Date.now();
+    const nb = await db.prepare(`SELECT status FROM notebooks WHERE id = ?`).bind(a.notebook_id).first<{ status: string }>();
+    if (a.status !== "active" || !released || nb?.status !== "published") throw new HttpError(404, "Assignment not found");
+  }
   return { a, user, isTeacher };
 }
 
@@ -615,6 +623,14 @@ app.post("/api/assignments/:id/grade", handler(async (c) => {
     .prepare(`SELECT id FROM submissions WHERE assignment_id = ? AND student_id = ?`)
     .bind(a.id, b.studentId)
     .first<{ id: string }>();
+  // A grade goes to someone in this class, never to an id from anywhere else.
+  if (!existing) {
+    const enrolled = await db
+      .prepare(`SELECT 1 AS yes FROM enrollments WHERE class_id = ? AND user_id = ? AND role = 'student' AND status = 'active'`)
+      .bind(a.class_id, String(b.studentId ?? ""))
+      .first();
+    if (!enrolled) throw new HttpError(404, "That student isn't in this class");
+  }
   const completeVal = b.complete === null || b.complete === undefined ? null : b.complete ? 1 : 0;
   if (existing) {
     await db
@@ -776,7 +792,7 @@ app.get("/api/classes/:id/gradebook", handler(async (c) => {
   const classId = param(c, "id");
   await requireClassTeacher(c, classId);
   const assignments = await db
-    .prepare(`SELECT id, title, grading, points_max, due_at FROM assignments WHERE class_id = ? AND status = 'active' ORDER BY COALESCE(due_at, created_at)`)
+    .prepare(`SELECT id, title, grading, points_max, due_at, created_at FROM assignments WHERE class_id = ? AND status = 'active' ORDER BY COALESCE(due_at, created_at)`)
     .bind(classId)
     .all<any>();
   const students = await db
@@ -891,7 +907,10 @@ app.get("/api/classes/:id/gradebook.csv", handler(async (c) => {
   for (const s of subs.results ?? []) map.set(key(s.assignment_id, s.student_id), s);
 
   const esc = (v: any) => {
-    const s = v === null || v === undefined ? "" : String(v);
+    let s = v === null || v === undefined ? "" : String(v);
+    // A cell that starts like a formula is run by a spreadsheet; names and
+    // titles come from people, so they're made plain text first.
+    if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
 

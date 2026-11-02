@@ -22,7 +22,7 @@ import { SUPERADMIN_EMAILS } from "../schema";
 import { page } from "../lib/paging";
 import { guideMasterId } from "./templates";
 import { PLANS, type PlanKey } from "../../shared/plans.mjs";
-import { PUBLIC_MAIL_DOMAINS } from "../lib/session";
+import { PUBLIC_MAIL_DOMAINS, checkSchoolDomains } from "../lib/session";
 import { TRASH_DAYS, purgeExpired, restore, trashNotebook, trashOrg, trashUser } from "../lib/trash";
 
 export async function requireSuperadmin(c: any) {
@@ -153,19 +153,27 @@ app.post("/api/admin/orgs", handler(async (c) => {
   if (!name) throw new HttpError(400, "Give the school a name");
   if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) throw new HttpError(400, "That doesn't look like an email domain");
 
+  if (PUBLIC_MAIL_DOMAINS.has(domain)) throw new HttpError(400, `${domain} is a personal-mail domain; it can't belong to a school.`);
   const clash = await db
-    .prepare(`SELECT name FROM orgs WHERE lower(primary_domain) = ?`)
-    .bind(domain)
+    .prepare(
+      `SELECT name FROM orgs WHERE lower(primary_domain) = ?
+          OR ',' || lower(replace(teacher_domains, ' ', '')) || ',' LIKE ?
+          OR ',' || lower(replace(student_domains, ' ', '')) || ',' LIKE ? LIMIT 1`,
+    )
+    .bind(domain, `%,${domain},%`, `%,${domain},%`)
     .first<{ name: string }>();
   if (clash) throw new HttpError(409, `${domain} already belongs to ${clash.name}`);
 
   const id = uid();
+  const draft = { id, primary_domain: domain };
+  const teacherDomains = await checkSchoolDomains(b.teacherDomains ?? "", draft, { anyDomain: true });
+  const studentDomains = await checkSchoolDomains(b.studentDomains ?? "", draft, { anyDomain: true });
   await db
     .prepare(
       `INSERT INTO orgs (id, name, primary_domain, teacher_domains, student_domains, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, name, domain, (b.teacherDomains ?? "").trim(), (b.studentDomains ?? "").trim(), now())
+    .bind(id, name, domain, teacherDomains, studentDomains, now())
     .run();
   return c.json({ id });
 }));
@@ -305,8 +313,9 @@ app.post("/api/admin/impersonate", handler(async (c) => {
   if (!targetUserId) throw new HttpError(400, "Choose who to view as");
   if (targetUserId === actor.id) throw new HttpError(400, "You're already signed in as yourself");
 
-  const target = await db.prepare(`SELECT id, name, email FROM users WHERE id = ?`).bind(targetUserId).first<any>();
+  const target = await db.prepare(`SELECT id, name, email, is_superadmin FROM users WHERE id = ?`).bind(targetUserId).first<any>();
   if (!target) throw new HttpError(404, "User not found");
+  if (target.is_superadmin) throw new HttpError(400, "Another platform owner's account can't be viewed as.");
 
   const id = uid();
   const expiresAt = new Date(Date.now() + IMPERSONATE_MINUTES * 60_000).toISOString();
@@ -370,6 +379,16 @@ app.patch("/api/admin/:kind/:id", handler(async (c) => {
     const taken = await db.prepare(`SELECT id FROM orgs WHERE lower(primary_domain) = ? AND id <> ?`).bind(domain, id).first();
     if (taken) throw new HttpError(409, `Another school already uses ${domain}.`);
     value = domain;
+  }
+
+  // The lists decide where sign-ups land too: real domains, nobody else's.
+  if (kind === "orgs" && (body.column === "teacher_domains" || body.column === "student_domains")) {
+    const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(id).first<any>();
+    if (!org) throw new HttpError(404, "School not found");
+    value = await checkSchoolDomains(String(value ?? ""), org, { anyDomain: true });
+  }
+  if (kind === "users" && body.column === "role" && !["teacher", "student", "pending", "guardian"].includes(String(value))) {
+    throw new HttpError(400, "Role is teacher, student, pending or guardian.");
   }
 
   await db

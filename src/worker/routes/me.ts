@@ -2,7 +2,7 @@ import { app, currentScope, db } from "../platform";
 import { giveGuideOnce } from "./templates";
 import { billingConfigured } from "../platform/billing";
 import { BETA_FREE, PLANS } from "../../shared/plans.mjs";
-import { currentUser, handler, now, requireUser, HttpError, activeImpersonation, orgForDomain, uid } from "../lib/session";
+import { checkSchoolDomains, currentUser, handler, now, requireUser, HttpError, activeImpersonation, orgForDomain, uid } from "../lib/session";
 import { linkGuardian, requireCode } from "../lib/family";
 import { planForUser, notebooksUsedStatement, quotaFrom, departmentFor, requirePlan } from "../lib/plans";
 
@@ -188,12 +188,16 @@ app.patch("/api/org", handler(async (c) => {
   if (org.solo && ((body.teacherDomains ?? "") !== "" || (body.studentDomains ?? "") !== "")) {
     throw new HttpError(403, "A personal classroom can't claim email domains. Ask us to set up your school instead.");
   }
+  // Whoever owns a domain gets its sign-ups: checked against every other
+  // school, and limited to the school's own domain unless the platform adds more.
+  const teacherDomains = body.teacherDomains === undefined ? org.teacher_domains : await checkSchoolDomains(body.teacherDomains, org);
+  const studentDomains = body.studentDomains === undefined ? org.student_domains : await checkSchoolDomains(body.studentDomains, org);
   await db
     .prepare(`UPDATE orgs SET name = ?, teacher_domains = ?, student_domains = ?, family_access = ? WHERE id = ?`)
     .bind(
       body.name ?? org.name,
-      body.teacherDomains ?? org.teacher_domains,
-      body.studentDomains ?? org.student_domains,
+      teacherDomains,
+      studentDomains,
       body.familyAccess === undefined ? org.family_access ?? 1 : body.familyAccess ? 1 : 0,
       org.id,
     )

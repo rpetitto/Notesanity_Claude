@@ -38,6 +38,20 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "November 2, 2026",
+    "A gradebook that reads like one, and a round of work on who can see and change what.",
+    [
+      ["better", "<b>The gradebook is a real grade table.</b> Students down the left, surname first, and a column for each assignment across, newest first, with its date, title and maximum score. Handed-in work waiting for a grade is yellow, missing work is red, and a score under 60% is red. Each student gets a running average, each assignment a class average and median, and any cell opens that student's work on that assignment."],
+      ["better", "<b>Setting up a password confirms your email first.</b> We send a link, and your account and password are set up when you open it. Before this, anyone could set a password for an address they didn't own."],
+      ["fixed", "<b>Forgot password didn't let you set a new one.</b> The reset link now opens a page where you choose a new password without the old one, and saving it signs you out on every other device. <b>Settings</b> has a place to add or change a password any time."],
+      ["better", "<b>Schools stay apart.</b> A teacher can no longer create accounts for another school's addresses or add another school's students, and a school admin can add only their own domain and its subdomains. A co-teacher who's been removed from a class can't rejoin with its code, and only a class's own teacher can delete it."],
+      ["better", "<b>Guessing is slowed down.</b> Passwords, sign-in links, class codes and family codes are limited to a handful of tries a minute. A family code can't be used by a student, or by a teacher of that student."],
+      ["fixed", "<b>Students could change an uploaded photo or recording after handing work in.</b> Uploads are locked with the rest of the page now, until you reopen it."],
+      ["fixed", "<b>A student's notebook list included classmates' own notebooks</b> (titles only, never their contents). It now shows only the class's notebooks and their own."],
+      ["better", "<b>Pictures are PNG, JPEG, WebP or GIF.</b> SVG files are no longer accepted, because they can carry code."],
+    ],
+  ],
+  [
     "October 22, 2026",
     "Describe a worksheet and get one with the answer boxes on it, and print any pages you like.",
     [

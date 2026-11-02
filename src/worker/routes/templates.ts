@@ -245,7 +245,9 @@ async function copyPages(
   const limit = limiter(6);
   const copiedAssets = new Map<string, string>();
   await Promise.all(
-    [...new Set(pages.map((tp) => tp.asset_key).filter(Boolean))].map(async (src: string) => {
+    // Only documents under the template's own prefix are copied; a key
+    // pointing anywhere else is left behind rather than followed.
+    [...new Set(pages.filter((tp) => tp.asset_key && tp.asset_key.startsWith(`notebooks/${tp.notebook_id}/`)).map((tp) => tp.asset_key))].map(async (src: string) => {
       const dst = `notebooks/${copyId}/tpl-${flatten(src)}`;
       await limit(() => storage.copy(src, dst));
       copiedAssets.set(src, dst);
@@ -421,8 +423,14 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
   const user = await requireTeacher(c);
   const template = await ownedTemplate(user.id, param(c, "id"));
   const copies = await db
-    .prepare(`SELECT n.* FROM notebooks n JOIN classes c ON c.id = n.class_id WHERE n.template_id = ? AND n.owner_id = ? AND c.archived = 0`)
-    .bind(template.id, user.id)
+    // Only copies in classes they still teach: a co-teacher taken off a class
+    // stops reaching into it, even with the copy they once made there.
+    .prepare(
+      `SELECT n.* FROM notebooks n JOIN classes c ON c.id = n.class_id
+        WHERE n.template_id = ? AND n.owner_id = ? AND c.archived = 0
+          AND (c.owner_id = ? OR EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id = c.id AND e.user_id = ? AND e.role = 'teacher' AND e.status = 'active'))`,
+    )
+    .bind(template.id, user.id, user.id, user.id)
     .all<any>();
 
   const contents = await templateContents(template.id);

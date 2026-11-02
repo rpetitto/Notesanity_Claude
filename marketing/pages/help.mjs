@@ -73,7 +73,11 @@ const BODY = () => `
         "How do I sign in?",
         `Three ways: <b>Continue with Google</b> using your school account, a
          <b>sign-in link</b> emailed to you, or an email and password. They all reach the same
-         account — the address is what identifies you, not the method.`,
+         account — the address is what identifies you, not the method. Setting up a password
+         sends a link to confirm the address first; your password works once you've opened it.
+         Forgot it? <b>Forgotten it?</b> on the sign-in page emails a link, and the page it opens lets you choose a
+         new one, which signs you out everywhere else. You can add or change a password any time
+         in <b>Settings</b>.`,
       ],
       [
         "Why hasn't my sign-in link arrived?",
@@ -431,7 +435,19 @@ const BODY = () => `
          have admin rights. It covers your approved sign-in domains, everyone at your school,
          your sign-in email delivery, and a read-only look at your school's notebooks,
          assignments and grades. It only shows your own school — an admin can't see another
-         school's people or work.`,
+         school's people or work. You can add your own domain and its subdomains (like
+         students.yourschool.org); a domain that isn't, or that another school already uses, is
+         added by us, so nobody can claim a school's addresses.`,
+      ],
+      [
+        "How do I read the gradebook?",
+        `Students go down the left, surname first, and each assignment is a column across, newest
+         first, with its date, title and maximum score. A yellow cell has been handed in and is
+         waiting for a grade, a red one is past due with nothing handed in, and a red number is
+         under 60%. <b>Average</b> is points earned out of points possible on graded work —
+         complete counts as full marks, incomplete as none, and letter grades aren't averaged. Click
+         any cell to open that student's work on that assignment, or <b>Download CSV</b> for a
+         spreadsheet.`,
       ],
       [
         "Is there a limit on how many notebooks I can make?",

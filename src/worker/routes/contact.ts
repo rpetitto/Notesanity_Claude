@@ -29,7 +29,7 @@
 
 import { app, db } from "../platform";
 import { email as mailer } from "../platform/email";
-import { handler, now, uid, HttpError } from "../lib/session";
+import { handler, now, uid, HttpError, throttle } from "../lib/session";
 
 /** Long enough to stop a loop, short enough that a real correction isn't blocked. */
 const COOLDOWN_SECONDS = 45;
@@ -60,6 +60,7 @@ class ContactProblem extends HttpError {
 }
 
 app.post("/api/contact", handler(async (c) => {
+  await throttle(c, "strict", "contact");
   const isJson = (c.req.header("Content-Type") ?? "").toLowerCase().includes("application/json");
 
   if (isJson) {

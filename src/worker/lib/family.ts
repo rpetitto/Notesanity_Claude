@@ -67,6 +67,26 @@ export async function requireCode(raw: string | undefined | null): Promise<CodeH
 /** Link someone to a child. Linking twice is harmless. */
 export async function linkGuardian(guardianId: string, holder: CodeHolder, via: "code" | "invite" = "code") {
   if (guardianId === holder.studentId) throw new HttpError(400, "That's your own code — it's for your family to use.");
+  // A code is for a family. A student or an account still choosing its role
+  // can't use one, and a teacher can't use the code of a student they teach —
+  // they see those codes on their class's family page, and redeeming them
+  // would open the student's other classes to them.
+  const who = await db.prepare(`SELECT role FROM users WHERE id = ?`).bind(guardianId).first<{ role: string }>();
+  if (!who || (who.role !== "guardian" && who.role !== "teacher")) {
+    throw new HttpError(403, "Family codes are for parents and guardians. Sign in with the Parent or guardian option.");
+  }
+  if (who.role === "teacher") {
+    const teaches = await db
+      .prepare(
+        `SELECT 1 AS yes FROM enrollments e JOIN classes c ON c.id = e.class_id
+          WHERE e.user_id = ? AND e.role = 'student' AND e.status = 'active'
+            AND (c.owner_id = ? OR EXISTS (SELECT 1 FROM enrollments t WHERE t.class_id = c.id AND t.user_id = ? AND t.role = 'teacher' AND t.status = 'active'))
+          LIMIT 1`,
+      )
+      .bind(holder.studentId, guardianId, guardianId)
+      .first();
+    if (teaches) throw new HttpError(403, "That's the code of a student you teach — it's for their family to use.");
+  }
   await db
     .prepare(
       `INSERT OR IGNORE INTO guardian_links (id, org_id, guardian_id, student_id, via, created_at)
@@ -134,6 +154,7 @@ export async function childrenInClass(userId: string, classId: string): Promise<
       `SELECT g.student_id FROM guardian_links g
          JOIN enrollments e ON e.user_id = g.student_id AND e.class_id = ? AND e.role = 'student' AND e.status = 'active'
          JOIN orgs o ON o.id = g.org_id AND o.family_access = 1
+        JOIN users p ON p.id = g.guardian_id AND p.role IN ('guardian', 'teacher')
         WHERE g.guardian_id = ?`,
     )
     .bind(classId, userId)

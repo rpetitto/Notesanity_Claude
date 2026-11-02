@@ -7,8 +7,11 @@
  * family, then tries the requests each of them must never be able to make,
  * and checks each one is refused.
  *
- *   npx wrangler dev --port 8799 --persist-to /tmp/tenancy-state   (fresh state)
+ *   npx wrangler dev --port 8799 --persist-to /tmp/tenancy-state --var AUTH_DEV_LINKS:1 --var AI_STANDIN:1
  *   node tests/e2e/tenancy.mjs http://localhost:8799
+ *
+ * AUTH_DEV_LINKS hands sign-up and sign-in links back in the response on
+ * localhost, so the test can follow them instead of reading a mailbox.
  *
  * Plain fetch, no browser. Exits non-zero when anything gets through.
  */
@@ -22,11 +25,11 @@ const check = (name, ok, detail = "") => {
 
 function session(label) {
   let cookie = "";
-  const raw = async (method, path, body) => {
+  const raw = async (method, path, body, extraHeaders = {}) => {
     const isForm = body instanceof FormData;
     const r = await fetch(B + path, {
       method,
-      headers: isForm ? { cookie } : { "content-type": "application/json", cookie },
+      headers: { ...(isForm ? { cookie } : { "content-type": "application/json", cookie }), ...extraHeaders },
       body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
       redirect: "manual",
     });
@@ -34,7 +37,14 @@ function session(label) {
     if (sc && /notesanity_session=/.test(sc)) cookie = sc.match(/notesanity_session=[^;]*/)[0];
     const text = await r.text();
     let json; try { json = JSON.parse(text); } catch { json = text; }
-    return { status: r.status, body: json };
+    return { status: r.status, body: json, headers: r.headers };
+  };
+  /** Open a sign-in link as this browser would: the cookie it sets becomes ours. */
+  const follow = async (link) => {
+    const r = await fetch(link, { redirect: "manual", headers: { cookie } });
+    const sc = r.headers.get("set-cookie");
+    if (sc && /notesanity_session=/.test(sc)) cookie = sc.match(/notesanity_session=[^;]*/)[0];
+    return r;
   };
   const call = async (method, path, body) => {
     const r = await raw(method, path, body);
@@ -42,7 +52,9 @@ function session(label) {
     return r.body;
   };
   call.raw = raw;
+  call.follow = follow;
   call.label = label;
+  call.cookie = () => cookie;
   return call;
 }
 
@@ -85,14 +97,21 @@ async function classNotebook(teacher, classId, title, publish = true) {
 
 // ------------------------------------------------------------------ setup
 
+/** Sign up the way a person does: ask, then open the link that arrives. */
+async function signUp(s, body) {
+  const r = await s("POST", "/api/auth/password/register", body);
+  if (!r.devLink) throw new Error(`${s.label}: sign-up sent no link — is wrangler running with --var AUTH_DEV_LINKS:1?`);
+  await s.follow(r.devLink);
+}
+
 const SA = session("superadmin");
-await SA("POST", "/api/auth/password/register", { email: "r.petitto@gmail.com", password: PW, name: "Platform Owner", door: "teacher" });
+await signUp(SA, { email: "r.petitto@gmail.com", password: PW, name: "Platform Owner", door: "teacher" });
 const orgA = (await SA("POST", "/api/admin/orgs", { name: "Alpha School", primaryDomain: "a.edu", teacherDomains: "a.edu", studentDomains: "students.a.edu" })).id;
 const orgB = (await SA("POST", "/api/admin/orgs", { name: "Beta School", primaryDomain: "b.edu", teacherDomains: "b.edu", studentDomains: "students.b.edu" })).id;
 
 const reg = async (label, email, extra = {}) => {
   const s = session(label);
-  await s("POST", "/api/auth/password/register", { email, password: PW, name: label, ...extra });
+  await signUp(s, { email, password: PW, name: label, ...extra });
   s.me = (await s("GET", "/api/me")).user;
   return s;
 };
@@ -212,6 +231,152 @@ for (const path of ["/api/org/notebooks", "/api/org/assignments", "/api/org/grad
   check(`a school admin's ${path} holds only their own school`, !text.includes("A1 Unit") && !text.includes("a.edu") && !text.includes("sa1"), `status ${r.status}`);
 }
 await denied("a teacher who isn't an admin can't read the school's grades", TA2, "GET", "/api/org/grades");
+
+// ------------------------------------------------------------------ signing up proves the address
+
+{
+  // An account a teacher made ahead of time has no password yet — the case
+  // that used to let anyone sign up "as" it.
+  await TA1("POST", `/api/classes/${clsA1.id}/invite`, { emails: ["newkid@students.a.edu"] });
+  const X = session("attacker");
+  const r = await X.raw("POST", "/api/auth/password/register", { email: "newkid@students.a.edu", password: "attacker-password-1", door: "student" });
+  check("sign-up for an existing address doesn't sign the caller in", r.status === 200 && r.body.verify === true && !X.cookie(), `${r.status} cookie=${!!X.cookie()}`);
+  const me = await X.raw("GET", "/api/me");
+  check("…and the caller isn't anyone afterwards", !me.body?.user, JSON.stringify(me.body).slice(0, 80));
+  const login = await X.raw("POST", "/api/auth/password/login", { email: "newkid@students.a.edu", password: "attacker-password-1" });
+  check("…and no password was set on that account", login.status === 401, String(login.status));
+  const Y = session("attacker2");
+  await Y.raw("POST", "/api/auth/password/register", { email: "robert@unropedapps.com", password: "attacker-password-1", door: "teacher" });
+  const users = (await SA("GET", "/api/admin/users?limit=100")).rows.map((u) => u.email);
+  check("sign-up for a platform-owner address makes nothing until the link is opened", !Y.cookie() && !users.includes("robert@unropedapps.com"));
+  const Z = session("crossSite");
+  const cs = await Z.raw("POST", "/api/auth/password/login", { email: "ta1@a.edu", password: PW }, { origin: "https://evil.example" });
+  check("a sign-in posted from another site is refused", cs.status === 403 && !Z.cookie(), String(cs.status));
+}
+
+// ------------------------------------------------------------------ password reset
+
+{
+  const TA2b = session("teacherA2-otherDevice");
+  await TA2b("POST", "/api/auth/password/login", { email: "ta2@a.edu", password: PW });
+  const reset = await session("x")("POST", "/api/auth/magic/request", { email: "ta2@a.edu", purpose: "reset" });
+  const R = session("teacherA2-reset");
+  await R.follow(reset.devLink);
+  const changed = await R.raw("POST", "/api/auth/password/change", { newPassword: "a-brand-new-password" });
+  check("a reset link lets you choose a new password without the old one", changed.status === 200, `${changed.status} ${JSON.stringify(changed.body)}`);
+  const stale = await TA2b.raw("GET", "/api/me");
+  check("…and every other device is signed out", !stale.body?.user);
+  const again = await R.raw("POST", "/api/auth/password/change", { newPassword: "yet-another-password" });
+  check("…and only once: after that the old password is needed again", again.status === 401, String(again.status));
+  const NOPE = session("noReset");
+  await NOPE("POST", "/api/auth/password/login", { email: "ta2@a.edu", password: "a-brand-new-password" });
+  const without = await NOPE.raw("POST", "/api/auth/password/change", { newPassword: "sneaky-new-password" });
+  check("an ordinary session still needs the current password", without.status === 401, String(without.status));
+  // The original TA2 session was signed out by the reset; sign it back in for what follows.
+  await TA2("POST", "/api/auth/password/login", { email: "ta2@a.edu", password: "a-brand-new-password" });
+}
+
+// ------------------------------------------------------------------ school domains
+
+{
+  const c1 = await TA1.raw("PATCH", "/api/org", { teacherDomains: "a.edu, b.edu" });
+  check("a school admin can't claim another school's domain", c1.status === 409, String(c1.status));
+  const c2 = await TA1.raw("PATCH", "/api/org", { studentDomains: "students.a.edu, students.b.edu" });
+  check("…or another school's student domain", c2.status === 409, String(c2.status));
+  const r1 = await TA1.raw("PATCH", "/api/org", { teacherDomains: "a.edu, gmail.com" });
+  check("…or a personal-mail domain", r1.status === 400, String(r1.status));
+  const r2 = await TA1.raw("PATCH", "/api/org", { teacherDomains: "a.edu, unclaimed-district.org" });
+  check("…or a domain nobody has claimed (the platform adds those)", r2.status === 403, String(r2.status));
+  const r3 = await TA1.raw("PATCH", "/api/org", { teacherDomains: "a.edu, staff.a.edu" });
+  check("…but can add a subdomain of their own", r3.status === 200, String(r3.status));
+}
+
+// ------------------------------------------------------------------ rosters across schools
+
+{
+  const r = await SOLO("POST", `/api/classes/${clsSolo.id}/invite`, { emails: ["kid9@students.b.edu"] });
+  const users = (await SA("GET", "/api/admin/users?limit=100")).rows.map((u) => u.email);
+  check("a solo teacher can't make accounts on a school's domain", r.skipped?.length === 1 && !users.includes("kid9@students.b.edu"), JSON.stringify(r));
+  const r2 = await TA1("POST", `/api/classes/${clsA1.id}/invite`, { emails: ["sb@students.b.edu"] });
+  check("inviting another school's existing student gives the same answer", r2.skipped?.[0]?.reason === r.skipped?.[0]?.reason, JSON.stringify(r2.skipped));
+  const r3 = await TA1("POST", `/api/classes/${clsA1.id}/teachers`, { emails: ["sa2@students.a.edu", "parent1@gmail.com"] });
+  check("only teacher accounts become co-teachers (not a student, not a parent)", !r3.added?.length && r3.skipped?.length === 2, JSON.stringify(r3));
+  const r4 = await TA1.raw("POST", `/api/classes/${clsA1.id}/teachers`, { emails: "a@b" });
+  check("the co-teacher list must be a list", r4.status === 400, String(r4.status));
+}
+
+// ------------------------------------------------------------------ co-teachers
+
+{
+  await TA1("POST", `/api/classes/${clsA1.id}/teachers`, { emails: ["ta2@a.edu"] });
+  await denied("a co-teacher can't delete the owner's class", TA2, "DELETE", `/api/classes/${clsA1.id}?confirm=${encodeURIComponent(clsA1.name)}`);
+  await TA1("DELETE", `/api/classes/${clsA1.id}/teachers/${TA2.me.id}`);
+  const code = (await TA1("GET", `/api/classes/${clsA1.id}`)).class.joinCode;
+  await denied("a removed co-teacher can't get back in with the join code", TA2, "POST", "/api/classes/join", { code });
+  await denied("…and is out of the class", TA2, "GET", `/api/classes/${clsA1.id}`);
+}
+
+// ------------------------------------------------------------------ join codes
+
+{
+  const asStudent = await SA1("GET", `/api/classes/${clsA1.id}`);
+  const text = JSON.stringify(asStudent);
+  const code = (await TA1("GET", `/api/classes/${clsA1.id}`)).class.joinCode;
+  check("a student doesn't receive the join code", !text.includes(code) && !("join_code" in asStudent.class));
+  const r = await SB.raw("POST", "/api/classes/join", { code });
+  check("another school's student gets the same answer as a wrong code", r.status === 404 && /No class matches/.test(r.body.error), `${r.status} ${JSON.stringify(r.body)}`);
+}
+
+// ------------------------------------------------------------------ family codes
+
+{
+  const fam2 = await TA1("GET", `/api/classes/${clsA1.id}/family`);
+  const code = fam2.students.find((s) => s.id === SA2.me.id).code;
+  await denied("a teacher can't redeem a family code of a student they teach", TA1, "POST", "/api/family/link", { code });
+  await denied("a student can't redeem a classmate's family code", SA1, "POST", "/api/family/link", { code });
+}
+
+// ------------------------------------------------------------------ files
+
+{
+  const tpl = (await TB("POST", "/api/my/templates", { title: "B template", pages: 1, pattern: "graph", color: "#3F6C9E" })).notebook.id;
+  const r = await TB.raw("POST", `/api/notebooks/${tpl}/pages`, { assetKey: nbA1.assetKey, pages: [{ sourceIndex: 0, width: 612, height: 792 }] });
+  check("a page can't point at another notebook's document", r.status === 400, `${r.status} ${JSON.stringify(r.body)}`);
+  const r2 = await TB.raw("POST", `/api/notebooks/${tpl}/pages`, { assetKey: `notebooks/${nbA1.id}/ink/x/y-student.json`, pages: [{ sourceIndex: 0, width: 612, height: 792 }] });
+  check("…or at another notebook's ink", r2.status === 400, String(r2.status));
+  const tp = (await TB("GET", `/api/notebooks/${tpl}`)).pages[0].id;
+  const fig = (await TB("POST", `/api/notebooks/${tpl}/fields`, { pageId: tp, type: "figure", x: 10, y: 10, w: 100, h: 100 })).field.id;
+  const f = new FormData();
+  f.append("file", new Blob(['<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'], { type: "image/svg+xml" }), "x.svg");
+  const up = await TB.raw("POST", `/api/notebooks/${tpl}/fields/${fig}/media`, f);
+  check("an SVG can't be uploaded as a picture", up.status === 400, String(up.status));
+  const asset = await TA1.raw("GET", `/api/notebooks/${nbA1.id}/asset`);
+  check("uploaded files are served with nosniff and a sandbox",
+    asset.headers.get("x-content-type-options") === "nosniff" && /sandbox/.test(asset.headers.get("content-security-policy") ?? ""));
+  await denied("a student can't fetch a non-page file from a notebook's folder", SA1, "GET", `/api/notebooks/${nbA1.id}/asset?key=${encodeURIComponent(`notebooks/${nbA1.id}/comments/x.webm`)}`);
+}
+
+// ------------------------------------------------------------------ assignments and grades
+
+{
+  const live = (await TA1("POST", `/api/classes/${clsA1.id}/assignments`, { title: "Live one", notebookId: nbA1.id, pageIds: [nbA1.pages[0].id], status: "active", grading: "points", pointsMax: 10 })).assignment?.id;
+  const later = (await TA1("POST", `/api/classes/${clsA1.id}/assignments`, { title: "Not yet", notebookId: nbA1.id, pageIds: [nbA1.pages[1].id], status: "active", releaseAt: new Date(Date.now() + 7 * 86400_000).toISOString() })).assignment?.id;
+  await denied("a teacher can't grade someone who isn't in the class", TA1, "POST", `/api/assignments/${live}/grade`, { studentId: SB.me.id, points: 1 });
+  await denied("a student can't open an assignment before it's released", SA1, "GET", `/api/assignments/${later}`);
+  await denied("…or hand it in", SA1, "POST", `/api/assignments/${later}/submit`, {});
+  const ok = await SA1.raw("GET", `/api/assignments/${live}`);
+  check("a student can open a live assignment", ok.status === 200, String(ok.status));
+}
+
+// ------------------------------------------------------------------ students' own notebooks
+
+{
+  await SA2("POST", `/api/classes/${clsA1.id}/my-notebooks`, { title: "SA2 private journal", pages: 1, pattern: "blank", color: "#000000" });
+  const mine = await SA1("GET", "/api/my/notebooks");
+  check("a student's notebook list doesn't include a classmate's own notebook", !JSON.stringify(mine).includes("SA2 private journal"));
+  const theirs = await SA2("GET", "/api/my/notebooks");
+  check("…but does include their own", JSON.stringify(theirs).includes("SA2 private journal"));
+}
 
 // ------------------------------------------------------------------ result
 

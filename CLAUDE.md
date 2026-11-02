@@ -42,7 +42,13 @@ npx wrangler secret put STRIPE_SECRET_KEY        Stripe; also STRIPE_WEBHOOK_SEC
 npx wrangler secret put AWS_ACCESS_KEY_ID        SES, if switching mail off Cloudflare; also AWS_SECRET_ACCESS_KEY
 npx wrangler secret put ANTHROPIC_API_KEY        Design with AI (Claude); without it the feature says it isn't switched on
 npx wrangler dev --var AI_STANDIN:1              Design with AI against a free stand-in instead of Claude (tests use this)
+npx wrangler dev --var AUTH_DEV_LINKS:1          sign-up/sign-in links come back in the response (localhost only)
+tests/e2e/run.sh tenancy                         end-to-end suites on a fresh local server: tenancy, ai-designer, print, gradebook
 ```
+
+Run `npm run build` before the suites (they drive the built SPA), and run
+`tenancy` after any change to a route: it is the check that schools, teachers,
+students and families stay apart.
 
 Deploying needs Cloudflare credentials in `.cf-credentials` (gitignored):
 `. ./.cf-credentials` first. If that token has been revoked, ask rather than
@@ -76,6 +82,16 @@ names.
   design is made (refunded if it fails); refining a design is free, up to ten
   changes. Only the teacher's description and chosen source material go to
   Anthropic — keep it that way, and keep the privacy page's list in step.
+- **There is no row-level security; every route is the rule.** Use the guards
+  (`requireClassTeacher`, `requireClassMember`, `notebookAccess` +
+  `requireNotebookTeacher`) and tie every id from a request back to the
+  caller's class or notebook in the same WHERE clause. A teacher never creates
+  an account on another school's domain (`addressBelongsElsewhere`), domains
+  go through `checkSchoolDomains`, uploaded files are served with
+  `fileHeaders`, and anything guessable goes through `throttle`.
+- **Signing up proves the address.** A password sign-up is held, hashed, with
+  a single-use link and only becomes an account when the link is opened —
+  never set a password or start a session for an address nobody has proven.
 - **`/api/status` really probes.** Keep it that way — a status page that reports
   a value someone set by hand is worse than none.
 
