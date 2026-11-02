@@ -38,7 +38,7 @@ export function ExportPagesDialog({
 }) {
   const selected = pages.filter((p) => selectedIds.includes(p.id));
   const currentIdx = Math.max(0, pages.findIndex((p) => p.id === currentPageId));
-  const [which, setWhich] = useState<Which>(selected.length > 1 ? "selected" : "current");
+  const [which, setWhich] = useState<Which>(selected.length > 0 ? "selected" : "current");
   const [range, setRange] = useState("");
   const [include, setInclude] = useState(true);
   const [busy, setBusy] = useState<"" | "print" | "download" | "drive">("");

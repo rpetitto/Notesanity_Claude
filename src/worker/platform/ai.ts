@@ -199,7 +199,10 @@ async function askClaude(req: AiPageRequest, previous?: AiDesign, instruction?: 
           },
     );
   }
-  first.push({ type: "text", text: describe(req) });
+  // Cached, with the source above it: a refinement resends exactly this, so
+  // the second and later calls read a long PDF from the cache instead of
+  // paying for every page again.
+  first.push({ type: "text", text: describe(req), cache_control: { type: "ephemeral" } });
 
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: first }];
   if (previous && instruction) {
@@ -304,7 +307,7 @@ function standIn(req: AiPageRequest, previous?: AiDesign, instruction?: string):
 // ---------------------------------------------------------------- checking
 
 /** Anything that could run or reach out, which no worksheet needs. */
-const FORBIDDEN = /<\s*(script|foreignObject|image|iframe|style|use|a)\b|\son[a-z]+\s*=|javascript:|(?:xlink:)?href\s*=\s*["'](?!#)|url\(\s*["']?(?!#)/i;
+const FORBIDDEN = /<!(DOCTYPE|ENTITY)|<\s*(script|foreignObject|image|iframe|style|use|a)\b|\son[a-z]+\s*=|javascript:|(?:xlink:)?href\s*=\s*["'](?!#)|url\(\s*["']?(?!#)/i;
 
 /**
  * Trust nothing about the shape of what came back: the browser draws these

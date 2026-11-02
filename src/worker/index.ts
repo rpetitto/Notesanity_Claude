@@ -32,6 +32,7 @@ import "./routes/contact";
 import "./routes/ai";
 import { drainMailQueue } from "./lib/mailqueue";
 import { purgeExpired } from "./lib/trash";
+import { purgeOldDesigns } from "./routes/ai";
 
 /**
  * Queued mail goes out a few at a time, every minute.
@@ -54,6 +55,12 @@ cron("drain-mail-queue", "* * * * *", async () => {
 cron("purge-trash", "* * * * *", async () => {
   if (new Date().getUTCMinutes() !== 17) return { skipped: true };
   return { purged: await purgeExpired() };
+});
+
+/** AI page designs are scratch work, kept a week for refining and then dropped. Same hourly slot. */
+cron("purge-ai-designs", "* * * * *", async () => {
+  if (new Date().getUTCMinutes() !== 17) return { skipped: true };
+  return { purged: await purgeOldDesigns() };
 });
 
 auth.allow();

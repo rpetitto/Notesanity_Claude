@@ -269,7 +269,7 @@ export default function StudentNotebook() {
           title={`${work.data.notebook.title} - ${student.name}`}
           pages={pages}
           currentPageId={visiblePage}
-          layersFor={(id) => [masterLayers[id], notebookWork.teacherLayers[id], notebookWork.studentLayers[id]].filter(Boolean) as LayerData[]}
+          layersFor={(id) => [masterLayers[id], notebookWork.studentLayers[id], notebookWork.teacherLayers[id]].filter(Boolean) as LayerData[]}
           content={{ fields: work.data.fields, values: notebookWork.fieldValues, studentId }}
           includeLabel={`${student.name}'s writing and answers`}
           onClose={() => setExportOpen(false)}

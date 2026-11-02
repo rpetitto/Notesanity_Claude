@@ -352,7 +352,10 @@ export default function NotebookEditor() {
   // Printing the editor itself would print its toolbars; Ctrl/Cmd+P prints pages.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") { e.preventDefault(); setExportOpen(true); }
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "p") return;
+      e.preventDefault();
+      // Not over another dialog; the one already open stays in charge.
+      if (!document.querySelector('[role="dialog"]')) setExportOpen(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

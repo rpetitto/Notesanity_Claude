@@ -27,6 +27,13 @@ const MAX_SOURCE_TEXT = 30_000;
 /** Base64 runs a third larger than the file: about 10MB of PDF or photo. */
 const MAX_SOURCE_BASE64 = 14_000_000;
 const SOURCE_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
+/**
+ * Every page of an attached PDF is read by the model on every call, refining
+ * included, so a long one is what makes a design expensive. The browser
+ * counts exactly and refuses first; this is a best-effort second check, since
+ * a PDF can tuck its page objects away in compressed streams.
+ */
+const MAX_SOURCE_PAGES = 20;
 /** Designs are scratch work; a week is long enough to come back to one. */
 const KEEP_DESIGNS_MS = 7 * 24 * 3600 * 1000;
 
@@ -91,9 +98,30 @@ function sourceFrom(body: { sourceText?: unknown; sourceFile?: unknown }) {
     if (typeof f.data !== "string" || !f.data || f.data.length > MAX_SOURCE_BASE64 || !/^[A-Za-z0-9+/=]+$/.test(f.data.slice(0, 200))) {
       throw new HttpError(400, "That file is too large. Attach one under 10MB.");
     }
+    if (f.mediaType === "application/pdf" && pdfPagesAtLeast(f.data) > MAX_SOURCE_PAGES) {
+      throw new HttpError(400, `That PDF has more than ${MAX_SOURCE_PAGES} pages. Attach the pages you need, or paste the text.`);
+    }
     sourceFile = { mediaType: f.mediaType, data: f.data };
   }
   return { sourceText: sourceText || undefined, sourceFile };
+}
+
+/** Page objects visible in a PDF's uncompressed parts: a floor on its length, never more than it has. */
+function pdfPagesAtLeast(base64: string): number {
+  try {
+    return (atob(base64).match(/\/Type\s*\/Page(?![a-zA-Z])/g) ?? []).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Designs nobody came back to within a week. Run hourly from the cron. */
+export async function purgeOldDesigns(): Promise<number> {
+  const res = await db
+    .prepare(`DELETE FROM ai_designs WHERE created_at < ?`)
+    .bind(new Date(Date.now() - KEEP_DESIGNS_MS).toISOString())
+    .run();
+  return res.meta?.changes ?? 0;
 }
 
 function aiFailure(c: any, err: unknown) {
@@ -168,14 +196,16 @@ app.post("/api/ai/designs", handler(async (c) => {
   }
 
   const id = uid();
-  const { sourceFile, ...kept } = req;
+  // The source material is never kept: the browser sends it again with each
+  // change, and a teacher's pasted passage has no business in a table.
+  const { sourceFile, sourceText, ...kept } = req;
   await db.batch([
     db.prepare(`DELETE FROM ai_designs WHERE user_id = ? AND created_at < ?`)
       .bind(user.id, new Date(Date.now() - KEEP_DESIGNS_MS).toISOString()),
     db.prepare(
       `INSERT INTO ai_designs (id, user_id, notebook_id, request, result, refinements, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
-    ).bind(id, user.id, nb.id, JSON.stringify({ ...kept, hadFile: !!sourceFile }), JSON.stringify(design), now(), now()),
+    ).bind(id, user.id, nb.id, JSON.stringify({ ...kept, hadSource: !!(sourceFile || sourceText) }), JSON.stringify(design), now(), now()),
   ]);
   return c.json({ id, design, refinementsLeft: MAX_REFINEMENTS, allowance: await allowanceFor(user) });
 }));
@@ -200,8 +230,8 @@ app.post("/api/ai/designs/:id/refine", handler(async (c) => {
   const body = await c.req.json<{ instruction?: string; sourceText?: string; sourceFile?: AiSourceFile }>();
   const instruction = String(body.instruction ?? "").trim();
   if (instruction.length > 1000) throw new HttpError(400, "Keep the change under 1,000 characters");
-  const stored = JSON.parse(row.request) as AiPageRequest & { hadFile?: boolean };
-  const { hadFile: _hadFile, ...base } = stored;
+  const stored = JSON.parse(row.request) as AiPageRequest & { hadSource?: boolean; hadFile?: boolean };
+  const { hadSource: _hadSource, hadFile: _hadFile, sourceText: _oldText, ...base } = stored;
   const req: AiPageRequest = { ...base, ...sourceFrom(body) };
 
   // Claim the refinement before the slow part, so two at once can't both

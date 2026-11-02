@@ -830,11 +830,14 @@ export default function Workspace() {
    */
   const canExport = !!data && (data.isTeacher || data.notebook.allowExport !== false);
   const exportLayers = (pageId: string) =>
-    [masterLayers[pageId], work.teacherLayers[pageId], work.studentLayers[pageId]].filter(Boolean) as LayerData[];
+    [masterLayers[pageId], work.studentLayers[pageId], work.teacherLayers[pageId]].filter(Boolean) as LayerData[];
   useEffect(() => {
     if (!canExport) return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") { e.preventDefault(); setExportOpen(true); }
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "p") return;
+      e.preventDefault();
+      // Not over another dialog; the one already open stays in charge.
+      if (!document.querySelector('[role="dialog"]')) setExportOpen(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { toast } from "sonner";
 import { api, ApiError, type PageRec } from "../lib/api";
 import { cn } from "../lib/utils";
 import { renderPageToCanvas } from "../lib/pdf";
@@ -148,13 +149,19 @@ export function AiPageDesigner({
         pages: sizes.map((s, i) => ({ sourceIndex: i, width: s.width, height: s.height })),
         insertAfterPageId,
       });
-      for (let i = 0; i < created.length; i++) {
-        const answers = design.design.pages[i]?.answers ?? [];
-        if (!answers.length) continue;
-        await api.post(`/api/notebooks/${notebookId}/fields/bulk`, {
-          pageId: created[i],
-          fields: answers.map((x) => ({ type: x.kind, x: x.x, y: x.y, w: x.w, h: x.h, label: x.label })),
-        });
+      // The pages exist from here on, so nothing below may leave the dialog
+      // open with Add still offered: a second press would add them twice.
+      try {
+        for (let i = 0; i < created.length; i++) {
+          const answers = design.design.pages[i]?.answers ?? [];
+          if (!answers.length) continue;
+          await api.post(`/api/notebooks/${notebookId}/fields/bulk`, {
+            pageId: created[i],
+            fields: answers.map((x) => ({ type: x.kind, x: x.x, y: x.y, w: x.w, h: x.h, label: x.label })),
+          });
+        }
+      } catch {
+        toast.error("The page was added, but some answer boxes couldn't be placed. Add them with Find blanks on this page.");
       }
       onAdded(created);
     } catch (e) {

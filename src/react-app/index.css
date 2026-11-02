@@ -200,12 +200,15 @@ a {
 
 /* Printing from Notesanity prints the pages and nothing else: the rendered
    sheets go into #print-root (see lib/exportPdf.ts), one per sheet, edge to
-   edge, and everything else on screen is hidden for the duration. */
+   edge, and everything else on screen is hidden for the duration. Scoped to
+   the class set while that happens, so printing any other screen from the
+   browser's own menu still prints what's on it. */
 #print-root { display: none; }
+/* A named page, so only these sheets lose the margins. */
+@page notesanity-sheet { margin: 0; }
 @media print {
-  @page { margin: 0; }
-  body > *:not(#print-root) { display: none !important; }
-  #print-root { display: block; }
+  html.printing-pages body > *:not(#print-root) { display: none !important; }
+  html.printing-pages #print-root { display: block; page: notesanity-sheet; }
   #print-root img { display: block; width: 100%; height: auto; break-after: page; page-break-after: always; }
   #print-root img:last-child { break-after: auto; page-break-after: auto; }
 }

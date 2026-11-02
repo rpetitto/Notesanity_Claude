@@ -97,6 +97,10 @@ export async function designToPdf(design: AiDesign): Promise<{ pdf: Blob; sizes:
 export async function sourceFileFor(file: File): Promise<{ mediaType: string; data: string }> {
   if (file.type === "application/pdf") {
     if (file.size > 10 * 1024 * 1024) throw new Error("That PDF is over 10MB. Attach a shorter one, or paste the text.");
+    // The designer reads every page on every change, so a long PDF is refused
+    // here rather than paid for over and over.
+    const { readPageSizes } = await import("./pdf");
+    if ((await readPageSizes(file)).length > 20) throw new Error("That PDF has more than 20 pages. Attach the pages you need, or paste the text.");
     return { mediaType: "application/pdf", data: await base64Of(file) };
   }
   if (!file.type.startsWith("image/")) throw new Error("Attach a PDF or a photo.");

@@ -408,8 +408,10 @@ export async function printNotebookPages(
     onProgress?.(i + 1, pages.length);
   }
   document.body.appendChild(root);
+  document.documentElement.classList.add("printing-pages");
   await Promise.all(Array.from(root.querySelectorAll("img")).map((img) => img.decode().catch(() => {})));
   const cleanup = () => {
+    document.documentElement.classList.remove("printing-pages");
     root.remove();
     urls.forEach((u) => URL.revokeObjectURL(u));
     window.removeEventListener("afterprint", cleanup);
