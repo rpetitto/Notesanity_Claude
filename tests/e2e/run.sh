@@ -34,5 +34,6 @@ case "$SUITE" in
   live)        node tests/e2e/live.mjs "$URL" "$PDF" "$SHOTS" ;;
   share)       node tests/e2e/share.mjs "$URL" "$PDF" "$SHOTS" ;;
   sso)         node tests/e2e/sso.mjs "$URL" "$SHOTS" ;;
+  demo)        node scripts/record-demo.mjs "$URL" public/media ;;   # the landing page's recording, not a test
   *) echo "unknown suite: $SUITE"; exit 2 ;;
 esac

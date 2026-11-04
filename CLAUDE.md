@@ -47,6 +47,7 @@ npx wrangler secret put CLEVER_CLIENT_ID          Clever sign-in; also CLEVER_CL
 npx wrangler dev --var SSO_STANDIN:1             Clever and ClassLink against a local stand-in page (localhost only; tests use this)
 npx wrangler dev --var AUTH_DEV_LINKS:1          sign-up/sign-in links come back in the response (localhost only)
 tests/e2e/run.sh tenancy                         end-to-end suites on a fresh local server: tenancy, ai-designer, print, gradebook, answers, live, share, sso
+tests/e2e/run.sh demo                            re-records the landing page's screen recording (public/media), invented class; rerun when those screens change
 ```
 
 Run `npm run build` before the suites (they drive the built SPA), and run
