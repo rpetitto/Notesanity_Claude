@@ -182,6 +182,8 @@ export default () =>
             <td>All data, as our infrastructure provider</td></tr>
         <tr><td>Google</td><td>Optional "Sign in with Google"</td>
             <td>That an account signed in. Only if that method is used.</td></tr>
+        <tr><td>Clever, ClassLink</td><td>Optional district sign-in, when a school links one</td>
+            <td>That an account signed in. We receive the name, email address and district ID they hold, and nothing else from them.</td></tr>
         <tr><td>Anthropic</td><td>Designing worksheet pages with AI, when a teacher asks for one</td>
             <td>Only what the teacher types or attaches for that page. Never student information.</td></tr>
       </table>

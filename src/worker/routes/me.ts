@@ -174,13 +174,17 @@ app.get("/api/org", handler(async (c) => {
     studentDomains: org.student_domains,
     familyAccess: !!org.family_access,
     canEdit: !!user.is_admin,
+    // Which district on each provider vouches for this school's addresses.
+    cleverDistrictId: user.is_admin ? org.clever_district_id ?? "" : undefined,
+    classlinkTenantId: user.is_admin ? org.classlink_tenant_id ?? "" : undefined,
+    solo: !!org.solo,
   });
 }));
 
 app.patch("/api/org", handler(async (c) => {
   const user = await requireUser(c);
   if (!user.is_admin) throw new HttpError(403, "Admin access required");
-  const body = await c.req.json<{ name?: string; teacherDomains?: string; studentDomains?: string; familyAccess?: boolean }>();
+  const body = await c.req.json<{ name?: string; teacherDomains?: string; studentDomains?: string; familyAccess?: boolean; cleverDistrictId?: string; classlinkTenantId?: string }>();
   const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(user.org_id).first<any>();
   if (!org) throw new HttpError(404, "Org not found");
   // A teacher's own space claims no domain — otherwise anyone could sign up
@@ -192,13 +196,26 @@ app.patch("/api/org", handler(async (c) => {
   // school, and limited to the school's own domain unless the platform adds more.
   const teacherDomains = body.teacherDomains === undefined ? org.teacher_domains : await checkSchoolDomains(body.teacherDomains, org);
   const studentDomains = body.studentDomains === undefined ? org.student_domains : await checkSchoolDomains(body.studentDomains, org);
+  // A district link only ever vouches for this school's own domains (see
+  // routes/sso.ts), so a personal space, which has none, has nothing to link.
+  const linkId = (v: string | undefined, current: string, what: string) => {
+    if (v === undefined) return current ?? "";
+    const id = String(v).trim();
+    if (id && org.solo) throw new HttpError(403, "A personal classroom can't link a district. Ask us to set up your school instead.");
+    if (id && !/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new HttpError(400, `That doesn't look like a ${what}. Copy it from the provider's dashboard.`);
+    return id;
+  };
+  const clever = linkId(body.cleverDistrictId, org.clever_district_id, "Clever district ID");
+  const classlink = linkId(body.classlinkTenantId, org.classlink_tenant_id, "ClassLink tenant ID");
   await db
-    .prepare(`UPDATE orgs SET name = ?, teacher_domains = ?, student_domains = ?, family_access = ? WHERE id = ?`)
+    .prepare(`UPDATE orgs SET name = ?, teacher_domains = ?, student_domains = ?, family_access = ?, clever_district_id = ?, classlink_tenant_id = ? WHERE id = ?`)
     .bind(
       body.name ?? org.name,
       teacherDomains,
       studentDomains,
       body.familyAccess === undefined ? org.family_access ?? 1 : body.familyAccess ? 1 : 0,
+      clever,
+      classlink,
       org.id,
     )
     .run();

@@ -64,7 +64,10 @@ export default {
       // `index`, bounce them back to `/` and round again. So the app case asks
       // for the request as it stands — the root already resolves to the shell —
       // and only the marketing case names a different page, extensionless.
-      const wantsApp = hasSession(request) || url.searchParams.has("signin");
+      // So does `?auth_error=`: a sign-in that failed (an expired link, a
+      // district that isn't linked) comes back here to say why, and the
+      // marketing page has nowhere to say it.
+      const wantsApp = hasSession(request) || url.searchParams.has("signin") || url.searchParams.has("auth_error");
       return wantsApp
         ? (env as unknown as { ASSETS: { fetch(r: Request): Promise<Response> } }).ASSETS.fetch(request)
         : asset(env, request, "/landing");

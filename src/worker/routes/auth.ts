@@ -94,7 +94,7 @@ function clearSessionCookie(c: Context) {
   );
 }
 
-async function startSession(c: Context, userId: string, opts: { reset?: boolean } = {}) {
+export async function startSession(c: Context, userId: string, opts: { reset?: boolean } = {}) {
   const id = randomToken(32);
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000).toISOString();
   // A session opened by a reset link may set a new password without the old
@@ -149,8 +149,8 @@ async function localSessionUser(c: Context) {
 
 setLocalSessionResolver(localSessionUser);
 
-const normalize = (e: string) => (e ?? "").trim().toLowerCase();
-const domainOf = (e: string) => e.split("@")[1] ?? "";
+export const normalize = (e: string) => (e ?? "").trim().toLowerCase();
+export const domainOf = (e: string) => e.split("@")[1] ?? "";
 const csv = (s: string) => s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
 
 /**
@@ -269,7 +269,7 @@ async function soloSpaceFor(email: string, name?: string): Promise<string> {
 }
 
 /** After sign-in: a class code that came along joins that class. */
-async function joinWithCode(user: { id: string; org_id: string; role: string }, intent: Intent) {
+export async function joinWithCode(user: { id: string; org_id: string; role: string }, intent: Intent) {
   if (!intent.classCode || user.role !== "student") return;
   // Signing in worked; a class that turns out to be full shouldn't undo that.
   await joinClass(user, intent.classCode).catch(() => {});
@@ -285,7 +285,7 @@ async function claimCode(user: { id: string; role: string }, intent: Intent) {
   await linkGuardian(user.id, holder);
 }
 
-async function findOrCreateUser(email: string, name?: string, intent: Intent = {}) {
+export async function findOrCreateUser(email: string, name?: string, intent: Intent = {}) {
   const existing = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first<any>();
   if (existing) {
     // Re-applied rather than set once: the seed list is the source of truth, so

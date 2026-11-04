@@ -1307,3 +1307,16 @@ migrate("041_notebook_shares", async () => {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notebook_shares_notebook ON notebook_shares(notebook_id)`),
   ]);
 });
+
+/**
+ * Which Clever district and ClassLink tenant a school's admin has linked.
+ * Sign-in through either counts only for addresses on that school's own
+ * domains, and only when the provider says it's that district — so a district
+ * elsewhere can't vouch for an address here. Empty means not linked.
+ */
+migrate("042_sso_links", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(orgs)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("clever_district_id")) await db.prepare(`ALTER TABLE orgs ADD COLUMN clever_district_id TEXT NOT NULL DEFAULT ''`).run();
+  if (!has("classlink_tenant_id")) await db.prepare(`ALTER TABLE orgs ADD COLUMN classlink_tenant_id TEXT NOT NULL DEFAULT ''`).run();
+});

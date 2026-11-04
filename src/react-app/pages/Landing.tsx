@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Mail, KeyRound, ArrowRight, Check, PenSquare, GraduationCap, Users, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
@@ -183,6 +183,13 @@ export default function Landing({ error }: { error?: Error | null }) {
             <a href={signOutHref} className="mt-3 inline-block font-display text-[16px] underline">
               Sign out and use another account
             </a>
+          </div>
+        )}
+
+        {linkProblem?.startsWith("sso_") && (
+          <div className="mb-5 rounded-[22px] border-[3px] border-[#8a6a1f] bg-[#f7e6bf] p-4 text-[#5c4611]" role="alert">
+            <div className="font-display text-[17px]">That didn't sign you in</div>
+            <p className="mt-1 text-[16px] leading-relaxed">{SSO_PROBLEMS[linkProblem] ?? SSO_PROBLEMS.sso_failed}</p>
           </div>
         )}
 
@@ -446,10 +453,47 @@ export default function Landing({ error }: { error?: Error | null }) {
                   )}
                 />
               </div>
+              <DistrictSignIn door={door} classCode={classCode} />
             </>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+const SSO_PROBLEMS: Record<string, string> = {
+  sso_not_linked: "Your school hasn't linked that district to Notesanity, or that address isn't on your school's domain here. Sign in another way below, or ask your school's admin to link it under My School.",
+  sso_no_email: "Your district didn't share a confirmed email address for this account, and Notesanity matches accounts by email. Sign in another way below.",
+  sso_not_allowed: "That address can't sign in that way here — a student address can't open a teacher account, for one. Sign in another way below, or ask your school's admin.",
+  sso_family: "Clever and ClassLink are for teachers and students. Parents and guardians sign in with the family code from a teacher.",
+  sso_cancelled: "Signing in was cancelled. Try again whenever you're ready.",
+  sso_expired: "That took a little too long. Try again.",
+  sso_failed: "Something went wrong on the way back from your district's sign-in. Try again, or sign in another way below.",
+};
+
+/** Sign in through a district's Clever or ClassLink, when this school uses one. */
+function DistrictSignIn({ door, classCode }: { door: Door; classCode: string }) {
+  const config = useQuery({
+    queryKey: ["sso-config"],
+    queryFn: () => api.get<{ clever: boolean; classlink: boolean }>("/api/auth/sso/config"),
+    staleTime: 5 * 60_000,
+  });
+  if (door === "family" || !config.data || (!config.data.clever && !config.data.classlink)) return null;
+  const href = (provider: string) => {
+    const q = new URLSearchParams({ door });
+    if (classCode.trim()) q.set("classCode", classCode.trim());
+    return `/api/auth/sso/${provider}/start?${q}`;
+  };
+  const cls = cn(
+    "flex min-h-[52px] w-full items-center justify-center gap-3 rounded-full border-[3px] border-pine",
+    "bg-white font-display text-[17px] text-pine shadow-[4px_4px_0_0_var(--color-pine)]",
+    "transition-[transform,box-shadow] hover:bg-oat active:translate-x-[3px] active:translate-y-[3px] active:shadow-none",
+  );
+  return (
+    <div className="mt-3 space-y-3">
+      {config.data.clever && <a href={href("clever")} className={cls}>Continue with Clever</a>}
+      {config.data.classlink && <a href={href("classlink")} className={cls}>Continue with ClassLink</a>}
     </div>
   );
 }

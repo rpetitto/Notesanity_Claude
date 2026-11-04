@@ -80,6 +80,15 @@ const BODY = () => `
          in <b>Settings</b>.`,
       ],
       [
+        "Can we sign in with Clever or ClassLink?",
+        `Yes, once it's set up for your district — <a href="/contact">ask us</a>. Your school's admin
+         then links your Clever district or ClassLink tenant under <b>My School</b>, and
+         <b>Continue with Clever</b> or <b>Continue with ClassLink</b> signs teachers and students
+         into the account their email already has. It only works for your school's own domains, and
+         only from the district you linked. Your district has to share each person's email address,
+         since that's how accounts are matched.`,
+      ],
+      [
         "Why hasn't my sign-in link arrived?",
         `Check your spam folder first. School mail systems filter unfamiliar senders hard, and
          Notesanity is a new sender. If you administer your school's email, allowlisting

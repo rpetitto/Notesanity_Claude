@@ -42,8 +42,11 @@ npx wrangler secret put STRIPE_SECRET_KEY        Stripe; also STRIPE_WEBHOOK_SEC
 npx wrangler secret put AWS_ACCESS_KEY_ID        SES, if switching mail off Cloudflare; also AWS_SECRET_ACCESS_KEY
 npx wrangler secret put ANTHROPIC_API_KEY        Design with AI (Claude); without it the feature says it isn't switched on
 npx wrangler dev --var AI_STANDIN:1              Design with AI against a free stand-in instead of Claude (tests use this)
+npx wrangler secret put CLEVER_CLIENT_ID          Clever sign-in; also CLEVER_CLIENT_SECRET, CLASSLINK_CLIENT_ID, CLASSLINK_CLIENT_SECRET
+                                                 redirect URI to register: https://<host>/api/auth/sso/{clever|classlink}/callback
+npx wrangler dev --var SSO_STANDIN:1             Clever and ClassLink against a local stand-in page (localhost only; tests use this)
 npx wrangler dev --var AUTH_DEV_LINKS:1          sign-up/sign-in links come back in the response (localhost only)
-tests/e2e/run.sh tenancy                         end-to-end suites on a fresh local server: tenancy, ai-designer, print, gradebook, answers, live, share
+tests/e2e/run.sh tenancy                         end-to-end suites on a fresh local server: tenancy, ai-designer, print, gradebook, answers, live, share, sso
 ```
 
 Run `npm run build` before the suites (they drive the built SPA), and run
@@ -92,6 +95,11 @@ names.
 - **Signing up proves the address.** A password sign-up is held, hashed, with
   a single-use link and only becomes an account when the link is opened —
   never set a password or start a session for an address nobody has proven.
+- **A district vouches only for its own school.** Clever/ClassLink sign-in
+  (`routes/sso.ts`) is accepted only when the email's domain belongs to a
+  school (`orgForDomain`, never the superadmin fallback in `resolveOrgFor`),
+  that school's admin linked the provider, and the signed token names that
+  same district or tenant. Superadmin addresses never sign in this way.
 - **Answer keys never reach a student.** `fields.answer_key` and `points` are
   selected only for a teacher (`GET /api/notebooks/:id`, the check routes in
   `assignments.ts`); every student and family route names its columns, so never

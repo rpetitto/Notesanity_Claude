@@ -48,6 +48,7 @@ const RELEASES = [
       ["new", "<b>Scores can become grades.</b> While you grade, the panel shows each student's score against the key and offers it as the grade. <b>Make grades from scores</b> does the whole class at once, as points or as a letter (90% is an A). It leaves alone work you've already returned or graded, anyone with an answer still to check, and anyone who answered nothing, so missing work isn't recorded as a zero. Nothing is returned until you return it."],
       ["better", "<b>Design with AI drafts the answer key.</b> Questions with one short right answer come with it filled in on the box, for you to check. It's never printed on the page."],
       ["better", "<b>Answer keys follow your templates.</b> A key set on a template goes with it when you push it into a class, and a key you add later goes out with <b>Send updates</b>. A key you set in one class's copy is left as it is."],
+      ["fixed", "<b>An expired sign-in link left you on the home page with no explanation.</b> It now opens the sign-in page and says the link has expired, so you can ask for a fresh one."],
       ["new", "<b>A due date for one student.</b> In grading, <b>Give an extension</b> under the grade sets that student's own due date for the assignment. They see their date everywhere they see the assignment, your gradebook doesn't call their work missing until it passes, and <b>Use the class date</b> takes it away."],
     ],
   ],

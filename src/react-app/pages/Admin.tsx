@@ -774,6 +774,9 @@ interface OrgResponse {
   studentDomains: string;
   familyAccess: boolean;
   canEdit: boolean;
+  cleverDistrictId?: string;
+  classlinkTenantId?: string;
+  solo?: boolean;
 }
 
 interface FamilyLink {
@@ -942,6 +945,57 @@ function OrgSettings() {
           {mutation.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * Clever and ClassLink: which district on each one speaks for this school.
+ * Sign-in through a provider counts only for this school's own domains, and
+ * only when the provider names the district linked here.
+ */
+function SignInSettings() {
+  const qc = useQueryClient();
+  const org = useQuery({ queryKey: ["org"], queryFn: () => api.get<OrgResponse>("/api/org") });
+  const config = useQuery({ queryKey: ["sso-config"], queryFn: () => api.get<{ clever: boolean; classlink: boolean }>("/api/auth/sso/config") });
+  const [clever, setClever] = useState("");
+  const [classlink, setClasslink] = useState("");
+  useEffect(() => {
+    if (org.data) { setClever(org.data.cleverDistrictId ?? ""); setClasslink(org.data.classlinkTenantId ?? ""); }
+  }, [org.data]);
+  const save = useMutation({
+    mutationFn: () => api.patch("/api/org", { cleverDistrictId: clever, classlinkTenantId: classlink }),
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["org"] }); toast.success("Sign-in settings saved"); },
+    onError: (err: Error) => toast.error(err.message),
+  });
+  if (!org.data || org.data.solo) return null;
+  const off = (on?: boolean) => (config.data && !on ? " — not switched on for Notesanity yet; ask us" : "");
+  return (
+    <Card className="p-5" data-testid="sso-settings">
+      <h2 className="font-display text-[17px] text-pine">Clever and ClassLink</h2>
+      <p className="mt-1 text-[16px] text-pine/70">
+        If your district uses Clever or ClassLink, link it here and teachers and students can sign in with it.
+        It works for addresses on your school's domains above, and only when the sign-in comes from the district
+        you link — a district elsewhere can never sign anyone in here. Everyone keeps the account they have; it's
+        matched by email.
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label htmlFor="clever-id">Clever district ID{off(config.data?.clever)}</Label>
+          <Input id="clever-id" value={clever} onChange={(e) => setClever(e.target.value)} placeholder="e.g. 5b2ad81a709e300001e2cd7a" className="mt-1.5" />
+        </div>
+        <div>
+          <Label htmlFor="classlink-id">ClassLink tenant ID{off(config.data?.classlink)}</Label>
+          <Input id="classlink-id" value={classlink} onChange={(e) => setClasslink(e.target.value)} placeholder="e.g. 2468" className="mt-1.5" />
+        </div>
+      </div>
+      <p className="mt-2 text-[15px] text-pine/60">
+        Your district's Clever admin finds the district ID in the Clever dashboard; ClassLink shows the tenant ID in
+        its management console. Leave one blank to turn it off.
+      </p>
+      <Button type="button" variant="primary" className="mt-3" onClick={() => save.mutate()} disabled={save.isPending}>
+        {save.isPending ? "Saving…" : "Save"}
+      </Button>
     </Card>
   );
 }
@@ -1153,6 +1207,7 @@ function SchoolAdmin() {
       <OrgOverview />
       <div className="mt-4 space-y-4">
         <OrgSettings />
+        <SignInSettings />
         <FamilySettings />
         <MailLog />
         <OrgUsers />
@@ -1259,6 +1314,7 @@ export default function Admin() {
       ) : tab === "school" ? (
         <div className="space-y-4">
           <OrgSettings />
+          <SignInSettings />
           <FamilySettings />
           <MailLog />
           <OrgUsers />
