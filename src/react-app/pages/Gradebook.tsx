@@ -37,6 +37,8 @@ interface GbSubmission {
   grade_points: number | null;
   grade_letter: string | null;
   grade_complete: number | null;
+  /** This student's own due date, when they have an extension. */
+  due_override?: string | null;
 }
 
 interface GradebookResponse {
@@ -210,7 +212,8 @@ function gradeCell(a: GbAssignment, sub: GbSubmission | undefined): { text: stri
       : { text: "✗", state: "low", score: 0 };
   }
   if (handedIn) return a.grading === "none" ? { text: "In", state: "graded", score: null } : { text: "To grade", state: "to-grade", score: null };
-  const due = a.due_at ? new Date(a.due_at.includes("T") ? a.due_at : a.due_at.replace(" ", "T") + "Z") : null;
+  const dueIso = sub?.due_override ?? a.due_at;
+  const due = dueIso ? new Date(dueIso.includes("T") ? dueIso : dueIso.replace(" ", "T") + "Z") : null;
   if (due && due.getTime() < Date.now()) return { text: "Missing", state: "missing", score: null };
   return { text: "", state: "open", score: null };
 }

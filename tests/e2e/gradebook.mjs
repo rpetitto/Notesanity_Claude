@@ -111,6 +111,27 @@ check("the letter column's class average is the mean of 85 and 59", /\b72%/.test
   const mike = csv.split("\n").find((l) => l.startsWith("Mike Anderson"));
   check("the CSV has the same average, letters included", /^Student,Email,Average %/.test(csv) && mike?.split(",")[2] === "86.9", mike);
 }
+// Extensions: Dale gets until next week on the quiz.
+{
+  const until = new Date(Date.now() + 6 * day).toISOString();
+  const r = await fetch(`${B}/api/assignments/${quiz}/extension`, { method: "POST", headers: { "content-type": "application/json", cookie: students["Dale Gross"].S.cookie() }, body: JSON.stringify({ studentId: students["Dale Gross"].id, dueAt: until }) });
+  check("a student can't give themselves an extension", r.status === 403, String(r.status));
+  await T("POST", `/api/assignments/${quiz}/extension`, { studentId: students["Dale Gross"].id, dueAt: until });
+  const mineD = await students["Dale Gross"].S("GET", `/api/assignments/${quiz}`);
+  const mineM = await students["Mike Anderson"].S("GET", `/api/assignments/${quiz}`);
+  check("the extended student sees their own due date", mineD.assignment.dueAt === until && mineD.assignment.extended === true);
+  check("…and nobody else's changes", mineM.assignment.dueAt !== until && !mineM.assignment.extended);
+  const list = await students["Dale Gross"].S("GET", `/api/classes/${cls.id}/assignments`);
+  check("the class list shows the student their own date", list.assignments.find((x) => x.id === quiz)?.dueAt === until);
+  const mine = await students["Dale Gross"].S("GET", "/api/my/assignments");
+  check("so does their list across classes", mine.assignments.find((x) => x.id === quiz)?.dueAt === until);
+  await p.reload();
+  await p.locator("[data-testid=gradebook]").waitFor();
+  check("in the gradebook, an extended student isn't Missing", (await cell(2, 4).innerText()).trim() === "", await cell(2, 4).innerText());
+  await T("POST", `/api/assignments/${quiz}/extension`, { studentId: students["Dale Gross"].id, dueAt: null });
+  check("removing the extension brings the class date back", !(await students["Dale Gross"].S("GET", `/api/assignments/${quiz}`)).assignment.extended);
+}
+
 // The student's own page counts returned grades the same way.
 await T("POST", `/api/assignments/${quiz}/return`, { all: true });
 await T("POST", `/api/assignments/${hw}/return`, { all: true });

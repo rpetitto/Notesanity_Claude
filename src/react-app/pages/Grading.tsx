@@ -158,9 +158,56 @@ interface GradeRow {
   grade: { points: number | null; letter: string | null; complete: number | null };
   feedback: string;
   graded: boolean;
+  /** This student's own due date, when they have an extension. */
+  dueOverride?: string | null;
 }
 
 const LETTERS = ["A", "B", "C", "D", "F"];
+
+/** An ISO time as a <input type="datetime-local"> value, in the viewer's own time zone. */
+const toLocalInput = (iso: string | null | undefined) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/**
+ * One student's own due date: an extension, or an accommodation an IEP
+ * requires. It replaces the class's date for this student everywhere they
+ * see it, and in the gradebook's "Missing".
+ */
+function ExtensionControl({ classDue, override, onChange, busy }: {
+  classDue: string | null; override: string | null | undefined; onChange: (dueAt: string | null) => void; busy: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(toLocalInput(override ?? classDue));
+  useEffect(() => { setValue(toLocalInput(override ?? classDue)); setEditing(false); }, [override, classDue]);
+  return (
+    <div className="mt-5 border-t-2 border-pine/10 pt-4" data-testid="extension">
+      <div className="label-caps text-pine/70">Due date for this student</div>
+      <p className="mt-1 text-[16px] text-pine">
+        {override ? <><b>{dueLabel(override)}</b> <span className="text-pine/60">· extended from {classDue ? dueLabel(classDue).replace(/^Due /, "") : "no date"}</span></> : dueLabel(classDue)}
+      </p>
+      {editing ? (
+        <div className="mt-2 grid gap-2">
+          <input type="datetime-local" aria-label="New due date for this student" value={value} onChange={(e) => setValue(e.target.value)}
+            className="h-11 rounded-[12px] border-[3px] border-pine px-2 text-[16px] outline-none focus:ring-[3px] focus:ring-mint" />
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" disabled={busy || !value} onClick={() => onChange(new Date(value).toISOString())}>Save date</Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>{override ? "Change" : "Give an extension"}</Button>
+          {override && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onChange(null)}>Use the class date</Button>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** "Pages 4, 7-9" reads far better than "3 pages" when you're about to grade them. */
 export function formatPageNumbers(numbers?: number[]): string {
@@ -397,6 +444,14 @@ export default function Grading() {
   const grade = useMutation({
     mutationFn: (body: any) => api.post(`/api/assignments/${assignmentId}/grade`, { studentId, ...body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["assignment", assignmentId] }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const extend = useMutation({
+    mutationFn: (dueAt: string | null) => api.post(`/api/assignments/${assignmentId}/extension`, { studentId, dueAt }),
+    onSuccess: (_r, dueAt) => {
+      qc.invalidateQueries({ queryKey: ["assignment", assignmentId] });
+      toast.success(dueAt ? "Extension saved" : "Back to the class due date");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -866,6 +921,8 @@ export default function Grading() {
           onSave={(body) => grade.mutate(body)}
           onReturn={() => returnWork.mutate({ studentId })}
           onReopen={() => setReopenModalOpen(true)}
+          onExtend={(d) => extend.mutate(d)}
+          extending={extend.isPending}
           saving={grade.isPending}
           mobileOpen={gradeSheetOpen}
           onMobileClose={() => setGradeSheetOpen(false)}
@@ -1047,13 +1104,15 @@ function StatusPill({ row }: { row?: GradeRow }) {
 }
 
 function GradePanel({
-  assignment, row, onSave, onReturn, onReopen, saving, mobileOpen, onMobileClose,
+  assignment, row, onSave, onReturn, onReopen, onExtend, extending, saving, mobileOpen, onMobileClose,
 }: {
   assignment: any;
   row?: GradeRow;
   onSave: (body: any) => void;
   onReturn: () => void;
   onReopen: () => void;
+  onExtend: (dueAt: string | null) => void;
+  extending: boolean;
   saving: boolean;
   mobileOpen: boolean;
   onMobileClose: () => void;
@@ -1197,6 +1256,8 @@ function GradePanel({
           <Unlock className="h-4 w-4" strokeWidth={2.5} /> Reopen for student
         </Button>
       )}
+
+      <ExtensionControl classDue={assignment.dueAt ?? null} override={row.dueOverride} onChange={onExtend} busy={extending} />
     </>
   );
 

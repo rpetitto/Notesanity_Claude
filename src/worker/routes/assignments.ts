@@ -103,7 +103,8 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
               (SELECT SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_returned,
               (SELECT SUM(CASE WHEN graded_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_graded,
               (SELECT COUNT(*) FROM submissions WHERE assignment_id = a.id) AS s_total` : `ms.status AS my_status, ms.grade_points AS my_points, ms.grade_letter AS my_letter,
-              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at`}
+              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at,
+              ms.due_override AS my_due`}
          FROM assignments a
          JOIN notebooks n ON n.id = a.notebook_id
          ${isTeacher ? "" : "LEFT JOIN submissions ms ON ms.assignment_id = a.id AND ms.student_id = ?"}
@@ -119,7 +120,7 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
     const base = {
       id: a.id, title: a.title, notebookId: a.notebook_id, notebookTitle: a.notebook_title,
       notebookColor: a.notebook_color ?? "#2E7D6B", notebookHasCover: !!a.notebook_has_cover,
-      pageCount: pageIds.length, releaseAt: a.release_at, dueAt: a.due_at,
+      pageCount: pageIds.length, releaseAt: a.release_at, dueAt: (!isTeacher && a.my_due) || a.due_at,
       grading: a.grading, pointsMax: a.points_max, status: a.status,
     };
     if (isTeacher) {
@@ -438,7 +439,8 @@ app.get("/api/assignments/:id", handler(async (c) => {
       ? await db.prepare(`SELECT google_course_id FROM classes WHERE id = ?`).bind(a.class_id).first<{ google_course_id: string | null }>()
       : null;
     return c.json({
-      assignment: base,
+      // Their own due date when they have an extension; the class's otherwise.
+      assignment: { ...base, dueAt: sub?.due_override ?? base.dueAt, extended: !!sub?.due_override },
       isTeacher: false,
       studentId: user.id,
       classroom: course?.google_course_id ? { courseId: course.google_course_id, courseworkId: a.google_coursework_id as string } : null,
@@ -502,6 +504,7 @@ app.get("/api/assignments/:id", handler(async (c) => {
       grade: { points: sub?.grade_points ?? null, letter: sub?.grade_letter ?? null, complete: sub?.grade_complete ?? null },
       feedback: sub?.feedback ?? "",
       graded: !!sub?.graded_at,
+      dueOverride: sub?.due_override ?? null,
     });
   }
   // The course id lives on the class, but the post and the grade passback both
@@ -656,6 +659,38 @@ app.post("/api/assignments/:id/grade", handler(async (c) => {
   return c.json({ ok: true });
 }));
 
+/**
+ * Give one student their own due date — an extension, an accommodation — or
+ * take it away (`dueAt: null`) so the class's date applies again. Teachers
+ * only, and only for a student in the class.
+ */
+app.post("/api/assignments/:id/extension", handler(async (c) => {
+  const { a, isTeacher } = await loadAssignment(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const b = await c.req.json<{ studentId?: string; dueAt?: string | null }>();
+  const studentId = String(b.studentId ?? "");
+  const enrolled = await db
+    .prepare(`SELECT 1 AS yes FROM enrollments WHERE class_id = ? AND user_id = ? AND role = 'student' AND status = 'active'`)
+    .bind(a.class_id, studentId)
+    .first();
+  if (!enrolled) throw new HttpError(404, "That student isn't in this class");
+  let due: string | null = null;
+  if (b.dueAt) {
+    const d = new Date(b.dueAt);
+    if (Number.isNaN(d.getTime())) throw new HttpError(400, "That isn't a date");
+    due = d.toISOString();
+  }
+  await db
+    .prepare(
+      `INSERT INTO submissions (id, assignment_id, student_id, status, due_override, created_at, updated_at)
+       VALUES (?, ?, ?, 'not_started', ?, ?, ?)
+       ON CONFLICT(assignment_id, student_id) DO UPDATE SET due_override = excluded.due_override, updated_at = excluded.updated_at`,
+    )
+    .bind(uid(), a.id, studentId, due, now(), now())
+    .run();
+  return c.json({ ok: true, dueAt: due });
+}));
+
 /** Release grades — one student, or the whole class at once. */
 app.post("/api/assignments/:id/return", handler(async (c) => {
   const { a, user, isTeacher } = await loadAssignment(c, param(c, "id"));
@@ -805,7 +840,7 @@ app.get("/api/classes/:id/gradebook", handler(async (c) => {
     .all<any>();
   const subs = await db
     .prepare(
-      `SELECT s.assignment_id, s.student_id, s.status, s.grade_points, s.grade_letter, s.grade_complete
+      `SELECT s.assignment_id, s.student_id, s.status, s.grade_points, s.grade_letter, s.grade_complete, s.due_override
          FROM submissions s JOIN assignments a ON a.id = s.assignment_id WHERE a.class_id = ?`,
     )
     .bind(classId)
@@ -829,7 +864,7 @@ app.get("/api/classes/:id/my-grades", handler(async (c) => {
 
   const rows = await db
     .prepare(
-      `SELECT a.id, a.title, a.due_at, a.grading, a.points_max, a.notebook_id,
+      `SELECT a.id, a.title, COALESCE(s.due_override, a.due_at) AS due_at, a.grading, a.points_max, a.notebook_id,
               s.status, s.submitted_at, s.returned_at, s.grade_points, s.grade_letter,
               s.grade_complete, s.feedback
          FROM assignments a
@@ -1005,7 +1040,8 @@ app.get("/api/my/assignments", handler(async (c) => {
       `SELECT a.*, c.name AS class_name, c.accent_color, c.emoji AS class_emoji,
               n.title AS notebook_title, n.accent_color AS notebook_color,
               ms.status AS my_status, ms.grade_points AS my_points, ms.grade_letter AS my_letter,
-              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at
+              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at,
+              ms.due_override AS my_due
          FROM assignments a
          JOIN classes c ON c.id = a.class_id
          JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active' AND e.role = 'student'
@@ -1030,7 +1066,7 @@ app.get("/api/my/assignments", handler(async (c) => {
       accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
       notebookId: a.notebook_id, notebookTitle: a.notebook_title,
       notebookColor: a.notebook_color ?? "#2E7D6B",
-      dueAt: a.due_at, grading: a.grading, pointsMax: a.points_max,
+      dueAt: a.my_due || a.due_at, grading: a.grading, pointsMax: a.points_max,
       total: pageIds.length,
       status: sub?.status ?? "not_started",
       grade: sub?.returned_at ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete } : null,

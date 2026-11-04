@@ -1243,3 +1243,16 @@ migrate("038_verified_signup", async () => {
   }
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`).run();
 });
+
+/**
+ * A student's own due date for one assignment — an extension, an IEP
+ * accommodation. Schema only. On the submission row because that is already
+ * the one-student-one-assignment row every view reads; NULL means the class's
+ * due date applies.
+ */
+migrate("039_extensions", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(submissions)`).all<{ name: string }>();
+  if (!(cols.results ?? []).some((c) => c.name === "due_override")) {
+    await db.prepare(`ALTER TABLE submissions ADD COLUMN due_override TEXT`).run();
+  }
+});

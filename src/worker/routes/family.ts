@@ -129,7 +129,7 @@ app.get("/api/family/children/:studentId/overview", handler(async (c) => {
   const { childName } = await requireChild(c, studentId);
   const [assignmentsRes, notebooksRes] = await db.batch([
     db.prepare(
-      `SELECT a.id, a.title, a.instructions, a.notebook_id, a.page_ids, a.release_at, a.due_at, a.grading, a.points_max,
+      `SELECT a.id, a.title, a.instructions, a.notebook_id, a.page_ids, a.release_at, COALESCE(s.due_override, a.due_at) AS due_at, a.grading, a.points_max,
               cl.id AS class_id, cl.name AS class_name, n.title AS notebook_title,
               s.status, s.submitted_at, s.returned_at, s.grade_points, s.grade_letter, s.grade_complete, s.feedback,
               -- "Started" the way the teacher's roster decides it: ink or an

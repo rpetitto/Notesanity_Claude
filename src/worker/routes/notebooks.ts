@@ -826,10 +826,11 @@ app.post("/api/notebooks/:id/pages/arrange", handler(async (c) => {
 
 /** Assignments that draw on this notebook, shown alongside its pages. */
 app.get("/api/notebooks/:id/assignments", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  const { nb, isTeacher, user } = await notebookAccess(c, param(c, "id"));
   const rows = await db
     .prepare(
-      `SELECT a.id, a.title, a.page_ids, a.due_at, a.release_at, a.grading, a.points_max, a.status, a.created_at
+      `SELECT a.id, a.title, a.page_ids, ${isTeacher ? "a.due_at" : "COALESCE((SELECT s.due_override FROM submissions s WHERE s.assignment_id = a.id AND s.student_id = ?), a.due_at) AS due_at"},
+              a.release_at, a.grading, a.points_max, a.status, a.created_at
               ${isTeacher ? `,
               (SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_submitted,
               (SELECT SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_returned,
@@ -838,7 +839,7 @@ app.get("/api/notebooks/:id/assignments", handler(async (c) => {
         WHERE a.notebook_id = ? ${isTeacher ? "" : "AND a.status = 'active'"}
         ORDER BY COALESCE(a.due_at, a.created_at) DESC`,
     )
-    .bind(nb.id)
+    .bind(...(isTeacher ? [nb.id] : [user.id, nb.id]))
     .all<any>();
 
   const assignments = [];
