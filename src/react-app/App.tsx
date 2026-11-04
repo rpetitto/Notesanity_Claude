@@ -21,6 +21,7 @@ import UploadNotebook from "./pages/UploadNotebook";
 import Workspace from "./pages/Workspace";
 import AssignmentEditor from "./pages/AssignmentEditor";
 import Grading from "./pages/Grading";
+import CheckByQuestion from "./pages/CheckByQuestion";
 import TeacherAssignments from "./pages/TeacherAssignments";
 import PageLibrary from "./pages/PageLibrary";
 import TeacherNotebooks from "./pages/TeacherNotebooks";
@@ -116,6 +117,7 @@ export default function App() {
       <Route path="/templates/upload" element={<UploadNotebook />} />
       <Route path="/assignments/:assignmentId" element={<AssignmentRoute />} />
       <Route path="/assignments/:assignmentId/edit" element={<AssignmentEditor />} />
+      <Route path="/assignments/:assignmentId/check" element={<CheckByQuestion />} />
       <Route path="/notebooks/:notebookId/edit" element={<NotebookEditor />} />
       <Route path="/notebooks/:notebookId" element={<Workspace />} />
       <Route path="/work" element={<StudentHome />} />

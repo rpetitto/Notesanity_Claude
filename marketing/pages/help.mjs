@@ -166,8 +166,9 @@ const BODY = () => `
          passage, a PDF, a photo or the page you're on, and you get a page with answer boxes already
          placed; ask for changes in plain words before you add it. Free includes 1 AI page a month
          and Pro 50, during the beta too; changes and retries don't count. It draws simple diagrams,
-         tables and organizers but not pictures, and it doesn't make answer keys. Only your
-         description and what you attach are sent to Anthropic, never anything about your students.`,
+         tables and organizers but not pictures. Questions with one short right answer come with a
+         drafted answer key on the box, never printed, for you to check. Only your description and
+         what you attach are sent to Anthropic, never anything about your students.`,
       ],
       [
         "Do the links in my worksheet still work?",
@@ -329,6 +330,27 @@ const BODY = () => `
         `Open the assignment. Your roster is on the left — pick a student, then a page — and you
          write on their page in your own layer, so your marks and their work never mix. Add a
          comment, set a grade, and return it.`,
+      ],
+      [
+        "Can Notesanity check answers for me?",
+        `For typed answers, dropdowns and checkboxes, yes. Give the box an answer key in its settings
+         in the editor, then open the assignment and choose <b>Check by question</b>: each question's
+         answers are gathered together, already marked by the key, and you can overrule any of them.
+         Handwritten answers and longer responses are yours to judge — they're shown so you can
+         mark them, but nothing reads handwriting. Students never see a key.`,
+      ],
+      [
+        "How do scores against the key become grades?",
+        `The grade panel shows a student's score and offers it as their grade, or <b>Make grades from
+         scores</b> in <b>Check by question</b> grades the whole class, as points or a letter. Work
+         you've already graded or returned is left alone unless you choose to replace it, and so is
+         anyone with an answer still to check or nothing answered at all.`,
+      ],
+      [
+        "Can one student have a different due date?",
+        `Yes. While grading, choose <b>Give an extension</b> under that student's grade and set their
+         date. Only they see it, and your gradebook won't show their work as missing until it passes.
+         <b>Use the class date</b> puts them back on everyone else's.`,
       ],
       [
         "Can I undo a mistake I made writing on a notebook?",

@@ -134,6 +134,10 @@ export interface FieldRec {
    * boolean, so accept either rather than forcing casts at every call site.
    */
   has_media?: number | boolean;
+  /** The box's answer key as stored JSON ("" for none). Only ever sent to teachers. */
+  answer_key?: string;
+  /** What the box is worth when checking against the key. Teachers only. */
+  points?: number;
 }
 
 export interface LayerRec {

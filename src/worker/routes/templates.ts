@@ -71,7 +71,7 @@ app.get("/api/my/teaching-notebooks", handler(async (c) => {
   // every copy in one statement rather than two queries per copy.
   const templates = notebooks.filter((n) => n.kind === "template");
   const copies = notebooks.filter((n) => n.template_id && templates.some((t) => t.id === n.template_id));
-  const pending = new Map<string, { pages: number; fields: number }>();
+  const pending = new Map<string, { pages: number; fields: number; keys: number }>();
   if (copies.length) {
     const rows = await db
       .prepare(
@@ -81,19 +81,23 @@ app.get("/api/my/teaching-notebooks", handler(async (c) => {
                     AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.notebook_id = cp.id AND p.template_page_id = tp.id)) AS pages,
                 (SELECT COUNT(*) FROM fields tf JOIN pages tp ON tp.id = tf.page_id
                   WHERE tf.notebook_id = cp.template_id AND tf.archived = 0 AND tp.archived = 0
-                    AND NOT EXISTS (SELECT 1 FROM fields f WHERE f.notebook_id = cp.id AND f.template_field_id = tf.id)) AS fields
+                    AND NOT EXISTS (SELECT 1 FROM fields f WHERE f.notebook_id = cp.id AND f.template_field_id = tf.id)) AS fields,
+                (SELECT COUNT(*) FROM fields f JOIN fields tf ON tf.id = f.template_field_id
+                  WHERE f.notebook_id = cp.id AND f.archived = 0 AND f.answer_key = ''
+                    AND tf.archived = 0 AND tf.answer_key <> '') AS keys
            FROM notebooks cp
           WHERE cp.template_id IN (SELECT id FROM notebooks WHERE kind = 'template' AND owner_id = ?)`,
       )
       .bind(user.id)
-      .all<{ id: string; pages: number; fields: number }>();
-    for (const r of rows.results ?? []) pending.set(r.id, { pages: r.pages, fields: r.fields });
+      .all<{ id: string; pages: number; fields: number; keys: number }>();
+    for (const r of rows.results ?? []) pending.set(r.id, { pages: r.pages, fields: r.fields, keys: r.keys });
   }
   for (const t of templates) {
     t.copies = copies.filter((n) => n.template_id === t.id).map((copy) => ({
       notebookId: copy.id, classId: copy.class_id, className: copy.class_name, status: copy.status,
       archived: !!copy.archived,
       pendingPages: pending.get(copy.id)?.pages ?? 0, pendingFields: pending.get(copy.id)?.fields ?? 0,
+      pendingKeys: pending.get(copy.id)?.keys ?? 0,
     }));
   }
   return c.json({ notebooks });
@@ -212,13 +216,13 @@ async function fieldInsert(copyId: string, pageId: string, f: any, limit: Limit)
   return db
     .prepare(
       `INSERT OR IGNORE INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
-                                     content, media_key, archived, template_field_id, created_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?
+                                     content, media_key, answer_key, points, archived, template_field_id, created_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?
         WHERE EXISTS (SELECT 1 FROM pages WHERE id = ?)`,
     )
     .bind(
       uid(), copyId, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
-      f.prompt ?? "", f.content ?? "", mediaKey, f.id, now(), pageId,
+      f.prompt ?? "", f.content ?? "", mediaKey, f.answer_key ?? "", f.points ?? 1, f.id, now(), pageId,
     );
 }
 
@@ -439,6 +443,7 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
   let classes = 0;
   let pagesAdded = 0;
   let fieldsAdded = 0;
+  let keysAdded = 0;
   for (const copy of copies.results ?? []) {
     const [pagesRes, fieldsRes] = await db.batch([
       db.prepare(`SELECT id, seq, template_page_id FROM pages WHERE notebook_id = ? ORDER BY seq`).bind(copy.id),
@@ -484,6 +489,22 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
     const boxStatements = await Promise.all(boxes);
     fieldsAdded += boxStatements.length;
 
+    // Answer keys written on the template after this copy was made. A box in
+    // the class that already has its own key keeps it: that one was set there
+    // on purpose, perhaps for this section alone.
+    const keyed = await db
+      .prepare(
+        `UPDATE fields
+            SET answer_key = (SELECT tf.answer_key FROM fields tf WHERE tf.id = fields.template_field_id),
+                points = (SELECT tf.points FROM fields tf WHERE tf.id = fields.template_field_id),
+                updated_at = ?
+          WHERE notebook_id = ? AND answer_key = ''
+            AND template_field_id IN (SELECT id FROM fields WHERE notebook_id = ? AND archived = 0 AND answer_key <> '')`,
+      )
+      .bind(now(), copy.id, template.id)
+      .run();
+    keysAdded += keyed.meta?.changes ?? 0;
+
     await runBatched([
       ...boxStatements,
       db.prepare(
@@ -494,7 +515,7 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
     ]);
     classes++;
   }
-  return c.json({ classes, pagesAdded, fieldsAdded });
+  return c.json({ classes, pagesAdded, fieldsAdded, keysAdded });
 }));
 
 /** Delete a template. Its class copies stand on their own from here. */

@@ -48,6 +48,12 @@ export interface AiAnswer {
   h: number;
   kind: "text" | "checkbox";
   label: string;
+  /**
+   * The expected answer, for the teacher's answer key: a short answer for a
+   * text area with one right answer, "checked" on the right option's checkbox,
+   * "" for anything open-ended. Never drawn on the page or shown to students.
+   */
+  key: string;
 }
 
 export interface AiPage {
@@ -122,7 +128,8 @@ DIAGRAMS
 
 CONTENT
 - Accurate, at the stated grade level, in plain wording a student of that age reads easily.
-- Questions and problems only. Never include answers, worked solutions or an answer key.
+- Questions and problems only. Never print answers, worked solutions or an answer key on the page.
+- Instead, give the teacher's answer key in "key" on each answer area: the expected answer when there is one short right answer (a number, a word or term, a date, a name — written the way a student would write it, e.g. "42" or "photosynthesis"); "checked" on the checkbox of the right option in a mark-one question and "" on the others; "" for open responses, explanations, opinions, drawings and work space. The key is private to the teacher and never shown to students.
 - When source material is attached, build the page from it: quote it faithfully and keep it short enough to fit. Otherwise write original material.
 - Do exactly the number of pages asked for, each a complete, well-balanced page: use the space, but never crowd it.`;
 
@@ -161,7 +168,7 @@ const SCHEMA = {
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["x", "y", "w", "h", "kind", "label"],
+              required: ["x", "y", "w", "h", "kind", "label", "key"],
               properties: {
                 x: { type: "number" },
                 y: { type: "number" },
@@ -169,6 +176,7 @@ const SCHEMA = {
                 h: { type: "number" },
                 kind: { type: "string", enum: ["text", "checkbox"] },
                 label: { type: "string" },
+                key: { type: "string" },
               },
             },
           },
@@ -293,7 +301,8 @@ function standIn(req: AiPageRequest, previous?: AiDesign, instruction?: string):
       parts.push(`<text x="40" y="${y}" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#1f2a27">${i + 1}. Item ${i + 1}</text>`);
       const ry = y + 36;
       parts.push(`<line x1="60" y1="${ry}" x2="${W - 40}" y2="${ry}" stroke="#8a9692" stroke-width="1"/>`);
-      answers.push({ x: 60, y: ry - 22, w: W - 100, h: 24, kind: "text", label: `${i + 1}. Answer` });
+      // Every second item has a key, so tests can see keys arrive and blanks stay blank.
+      answers.push({ x: 60, y: ry - 22, w: W - 100, h: 24, kind: "text", label: `${i + 1}. Answer`, key: i % 2 === 0 ? String((i + 1) * 2) : "" });
       y += gap;
     }
     pages.push({
@@ -338,6 +347,9 @@ function checked(design: AiDesign, req: AiPageRequest): AiDesign {
             h: Math.min(a.h, H - y),
             kind: a.kind === "checkbox" ? ("checkbox" as const) : ("text" as const),
             label: String(a.label ?? "").slice(0, 80),
+            key: a.kind === "checkbox"
+              ? (String(a.key ?? "").trim().toLowerCase() === "checked" ? "checked" : "")
+              : String(a.key ?? "").replace(/\s+/g, " ").trim().slice(0, 200),
           };
         })
         .slice(0, 120);

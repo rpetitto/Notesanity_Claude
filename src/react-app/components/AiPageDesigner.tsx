@@ -157,7 +157,11 @@ export function AiPageDesigner({
           if (!answers.length) continue;
           await api.post(`/api/notebooks/${notebookId}/fields/bulk`, {
             pageId: created[i],
-            fields: answers.map((x) => ({ type: x.kind, x: x.x, y: x.y, w: x.w, h: x.h, label: x.label })),
+            fields: answers.map((x) => ({
+              type: x.kind, x: x.x, y: x.y, w: x.w, h: x.h, label: x.label,
+              // The drafted key travels with the box, private to the teacher.
+              ...(x.key ? { answerKey: x.kind === "checkbox" ? { checked: true } : { accept: [x.key] } } : {}),
+            })),
           });
         }
       } catch {
@@ -366,6 +370,7 @@ function Preview({
     }
   }), [design]);
   const boxes = design.pages.reduce((n, p) => n + p.answers.length, 0);
+  const keyed = design.pages.reduce((n, p) => n + p.answers.filter((x) => x.key).length, 0);
 
   return (
     <div>
@@ -376,6 +381,12 @@ function Preview({
           Show answer boxes ({boxes})
         </label>
       </div>
+      {keyed > 0 && (
+        <p className="-mt-1 mb-3 text-[15px] text-pine/70" data-testid="ai-key-note">
+          Answer key drafted for {keyed} box{keyed === 1 ? "" : "es"} — students never see it. Check it in
+          a box's settings, or as you check work by question.
+        </p>
+      )}
       <div className={cn("flex max-h-[50vh] flex-col items-center gap-4 overflow-y-auto rounded-[16px] bg-oat p-3 transition-opacity", dim && "opacity-50")}>
         {pages.map((p, i) => (
           <div key={i} className="relative w-full max-w-[520px] border-2 border-pine/20 bg-white shadow-sm" data-testid="ai-preview-page"

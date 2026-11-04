@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { api, assetUrl, pageSource, type FieldRec, type PageRec } from "../lib/api";
 import { loadPdf, readPageLinks, readPageSizes, type PdfLink } from "../lib/pdf";
 import { linkHost, normalizeLink } from "../../shared/links.mjs";
+import { KEYABLE, parseKey, serializeKey, type AnswerKey } from "../../shared/answers.mjs";
 import { convertToPdf, driveFileAsPdf, hasDrivePicker, needsConversion, pickDriveFile } from "../lib/google";
 import {
   PATTERNS, PATTERN_COLORS, DEFAULT_PATTERN, DEFAULT_PATTERN_COLOR,
@@ -129,7 +130,31 @@ function fieldChip(f: FieldRow): string {
   return `${fieldTypeLabel(f.type)}${f.label ? ` · ${f.label}` : ""}`;
 }
 
-interface FieldDraft { label: string; options: string; prompt: string; content: string }
+interface FieldDraft { label: string; options: string; prompt: string; content: string; key: string; points: string }
+
+/**
+ * A key as the inspector edits it: accepted answers one per line for a typed
+ * box, the right option for a dropdown, "checked" or "blank" for a checkbox.
+ */
+function keyToDraft(f?: FieldRow): string {
+  if (!f) return "";
+  const k = parseKey(f.type, f.answer_key);
+  if (!k) return "";
+  if ("checked" in k) return k.checked ? "checked" : "blank";
+  return f.type === "choice" ? k.accept[0] ?? "" : k.accept.join("\n");
+}
+
+function keyFromDraft(type: string, text: string): AnswerKey | null {
+  if (type === "checkbox") return text === "checked" ? { checked: true } : text === "blank" ? { checked: false } : null;
+  const accept = type === "choice" ? [text.trim()] : text.split("\n").map((v) => v.trim());
+  return accept.some(Boolean) ? { accept: accept.filter(Boolean) } : null;
+}
+
+const pointsToDraft = (f?: FieldRow) => String(f?.points ?? 1);
+const draftPoints = (t: string) => {
+  const n = Number(t);
+  return t.trim() !== "" && Number.isFinite(n) && n >= 0 && n <= 1000 ? n : null;
+};
 
 /** Only the parts this field type actually shows — an omitted key means "leave it". */
 function fieldPatch(f: FieldRow, d: FieldDraft): Record<string, unknown> {
@@ -144,6 +169,11 @@ function fieldPatch(f: FieldRow, d: FieldDraft): Record<string, unknown> {
     out.content = d.content.trim();
     // The draft holds the look: "button", or nothing for an outline over the page.
     out.options = d.options.trim() === "button" ? ["button"] : [];
+  }
+  if (KEYABLE.has(f.type)) {
+    out.answerKey = keyFromDraft(f.type, d.key);
+    const pts = draftPoints(d.points);
+    if (pts !== null) out.points = pts;
   }
   return out;
 }
@@ -160,6 +190,8 @@ function fieldIsDirty(f: FieldRow, d: FieldDraft): boolean {
   if ("options" in p && JSON.stringify(p.options) !== JSON.stringify(safeOptions(f.options))) return true;
   if ("prompt" in p && d.prompt !== (f.prompt ?? "")) return true;
   if ("content" in p && content !== (f.content ?? "")) return true;
+  if ("answerKey" in p && serializeKey(f.type, p.answerKey) !== (f.answer_key ?? "")) return true;
+  if ("points" in p && p.points !== (f.points ?? 1)) return true;
   return false;
 }
 
@@ -2785,6 +2817,89 @@ function RichTextEditor({
   );
 }
 
+/**
+ * The right answer for a box, and what it's worth. Optional, and never shown to
+ * students: it's what "Check by question" marks their answers against.
+ */
+function AnswerKeyEditor({
+  where, field, options, value, onChange, points, onPoints,
+}: {
+  where: "rail" | "sheet";
+  field: FieldRow;
+  /** The dropdown's options as currently drafted, one per line. */
+  options: string;
+  value: string;
+  onChange: (v: string) => void;
+  points: string;
+  onPoints: (v: string) => void;
+}) {
+  const id = `answer-key-${where}-${field.id}`;
+  const choices = options.split("\n").map((v) => v.trim()).filter(Boolean);
+  const badPoints = draftPoints(points) === null;
+  return (
+    <section className="mt-5 rounded-[14px] border-2 border-pine/15 bg-oat/60 p-3" data-testid="answer-key">
+      <h4 className="font-display text-[16px] font-bold text-pine">Answer key</h4>
+      <p className="mt-0.5 text-[15px] leading-snug text-pine/65">
+        Optional. Students never see it — it's what Check by question marks their answers against.
+      </p>
+
+      {field.type === "choice" ? (
+        <>
+          <label className="label-caps mt-3 block text-pine/70" htmlFor={id}>Right option</label>
+          <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 h-11 text-[16px]">
+            <option value="">No answer key</option>
+            {choices.map((c) => <option key={c} value={c}>{c}</option>)}
+            {value && !choices.includes(value) && <option value={value}>{value} (no longer an option)</option>}
+          </Select>
+        </>
+      ) : field.type === "checkbox" ? (
+        <>
+          <label className="label-caps mt-3 block text-pine/70" htmlFor={id}>Right when</label>
+          <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 h-11 text-[16px]">
+            <option value="">No answer key</option>
+            <option value="checked">It's ticked</option>
+            <option value="blank">It's left blank</option>
+          </Select>
+        </>
+      ) : (
+        <>
+          <label className="label-caps mt-3 block text-pine/70" htmlFor={id}>Accepted answers</label>
+          <Textarea
+            id={id}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={2}
+            placeholder={"One per line — any of them counts"}
+            className="mt-1 text-[16px]"
+          />
+          <p className="mt-1 text-[14px] leading-snug text-pine/55">
+            Capitals, spacing and end punctuation don't matter, and numbers match however they're
+            written: 0.5, .5 and 1/2 are the same answer.
+          </p>
+        </>
+      )}
+
+      <label className="label-caps mt-3 block text-pine/70" htmlFor={`${id}-points`}>Worth</label>
+      <div className="mt-1 flex items-center gap-2">
+        <Input
+          id={`${id}-points`}
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={1000}
+          step="any"
+          value={points}
+          onChange={(e) => onPoints(e.target.value)}
+          aria-invalid={badPoints || undefined}
+          className="w-24 text-[16px]"
+        />
+        <span className="text-[16px] text-pine/70">point{points.trim() === "1" ? "" : "s"}</span>
+      </div>
+      {badPoints && <p className="mt-1 text-[15px] font-bold text-[#a3341f]">A number from 0 to 1,000.</p>}
+    </section>
+  );
+}
+
 function FieldInspector({
   field, notebookId, onClose, onSave, onDelete, onInvalidate, saving,
 }: {
@@ -2803,6 +2918,8 @@ function FieldInspector({
   });
   const [prompt, setPrompt] = useState(field?.prompt ?? "");
   const [content, setContent] = useState(field?.content ?? "");
+  const [key, setKey] = useState(() => keyToDraft(field));
+  const [points, setPoints] = useState(() => pointsToDraft(field));
   /** Bumped by Cancel to remount the rich text editor with the reverted value. */
   const [revertNonce, setRevertNonce] = useState(0);
   const [mediaBump, setMediaBump] = useState(0);
@@ -2824,9 +2941,9 @@ function FieldInspector({
    * would vanish with the panel.
    */
   const pending = useRef<{ field?: FieldRow; draft: FieldDraft; save: typeof onSave }>({
-    field, draft: { label, options, prompt, content }, save: onSave,
+    field, draft: { label, options, prompt, content, key, points }, save: onSave,
   });
-  pending.current = { field, draft: { label, options, prompt, content }, save: onSave };
+  pending.current = { field, draft: { label, options, prompt, content, key, points }, save: onSave };
   useEffect(() => () => {
     const { field: f, draft: d, save } = pending.current;
     if (f && fieldIsDirty(f, d)) save(fieldPatch(f, d), f.id);
@@ -2840,7 +2957,7 @@ function FieldInspector({
     // belong to, and Cancel stays the way to actually throw them away.
     const prev = lastField.current;
     if (prev && prev.id === syncedFieldId.current) {
-      const pending = { label, options, prompt, content };
+      const pending = { label, options, prompt, content, key, points };
       if (fieldIsDirty(prev, pending)) onSave(fieldPatch(prev, pending), prev.id);
     }
     syncedFieldId.current = field?.id;
@@ -2849,6 +2966,8 @@ function FieldInspector({
     setPrompt(field?.prompt ?? "");
     setContent(field?.content ?? "");
     setOptions(safeOptions(field?.options).join("\n"));
+    setKey(keyToDraft(field));
+    setPoints(pointsToDraft(field));
     // Only the identity of the selected field should drive a resync; including
     // the draft here would reset it on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2860,7 +2979,7 @@ function FieldInspector({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const draft: FieldDraft = { label, options, prompt, content };
+  const draft: FieldDraft = { label, options, prompt, content, key, points };
   const dirty = !!field && fieldIsDirty(field, draft);
 
   const revert = () => {
@@ -2868,6 +2987,8 @@ function FieldInspector({
     setPrompt(field?.prompt ?? "");
     setContent(field?.content ?? "");
     setOptions(safeOptions(field?.options).join("\n"));
+    setKey(keyToDraft(field));
+    setPoints(pointsToDraft(field));
     setRevertNonce((n) => n + 1);
   };
 
@@ -3140,6 +3261,18 @@ function FieldInspector({
             }}
           />
         </>
+      )}
+
+      {KEYABLE.has(field.type) && (
+        <AnswerKeyEditor
+          where={where}
+          field={field}
+          options={options}
+          value={key}
+          onChange={setKey}
+          points={points}
+          onPoints={setPoints}
+        />
       )}
 
       {field.type === "image" && (
@@ -3429,23 +3562,24 @@ function TemplateClassesMenu({ templateId, title, className }: { templateId: str
   });
   const list = useQuery({
     queryKey: ["teaching-notebooks"],
-    queryFn: () => api.get<{ notebooks: { id: string; copies?: { classId: string; className: string; pendingPages: number; pendingFields: number }[] }[] }>("/api/my/teaching-notebooks"),
+    queryFn: () => api.get<{ notebooks: { id: string; copies?: { classId: string; className: string; pendingPages: number; pendingFields: number; pendingKeys?: number }[] }[] }>("/api/my/teaching-notebooks"),
   });
   const me = list.data?.notebooks.find((n) => n.id === templateId);
   const copies = me?.copies ?? [];
-  const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
+  const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields + (c.pendingKeys ?? 0), 0);
   const pushed = new Set(copies.map((c) => c.classId));
   const teachable = (classes.data?.classes ?? []).filter((c) => c.my_role === "teacher" && !pushed.has(c.id));
   const hasClasses = (classes.data?.classes ?? []).some((c) => c.my_role === "teacher");
   const refresh = () => qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
 
   const sync = useMutation({
-    mutationFn: () => api.post<{ classes: number; pagesAdded: number; fieldsAdded: number }>(`/api/templates/${templateId}/sync`, {}),
+    mutationFn: () => api.post<{ classes: number; pagesAdded: number; fieldsAdded: number; keysAdded?: number }>(`/api/templates/${templateId}/sync`, {}),
     onSuccess: (res) => {
       refresh();
       const bits = [];
       if (res.pagesAdded) bits.push(`${res.pagesAdded} page${res.pagesAdded === 1 ? "" : "s"}`);
       if (res.fieldsAdded) bits.push(`${res.fieldsAdded} answer box${res.fieldsAdded === 1 ? "" : "es"}`);
+      if (res.keysAdded) bits.push(`${res.keysAdded} answer key${res.keysAdded === 1 ? "" : "s"}`);
       toast.success(bits.length ? `Sent ${bits.join(" and ")} to ${res.classes} class${res.classes === 1 ? "" : "es"}` : "Every class already has everything in this template");
     },
     onError: (e: Error) => toast.error(e.message),

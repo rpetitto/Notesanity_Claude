@@ -38,6 +38,18 @@ const release = (date, summary, items) => `
 
 const RELEASES = [
   [
+    "November 4, 2026",
+    "Answer keys that check the work for you, one question at a time, and due dates for one student.",
+    [
+      ["new", "<b>Answer keys.</b> Select a text box, dropdown or checkbox in the editor and its settings now have an <b>Answer key</b>: the answers you'll accept, one per line, the right option, or whether the box should be ticked, and what it's worth. Checking forgives capitals, spacing and end punctuation, and numbers match however they're written, so 0.5, .5 and 1/2 are the same answer. Students never see a key."],
+      ["new", "<b>Check by question.</b> From an assignment, <b>Check by question</b> shows one question at a time with every student's answer to it, identical answers gathered together, so eighteen students who wrote &ldquo;4&rdquo; are one decision rather than eighteen. The key has already decided what it can; mark a whole group or one student right or wrong, or accept an answer you hadn't thought of into the key. A student who wrote their answer with a pen instead of typing it shows up with the part of the page they wrote on, so their work gets checked too. A box with no key works the same way: mark the answers by hand."],
+      ["new", "<b>Scores can become grades.</b> While you grade, the panel shows each student's score against the key and offers it as the grade. <b>Make grades from scores</b> does the whole class at once, as points or as a letter (90% is an A). It leaves alone work you've already returned or graded, anyone with an answer still to check, and anyone who answered nothing, so missing work isn't recorded as a zero. Nothing is returned until you return it."],
+      ["better", "<b>Design with AI drafts the answer key.</b> Questions with one short right answer come with it filled in on the box, for you to check. It's never printed on the page."],
+      ["better", "<b>Answer keys follow your templates.</b> A key set on a template goes with it when you push it into a class, and a key you add later goes out with <b>Send updates</b>. A key you set in one class's copy is left as it is."],
+      ["new", "<b>A due date for one student.</b> In grading, <b>Give an extension</b> under the grade sets that student's own due date for the assignment. They see their date everywhere they see the assignment, your gradebook doesn't call their work missing until it passes, and <b>Use the class date</b> takes it away."],
+    ],
+  ],
+  [
     "November 2, 2026",
     "A gradebook that reads like one, and a round of work on who can see and change what.",
     [

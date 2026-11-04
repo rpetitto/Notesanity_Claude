@@ -8,7 +8,11 @@
  * refuses anything active, and this is the second lock on the same door.
  */
 
-export interface AiAnswer { x: number; y: number; w: number; h: number; kind: "text" | "checkbox"; label: string }
+export interface AiAnswer {
+  x: number; y: number; w: number; h: number; kind: "text" | "checkbox"; label: string;
+  /** The drafted answer key ("" when the question is open-ended). Teacher-only. */
+  key?: string;
+}
 export interface AiPage { svg: string; answers: AiAnswer[] }
 export interface AiDesign { title: string; pages: AiPage[] }
 

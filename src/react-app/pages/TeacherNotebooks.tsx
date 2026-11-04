@@ -31,7 +31,7 @@ interface TeachingNotebook extends ClassNotebook {
   template_id: string | null;
   copies?: {
     notebookId: string; classId: string; className: string; status: string; archived: boolean;
-    pendingPages: number; pendingFields: number;
+    pendingPages: number; pendingFields: number; pendingKeys?: number;
   }[];
 }
 
@@ -78,12 +78,13 @@ export default function TeacherNotebooks() {
 
   const sync = useMutation({
     mutationFn: (templateId: string) =>
-      api.post<{ classes: number; pagesAdded: number; fieldsAdded: number }>(`/api/templates/${templateId}/sync`, {}),
+      api.post<{ classes: number; pagesAdded: number; fieldsAdded: number; keysAdded?: number }>(`/api/templates/${templateId}/sync`, {}),
     onSuccess: (res) => {
       refresh();
       const bits = [];
       if (res.pagesAdded) bits.push(`${res.pagesAdded} page${res.pagesAdded === 1 ? "" : "s"}`);
       if (res.fieldsAdded) bits.push(`${res.fieldsAdded} answer box${res.fieldsAdded === 1 ? "" : "es"}`);
+      if (res.keysAdded) bits.push(`${res.keysAdded} answer key${res.keysAdded === 1 ? "" : "s"}`);
       toast.success(bits.length
         ? `Sent ${bits.join(" and ")} to ${res.classes} class${res.classes === 1 ? "" : "es"}`
         : "Every class already has everything in this template");
@@ -138,7 +139,7 @@ export default function TeacherNotebooks() {
   }, [archivedNotebooks, archivedClass, archivedQuery]);
 
   const templateMenu = (t: TeachingNotebook): MenuItem[] => {
-    const pending = (t.copies ?? []).reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
+    const pending = (t.copies ?? []).reduce((n, c) => n + c.pendingPages + c.pendingFields + (c.pendingKeys ?? 0), 0);
     return [
       {
         label: "Push to classes…",
@@ -188,7 +189,7 @@ export default function TeacherNotebooks() {
     const copies = t.copies ?? [];
     if (t.id === guideId) return `Teacher guide · copied to ${guide.data?.copiesGiven ?? 0} teacher${guide.data?.copiesGiven === 1 ? "" : "s"}`;
     if (copies.length === 0) return "Template · not in a class yet";
-    const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
+    const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields + (c.pendingKeys ?? 0), 0);
     return `Template · in ${copies.length} class${copies.length === 1 ? "" : "es"}${pending ? ` · ${pending} update${pending === 1 ? "" : "s"} to send` : ""}`;
   };
 

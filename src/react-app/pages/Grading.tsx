@@ -15,7 +15,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckCheck, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck,
-  History, Lock, Mail, MoreVertical, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Send, Trash2, Type as TypeIcon,
+  History, ListChecks, Lock, Mail, MoreVertical, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Send, Trash2, Type as TypeIcon,
   Undo2, Unlock, Upload, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,10 +29,12 @@ import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
-import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
+import { Button, Chip, IconButton, Modal, Textarea, buttonClass } from "../components/ui";
 import { cn, relativeTime, dueLabel } from "../lib/utils";
 import { hasGoogleClientId, pushGrades, type ClassroomGrade, type GradePushResult } from "../lib/google";
 import { letterPercent } from "../../shared/grades.mjs";
+import { letterFor } from "../../shared/answers.mjs";
+import type { CheckResponse } from "./CheckByQuestion";
 import GoogleIcon from "../components/GoogleIcon";
 
 /** Header controls share one height so a row of them lines up. */
@@ -354,6 +356,16 @@ export default function Grading() {
   const workUrl = (id: string) =>
     `/api/notebooks/${assignment.notebookId}/work?student=${encodeURIComponent(id)}${scope}`;
 
+  // Scores against the answer key, for the whole class at once — the grade
+  // panel offers the current student's as a suggestion.
+  const check = useQuery({
+    queryKey: ["check", assignmentId],
+    queryFn: () => api.get<CheckResponse>(`/api/assignments/${assignmentId}/check`),
+    enabled: isTeacher && !!assignmentId,
+  });
+  const keyed = !!check.data?.fields.some((f) => f.counted);
+  const keyScore = keyed ? check.data?.students.find((s) => s.student.id === studentId)?.score : undefined;
+
   const work = useQuery({
     queryKey: ["work", assignment?.notebookId, studentId, scope],
     queryFn: () => api.get<WorkResponse>(workUrl(studentId!)),
@@ -657,6 +669,12 @@ export default function Grading() {
             </Button>
           )}
 
+          {(check.data?.fields.length ?? 0) > 0 && (
+            <Link to={`/assignments/${assignmentId}/check`} className={buttonClass("secondary", "sm")}>
+              <ListChecks className="h-4 w-4" strokeWidth={2.5} /> Check by question
+            </Link>
+          )}
+
           <Button variant="secondary" size="sm" onClick={() => setHistoryOpen(true)}>
             <History className="h-4 w-4" strokeWidth={2.5} /> History
           </Button>
@@ -923,6 +941,7 @@ export default function Grading() {
           onReopen={() => setReopenModalOpen(true)}
           onExtend={(d) => extend.mutate(d)}
           extending={extend.isPending}
+          keyScore={keyScore}
           saving={grade.isPending}
           mobileOpen={gradeSheetOpen}
           onMobileClose={() => setGradeSheetOpen(false)}
@@ -1104,10 +1123,12 @@ function StatusPill({ row }: { row?: GradeRow }) {
 }
 
 function GradePanel({
-  assignment, row, onSave, onReturn, onReopen, onExtend, extending, saving, mobileOpen, onMobileClose,
+  assignment, row, onSave, onReturn, onReopen, onExtend, extending, saving, mobileOpen, onMobileClose, keyScore,
 }: {
   assignment: any;
   row?: GradeRow;
+  /** Their score against the answer key, when the assignment's boxes have one. */
+  keyScore?: { earned: number; possible: number; pending: number; answered: number };
   onSave: (body: any) => void;
   onReturn: () => void;
   onReopen: () => void;
@@ -1147,8 +1168,40 @@ function GradePanel({
    */
   const returned = !!row.returnedAt;
 
+  const fromKey = keyScore && keyScore.possible > 0 && (assignment.grading === "points" || assignment.grading === "letter")
+    ? assignment.grading === "points"
+      ? String(Math.round((keyScore.earned / keyScore.possible) * Number(assignment.pointsMax ?? 100) * 100) / 100)
+      : letterFor((keyScore.earned / keyScore.possible) * 100)
+    : null;
+  const usingKey = fromKey !== null && (assignment.grading === "points" ? points === fromKey : letter === fromKey);
+
   const fields = (
     <>
+      {keyScore && keyScore.possible > 0 && (
+        <div className="mt-4 rounded-[14px] border-2 border-pine/15 bg-oat/60 p-3" data-testid="key-score">
+          <div className="label-caps text-pine/70">Answer key</div>
+          <div className="mt-0.5 font-display text-[18px] font-bold text-pine">
+            {keyScore.earned} of {keyScore.possible} point{keyScore.possible === 1 ? "" : "s"}
+          </div>
+          {keyScore.pending > 0 && (
+            <p className="text-[15px] text-[#5c4611]">
+              {keyScore.pending} answer{keyScore.pending === 1 ? "" : "s"} still to check
+            </p>
+          )}
+          {fromKey !== null && !returned && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-2"
+              disabled={usingKey}
+              onClick={() => (assignment.grading === "points" ? setPoints(fromKey) : setLetter(fromKey))}
+            >
+              {usingKey ? "Using it" : `Use ${fromKey}${assignment.grading === "points" ? ` / ${assignment.pointsMax}` : ""} as the grade`}
+            </Button>
+          )}
+        </div>
+      )}
+
       {assignment.grading === "points" && (
         <div className="mt-4">
           <label className="label-caps block text-pine/70">Points</label>

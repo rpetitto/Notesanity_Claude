@@ -134,7 +134,7 @@ app.post("/api/my/page-library", handler(async (c) => {
     stored.push({
       type: f.type, x: f.x, y: f.y, w: f.w, h: f.h,
       label: f.label ?? "", options: f.options ?? "", prompt: f.prompt ?? "",
-      content: f.content ?? "", media_key: mediaKey,
+      content: f.content ?? "", media_key: mediaKey, answer_key: f.answer_key ?? "", points: f.points ?? 1,
     });
   }
 

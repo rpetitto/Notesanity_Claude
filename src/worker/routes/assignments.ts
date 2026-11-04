@@ -2,8 +2,9 @@ import { app, db } from "../platform";
 import {
   handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
 import { gradeContribution } from "../../shared/grades.mjs";
+import { KEYABLE, checkAnswer, letterFor } from "../../shared/answers.mjs";
 import { logActivity } from "../lib/activity";
-import { HAS_INK_BYTES } from "../lib/ink";
+import { HAS_INK_BYTES, inkKey, parseShape, readInkMany } from "../lib/ink";
 
 async function loadAssignment(c: any, assignmentId: string) {
   const a = await db.prepare(`SELECT * FROM assignments WHERE id = ?`).bind(assignmentId).first<any>();
@@ -689,6 +690,266 @@ app.post("/api/assignments/:id/extension", handler(async (c) => {
     .bind(uid(), a.id, studentId, due, now(), now())
     .run();
   return c.json({ ok: true, dueAt: due });
+}));
+
+// ---------------------------------------------------------------------------
+// Checking by question.
+//
+// A box with an answer key is checked as the work is read: every student's
+// answer to it against the key, in one place, with the teacher able to
+// overrule any single decision. A box without a key can still be marked by
+// hand, and once anyone's answer to it has been marked it counts for everyone
+// (the ones nobody has marked yet show as still to check, not as wrong).
+//
+// Keys and marks are teacher-only. Nothing here is reachable by a student,
+// and the routes students use select their columns by name, so a key never
+// rides along with their own work.
+// ---------------------------------------------------------------------------
+
+const KEYABLE_SQL = [...KEYABLE].map((t) => `'${t}'`).join(",");
+
+async function requireTeacherOf(c: any, assignmentId: string) {
+  const loaded = await loadAssignment(c, assignmentId);
+  if (!loaded.isTeacher) throw new HttpError(403, "Teacher access required");
+  return loaded;
+}
+
+/** The assignment's boxes, every student's answers to them, and what's been decided. */
+async function checkSheet(a: any) {
+  const pageIds: string[] = JSON.parse(a.page_ids || "[]");
+  const empty = { pages: [] as any[], fields: [] as any[], students: [] as any[] };
+  if (pageIds.length === 0) return empty;
+  const ph = pageIds.map(() => "?").join(",");
+  const [pagesRes, fieldsRes, rosterRes, instRes, valuesRes, marksRes, subsRes] = await db.batch([
+    db.prepare(
+      `SELECT id, seq, asset_key, source_index, width, height, label, pattern, pattern_color
+         FROM pages WHERE notebook_id = ? AND archived = 0 AND id IN (${ph}) ORDER BY seq`,
+    ).bind(a.notebook_id, ...pageIds),
+    db.prepare(
+      `SELECT id, page_id, type, x, y, w, h, label, options, prompt, answer_key, points
+         FROM fields WHERE notebook_id = ? AND archived = 0 AND type IN (${KEYABLE_SQL}) AND page_id IN (${ph})`,
+    ).bind(a.notebook_id, ...pageIds),
+    db.prepare(
+      `SELECT u.id, u.name, u.email, u.picture FROM enrollments e JOIN users u ON u.id = e.user_id
+        WHERE e.class_id = ? AND e.role = 'student' AND e.status = 'active' ORDER BY u.name`,
+    ).bind(a.class_id),
+    db.prepare(`SELECT id, student_id FROM instances WHERE notebook_id = ?`).bind(a.notebook_id),
+    db.prepare(
+      `SELECT v.instance_id, v.field_id, v.value FROM field_values v JOIN fields f ON f.id = v.field_id
+        WHERE f.notebook_id = ? AND f.archived = 0 AND f.page_id IN (${ph})
+          AND v.instance_id IN (SELECT id FROM instances WHERE notebook_id = ?)`,
+    ).bind(a.notebook_id, ...pageIds, a.notebook_id),
+    db.prepare(`SELECT student_id, field_id, correct FROM answer_marks WHERE assignment_id = ?`).bind(a.id),
+    db.prepare(
+      `SELECT student_id, status, grade_points, grade_letter, graded_at FROM submissions WHERE assignment_id = ?`,
+    ).bind(a.id),
+  ]) as D1Result<any>[];
+
+  const pages = pagesRes.results ?? [];
+  const pageOrder = new Map(pages.map((p: any, i: number) => [p.id, i]));
+  // Reading order: page by page, then top to bottom, then left to right — with
+  // boxes on roughly the same line read left to right rather than by a pixel.
+  const fields = (fieldsRes.results ?? [])
+    .filter((f: any) => pageOrder.has(f.page_id))
+    .sort((x: any, y: any) =>
+      (pageOrder.get(x.page_id)! - pageOrder.get(y.page_id)!)
+      || (Math.abs(x.y - y.y) > Math.min(x.h, y.h) / 2 ? x.y - y.y : x.x - y.x));
+
+  const studentOf = new Map<string, string>();
+  for (const i of instRes.results ?? []) studentOf.set(i.id, i.student_id);
+  const values = new Map<string, string>();
+  for (const v of valuesRes.results ?? []) {
+    const sid = studentOf.get(v.instance_id);
+    if (sid) values.set(`${sid}:${v.field_id}`, v.value ?? "");
+  }
+  const marks = new Map<string, boolean>();
+  const markedFields = new Set<string>();
+  for (const m of marksRes.results ?? []) {
+    marks.set(`${m.student_id}:${m.field_id}`, !!m.correct);
+    markedFields.add(m.field_id);
+  }
+  const subs = new Map<string, any>();
+  for (const s of subsRes.results ?? []) subs.set(s.student_id, s);
+
+  // A box counts toward the score once it has a key or anyone has been marked on it.
+  const counted = new Set(fields.filter((f: any) => f.answer_key || markedFields.has(f.id)).map((f: any) => f.id));
+  const possible = fields.reduce((n: number, f: any) => n + (counted.has(f.id) ? Number(f.points) || 0 : 0), 0);
+
+  const students = (rosterRes.results ?? []).map((u: any) => {
+    let earned = 0;
+    let pending = 0;
+    let answered = 0;
+    const answers: Record<string, { value: string; auto: boolean | null; mark: boolean | null }> = {};
+    for (const f of fields) {
+      const k = `${u.id}:${f.id}`;
+      const value = values.get(k) ?? "";
+      const auto = checkAnswer(f.type, f.answer_key, value);
+      const mark = marks.has(k) ? marks.get(k)! : null;
+      answers[f.id] = { value, auto, mark };
+      if (!counted.has(f.id)) continue;
+      if (value.trim() || mark !== null) answered++;
+      const result = mark ?? auto;
+      if (result === null) pending++;
+      else if (result) earned += Number(f.points) || 0;
+    }
+    const sub = subs.get(u.id);
+    return {
+      student: u,
+      answers,
+      score: { earned: Math.round(earned * 100) / 100, possible: Math.round(possible * 100) / 100, pending, answered },
+      status: sub?.status ?? "not_started",
+      graded: !!sub?.graded_at,
+      grade: { points: sub?.grade_points ?? null, letter: sub?.grade_letter ?? null },
+    };
+  });
+
+  return {
+    pages,
+    fields: fields.map((f: any) => ({ ...f, counted: counted.has(f.id) })),
+    students,
+  };
+}
+
+/** What a score comes to under this assignment's grading: points, or a letter. */
+function gradeFromScore(a: any, earned: number, possible: number) {
+  if (possible <= 0) return null;
+  const pct = (earned / possible) * 100;
+  if (a.grading === "points") return { points: Math.round((earned / possible) * Number(a.points_max ?? 100) * 100) / 100, letter: null };
+  if (a.grading === "letter") return { points: null, letter: letterFor(pct) };
+  return null;
+}
+
+app.get("/api/assignments/:id/check", handler(async (c) => {
+  const { a } = await requireTeacherOf(c, param(c, "id"));
+  const sheet = await checkSheet(a);
+  return c.json({
+    assignment: { id: a.id, title: a.title, notebookId: a.notebook_id, classId: a.class_id, grading: a.grading, pointsMax: a.points_max },
+    ...sheet,
+  });
+}));
+
+/**
+ * Overrule the key for students' answers to one box: right, wrong, or
+ * (`correct: null`) back to whatever the key says. `studentIds` marks a group
+ * at once — everyone who gave the same answer — and every one of them has to
+ * be in the class, or nothing is marked.
+ */
+app.post("/api/assignments/:id/marks", handler(async (c) => {
+  const { a, user } = await requireTeacherOf(c, param(c, "id"));
+  const b = await c.req.json<{ studentId?: string; studentIds?: string[]; fieldId?: string; correct?: boolean | null }>();
+  const ids = [...new Set((Array.isArray(b.studentIds) ? b.studentIds : [b.studentId]).map((v) => String(v ?? "")).filter(Boolean))];
+  if (ids.length === 0 || ids.length > 1000) throw new HttpError(400, "Say which students");
+  const fieldId = String(b.fieldId ?? "");
+  const pageIds: string[] = JSON.parse(a.page_ids || "[]");
+  // The box has to be on this assignment's pages in this assignment's notebook.
+  const field = await db.prepare(`SELECT id, page_id, type FROM fields WHERE id = ? AND notebook_id = ? AND archived = 0`)
+    .bind(fieldId, a.notebook_id).first<{ id: string; page_id: string; type: string }>();
+  if (!field || !pageIds.includes(field.page_id) || !KEYABLE.has(field.type)) throw new HttpError(404, "That question isn't part of this assignment");
+  const enrolled = new Set<string>();
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    const res = await db
+      .prepare(
+        `SELECT user_id FROM enrollments WHERE class_id = ? AND role = 'student' AND status = 'active'
+            AND user_id IN (${chunk.map(() => "?").join(",")})`,
+      )
+      .bind(a.class_id, ...chunk)
+      .all<{ user_id: string }>();
+    for (const r of res.results ?? []) enrolled.add(r.user_id);
+  }
+  if (ids.some((id) => !enrolled.has(id))) throw new HttpError(404, "That student isn't in this class");
+  const stamp = now();
+  const statements = ids.map((studentId) =>
+    b.correct === null || b.correct === undefined
+      ? db.prepare(`DELETE FROM answer_marks WHERE assignment_id = ? AND student_id = ? AND field_id = ?`).bind(a.id, studentId, fieldId)
+      : db
+        .prepare(
+          `INSERT INTO answer_marks (id, assignment_id, student_id, field_id, correct, marked_by, marked_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(assignment_id, student_id, field_id) DO UPDATE SET correct = excluded.correct, marked_by = excluded.marked_by, marked_at = excluded.marked_at`,
+        )
+        .bind(uid(), a.id, studentId, fieldId, b.correct ? 1 : 0, user.id, stamp),
+  );
+  for (let i = 0; i < statements.length; i += 50) await db.batch(statements.slice(i, i + 50));
+  return c.json({ ok: true, marked: ids.length });
+}));
+
+/**
+ * Turn checked scores into grades, for everyone or the students named.
+ *
+ * Leaves alone, and reports, anyone it shouldn't decide for: work already
+ * returned, a grade the teacher already gave (unless `overwrite`), anyone
+ * with an answer nobody has checked yet, and anyone who answered nothing —
+ * work not done is the teacher's to call missing, not ours to call zero.
+ * Feedback is never touched.
+ */
+app.post("/api/assignments/:id/apply-scores", handler(async (c) => {
+  const { a, user } = await requireTeacherOf(c, param(c, "id"));
+  if (a.grading !== "points" && a.grading !== "letter") {
+    throw new HttpError(400, "Scores can become grades on points or letter assignments — this one is graded another way.");
+  }
+  const b = await c.req.json<{ studentIds?: string[]; overwrite?: boolean }>().catch(() => ({} as { studentIds?: string[]; overwrite?: boolean }));
+  const only = Array.isArray(b.studentIds) ? new Set(b.studentIds.map(String)) : null;
+  const sheet = await checkSheet(a);
+  const skipped = { returned: 0, graded: 0, pending: 0, blank: 0 };
+  const stamp = now();
+  const statements: D1PreparedStatement[] = [];
+  for (const s of sheet.students) {
+    if (only && !only.has(s.student.id)) continue;
+    if (s.status === "returned") { skipped.returned++; continue; }
+    if (s.graded && !b.overwrite) { skipped.graded++; continue; }
+    // Nothing typed and nothing marked: that's missing work, not a zero to record.
+    if (s.score.answered === 0) { skipped.blank++; continue; }
+    if (s.score.pending > 0) { skipped.pending++; continue; }
+    const g = gradeFromScore(a, s.score.earned, s.score.possible);
+    if (!g) { skipped.blank++; continue; }
+    statements.push(
+      db.prepare(
+        `INSERT INTO submissions (id, assignment_id, student_id, status, grade_points, grade_letter, graded_at, graded_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'not_started', ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(assignment_id, student_id) DO UPDATE SET grade_points = excluded.grade_points, grade_letter = excluded.grade_letter,
+                graded_at = excluded.graded_at, graded_by = excluded.graded_by, updated_at = excluded.updated_at`,
+      ).bind(uid(), a.id, s.student.id, g.points, g.letter, stamp, user.id, stamp, stamp),
+    );
+  }
+  for (let i = 0; i < statements.length; i += 50) await db.batch(statements.slice(i, i + 50));
+  if (statements.length) {
+    await logActivity({
+      actorId: user.id, actorRole: "teacher", action: "grade",
+      detail: `Graded "${a.title}" from the answer key (${statements.length})`, assignmentId: a.id, notebookId: a.notebook_id,
+    });
+  }
+  return c.json({ applied: statements.length, skipped });
+}));
+
+/**
+ * Every student's own ink on one page of the assignment, so the check view can
+ * show what each of them wrote around a box as well as what they typed.
+ */
+app.get("/api/assignments/:id/page-ink", handler(async (c) => {
+  const { a } = await requireTeacherOf(c, param(c, "id"));
+  const pageId = c.req.query("pageId") ?? "";
+  const pageIds: string[] = JSON.parse(a.page_ids || "[]");
+  if (!pageIds.includes(pageId)) throw new HttpError(404, "That page isn't part of this assignment");
+  const rows = await db
+    .prepare(
+      `SELECT i.student_id, l.instance_id, l.data, l.byte_length FROM layers l
+         JOIN instances i ON i.id = l.instance_id
+         JOIN enrollments e ON e.class_id = ? AND e.user_id = i.student_id AND e.role = 'student' AND e.status = 'active'
+        WHERE i.notebook_id = ? AND l.page_id = ? AND l.kind = 'student'
+          AND (l.byte_length > ${HAS_INK_BYTES} OR l.data <> '')`,
+    )
+    .bind(a.class_id, a.notebook_id, pageId)
+    .all<{ student_id: string; instance_id: string; data: string; byte_length: number }>();
+  const list = rows.results ?? [];
+  const keys = list.map((r) => inkKey(a.notebook_id, r.instance_id, pageId, "student"));
+  const blobs = await readInkMany(keys);
+  const ink: Record<string, string> = {};
+  list.forEach((r, i) => {
+    const { v, s, x, e } = blobs.get(keys[i]) ?? parseShape(r.data);
+    if (s.length || x.length || e.length) ink[r.student_id] = JSON.stringify({ v, s, x, e, c: [] });
+  });
+  return c.json({ pageId, ink });
 }));
 
 /** Release grades — one student, or the whole class at once. */

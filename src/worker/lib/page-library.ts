@@ -28,6 +28,9 @@ export interface LibraryField {
   content: string;
   /** A library-owned copy of the original's media, or null when it had none. */
   media_key: string | null;
+  /** The box's answer key and worth — the teacher's, so they travel with the page. */
+  answer_key?: string;
+  points?: number;
 }
 
 /**

@@ -2,6 +2,7 @@ import { app, db, storage } from "../platform";
 import {
   fileHeaders, handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, requireTeacher, HttpError, param,} from "../lib/session";
 import { fieldContent, importedLinks, linkLabel } from "../lib/links";
+import { serializeKey } from "../../shared/answers.mjs";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import type { LibraryField } from "../lib/page-library";
 import { requireNotebookRoom, requirePlan } from "../lib/plans";
@@ -188,7 +189,9 @@ app.get("/api/notebooks/:id", handler(async (c) => {
     .bind(nb.id)
     .all();
   const fields = await db
+    // Answer keys are a teacher's: they're selected only for one.
     .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, content, media_key IS NOT NULL AS has_media
+              ${isTeacher ? ", answer_key, points" : ""}
          FROM fields WHERE notebook_id = ? AND archived = 0`)
     .bind(nb.id)
     .all();
@@ -447,12 +450,12 @@ async function insertLibraryPage(
     await db
       .prepare(
         `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
-                             content, media_key, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                             content, media_key, answer_key, points, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .bind(
         uid(), notebookId, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
-        f.prompt ?? "", f.content ?? "", mediaKey, now(),
+        f.prompt ?? "", f.content ?? "", mediaKey, f.answer_key ?? "", f.points ?? 1, now(),
       )
       .run();
   }
@@ -569,12 +572,12 @@ app.post("/api/notebooks/:id/pages/:pageId/duplicate", handler(async (c) => {
     await db
       .prepare(
         `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
-                             content, media_key, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                             content, media_key, answer_key, points, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .bind(
         uid(), nb.id, newId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
-        f.prompt ?? "", f.content ?? "", f.media_key ?? null, now(),
+        f.prompt ?? "", f.content ?? "", f.media_key ?? null, f.answer_key ?? "", f.points ?? 1, now(),
       )
       .run();
   }
@@ -916,7 +919,7 @@ app.post("/api/notebooks/:id/fields/bulk", handler(async (c) => {
   const body = await c.req.json<{
     pageId: string;
     /** `content` is read only for links — "Add the file's links" places them through here. */
-    fields: { type: string; x: number; y: number; w: number; h: number; label?: string; content?: string }[];
+    fields: { type: string; x: number; y: number; w: number; h: number; label?: string; content?: string; answerKey?: unknown }[];
   }>();
   const wanted = Array.isArray(body.fields) ? body.fields : [];
   if (!wanted.length) throw new HttpError(400, "No fields to add");
@@ -942,13 +945,15 @@ app.post("/api/notebooks/:id/fields/bulk", handler(async (c) => {
   const statements = wanted.map((f, i) =>
     db
       .prepare(
-        `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, answer_key, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         ids[i], nb.id, page.id, f.type, f.x, f.y, f.w, f.h,
         f.type === "link" ? linkLabel(f.label) : f.label ?? "", "[]", "",
-        f.type === "link" ? fieldContent("link", f.content) : "", now(), now(),
+        f.type === "link" ? fieldContent("link", f.content) : "",
+        // A drafted key (Design with AI) comes with its box; anything unreadable is no key.
+        serializeKey(f.type, f.answerKey), now(), now(),
       ),
   );
   statements.push(db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id));
@@ -965,9 +970,12 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
     .first<any>();
   if (!field) throw new HttpError(404, "Field not found");
   const b = await c.req.json<any>();
+  const points = b.points === undefined ? field.points ?? 1 : Number(b.points);
+  if (!Number.isFinite(points) || points < 0 || points > 1000) throw new HttpError(400, "Points must be between 0 and 1,000");
   await db
     .prepare(
-      `UPDATE fields SET x = ?, y = ?, w = ?, h = ?, label = ?, options = ?, prompt = ?, content = ?, archived = ?, updated_at = ?
+      `UPDATE fields SET x = ?, y = ?, w = ?, h = ?, label = ?, options = ?, prompt = ?, content = ?, archived = ?, updated_at = ?,
+              answer_key = ?, points = ?
         WHERE id = ?`,
     )
     .bind(
@@ -978,7 +986,9 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
       // Cleaned on the way in — markup sanitised, a link's address checked —
       // so what is stored is already safe to render.
       b.content === undefined ? field.content ?? "" : fieldContent(field.type, b.content),
-      b.archived === undefined ? field.archived : b.archived ? 1 : 0, now(), field.id,
+      b.archived === undefined ? field.archived : b.archived ? 1 : 0, now(),
+      b.answerKey === undefined ? field.answer_key ?? "" : serializeKey(field.type, b.answerKey),
+      points, field.id,
     )
     .run();
   await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
@@ -1017,9 +1027,9 @@ app.post("/api/notebooks/:id/fields/:fieldId/duplicate", handler(async (c) => {
   const y = f.y + nudge + f.h <= f.page_h ? f.y + nudge : Math.max(0, f.y - nudge);
   await db.batch([
     db.prepare(
-      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, media_key, archived, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-    ).bind(id, nb.id, f.page_id, f.type, x, y, f.w, f.h, f.label ?? "", f.options ?? "[]", f.prompt ?? "", f.content ?? "", mediaKey, now(), now()),
+      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, media_key, answer_key, points, archived, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    ).bind(id, nb.id, f.page_id, f.type, x, y, f.w, f.h, f.label ?? "", f.options ?? "[]", f.prompt ?? "", f.content ?? "", mediaKey, f.answer_key ?? "", f.points ?? 1, now(), now()),
     db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id),
   ]);
   return c.json({ field: { id } });

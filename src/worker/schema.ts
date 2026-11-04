@@ -1256,3 +1256,33 @@ migrate("039_extensions", async () => {
     await db.prepare(`ALTER TABLE submissions ADD COLUMN due_override TEXT`).run();
   }
 });
+
+/**
+ * Answer keys and checking by question. Schema only.
+ *
+ * `fields.answer_key` is the box's right answer as JSON (see
+ * shared/answers.mjs), "" when it has none; `fields.points` is what the box is
+ * worth when work is scored from the key. Neither is ever sent to a student.
+ * `answer_marks` holds a teacher's own call on one student's box — right or
+ * wrong — which wins over the key, and is how a box with no key gets marked.
+ */
+migrate("040_answer_keys", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(fields)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("answer_key")) await db.prepare(`ALTER TABLE fields ADD COLUMN answer_key TEXT NOT NULL DEFAULT ''`).run();
+  if (!has("points")) await db.prepare(`ALTER TABLE fields ADD COLUMN points REAL NOT NULL DEFAULT 1`).run();
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS answer_marks (
+        id TEXT PRIMARY KEY,
+        assignment_id TEXT NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+        student_id TEXT NOT NULL,
+        field_id TEXT NOT NULL,
+        correct INTEGER NOT NULL,
+        marked_by TEXT NOT NULL,
+        marked_at TEXT NOT NULL,
+        UNIQUE(assignment_id, student_id, field_id)
+      )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_answer_marks_assignment ON answer_marks(assignment_id)`),
+  ]);
+});
