@@ -5,7 +5,7 @@ import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
-  LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw,
+  LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw, Radio,
   Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal, FilePlus2, SquarePlus, Sparkles, Printer, Ban,
 } from "lucide-react";
 import { type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, pointFor, watchLongPress } from "../components/ContextMenu";
@@ -1369,6 +1369,16 @@ export default function NotebookEditor() {
               there when there isn't. Pages and fields reach students the moment
               they're made — annotations are the only thing publishing holds
               back — so "Up to date" means exactly what it says. */}
+          {/* Watching the class work, from the notebook they're working in. */}
+          {notebook.kind === "class" && notebook.status === "published" && (
+            <Link
+              to={`/notebooks/${notebookId}/live`}
+              title="Every student's page as they work on it"
+              className={cn(buttonClass("secondary", "md"), COMPACT)}
+            >
+              <Radio className="h-5 w-5" strokeWidth={2.5} /> Live
+            </Link>
+          )}
           {isTemplate ? (
             <TemplateClassesMenu templateId={notebookId} title={notebook.title} className={cn(COMPACT, "xl:order-7")} />
           ) : (

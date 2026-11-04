@@ -15,7 +15,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckCheck, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck,
-  History, ListChecks, Lock, Mail, MoreVertical, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Send, Trash2, Type as TypeIcon,
+  History, ListChecks, Lock, Radio, Mail, MoreVertical, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Send, Trash2, Type as TypeIcon,
   Undo2, Unlock, Upload, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -669,6 +669,9 @@ export default function Grading() {
             </Button>
           )}
 
+          <Link to={`/notebooks/${assignment.notebookId}/live${assignment.pageIds?.length === 1 ? `?page=${assignment.pageIds[0]}` : ""}`} className={buttonClass("secondary", "sm")}>
+            <Radio className="h-4 w-4" strokeWidth={2.5} /> Live
+          </Link>
           {(check.data?.fields.length ?? 0) > 0 && (
             <Link to={`/assignments/${assignmentId}/check`} className={buttonClass("secondary", "sm")}>
               <ListChecks className="h-4 w-4" strokeWidth={2.5} /> Check by question

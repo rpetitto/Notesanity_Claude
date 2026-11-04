@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronRight, ImageOff, PanelLeft, Printer } from "lucide-react";
 import { api, assetUrl, pageSource, type WorkResponse } from "../lib/api";
@@ -197,6 +197,23 @@ export default function StudentNotebook() {
   useEffect(() => {
     if (!visiblePage && pages[0]) setVisiblePage(pages[0].id);
   }, [pages, visiblePage]);
+
+  // `?page=` opens at that page — the live view links each tile to the page it shows.
+  const [searchParams] = useSearchParams();
+  const startPage = searchParams.get("page");
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (jumped.current || !startPage || !pages.some((p) => p.id === startPage)) return;
+    // Wait a frame for the pages to be laid out before scrolling to one.
+    const t = setTimeout(() => {
+      const el = scrollRef.current?.querySelector(`[data-page-id="${startPage}"]`);
+      if (!el) return;
+      jumped.current = true;
+      setVisiblePage(startPage);
+      el.scrollIntoView({ block: "start" });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [pages, startPage, work.isLoading]);
 
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   useEffect(() => {

@@ -22,6 +22,7 @@ import Workspace from "./pages/Workspace";
 import AssignmentEditor from "./pages/AssignmentEditor";
 import Grading from "./pages/Grading";
 import CheckByQuestion from "./pages/CheckByQuestion";
+import LiveClass from "./pages/LiveClass";
 import TeacherAssignments from "./pages/TeacherAssignments";
 import PageLibrary from "./pages/PageLibrary";
 import TeacherNotebooks from "./pages/TeacherNotebooks";
@@ -119,6 +120,7 @@ export default function App() {
       <Route path="/assignments/:assignmentId/edit" element={<AssignmentEditor />} />
       <Route path="/assignments/:assignmentId/check" element={<CheckByQuestion />} />
       <Route path="/notebooks/:notebookId/edit" element={<NotebookEditor />} />
+      <Route path="/notebooks/:notebookId/live" element={<LiveClass />} />
       <Route path="/notebooks/:notebookId" element={<Workspace />} />
       <Route path="/work" element={<StudentHome />} />
       <Route path="/settings" element={<Settings />} />

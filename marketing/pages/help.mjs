@@ -332,6 +332,14 @@ const BODY = () => `
          comment, set a grade, and return it.`,
       ],
       [
+        "Can I see what everyone is doing during class?",
+        `Yes. <b>Live</b>, on a published class notebook or on an assignment, shows every student's
+         page as they work — the page they last wrote on, refreshed every few seconds, with
+         anyone active in the last half minute marked <b>Writing now</b>. It follows what students
+         write, not what they're looking at, so someone reading shows the last page they wrote on.
+         Only the class's teachers can open it.`,
+      ],
+      [
         "Can Notesanity check answers for me?",
         `For typed answers, dropdowns and checkboxes, yes. Give the box an answer key in its settings
          in the editor, then open the assignment and choose <b>Check by question</b>: each question's
