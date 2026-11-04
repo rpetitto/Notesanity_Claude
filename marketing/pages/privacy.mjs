@@ -120,6 +120,9 @@ export default () =>
         <li><b>We do not use third-party analytics or advertising trackers.</b> There are no
             tracking cookies in Notesanity; the only cookie is the one that keeps you signed in.</li>
         <li><b>We do not build behavioral profiles</b> of students, or track them across sites.</li>
+        <li><b>Student work never leaves the class.</b> When a teacher sends a copy of a notebook to a
+            colleague, the copy holds the teacher's own pages, answer boxes and answer keys. No
+            student's name, answers or writing goes with it.</li>
       </ul>
 
       <h2 id="ferpa">4. FERPA</h2>

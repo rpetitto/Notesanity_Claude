@@ -23,6 +23,7 @@ import AssignmentEditor from "./pages/AssignmentEditor";
 import Grading from "./pages/Grading";
 import CheckByQuestion from "./pages/CheckByQuestion";
 import LiveClass from "./pages/LiveClass";
+import SharePage, { PendingShare } from "./pages/SharePage";
 import TeacherAssignments from "./pages/TeacherAssignments";
 import PageLibrary from "./pages/PageLibrary";
 import TeacherNotebooks from "./pages/TeacherNotebooks";
@@ -75,6 +76,7 @@ export default function App() {
   if (!user) {
     return (
       <Routes>
+        <Route path="/share/:token" element={<SharePage />} />
         <Route path="*" element={<Landing error={error} />} />
       </Routes>
     );
@@ -95,6 +97,7 @@ export default function App() {
         <Route path="/family/:studentId" element={<FamilyChild />} />
         <Route path="/family/:studentId/notebooks/:notebookId" element={<FamilyNotebookView />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/share/:token" element={<SharePage />} />
         <Route path="*" element={<Navigate to="/family" replace />} />
       </Routes>
     );
@@ -103,6 +106,8 @@ export default function App() {
   const home = user.role === "teacher" ? "/classes" : "/work";
 
   return (
+    <>
+    <PendingShare role={user.role} />
     <Routes>
       <Route path="/" element={<Navigate to={home} replace />} />
       <Route path="/classes" element={<TeacherHome />} />
@@ -121,6 +126,7 @@ export default function App() {
       <Route path="/assignments/:assignmentId/check" element={<CheckByQuestion />} />
       <Route path="/notebooks/:notebookId/edit" element={<NotebookEditor />} />
       <Route path="/notebooks/:notebookId/live" element={<LiveClass />} />
+      <Route path="/share/:token" element={<SharePage />} />
       <Route path="/notebooks/:notebookId" element={<Workspace />} />
       <Route path="/work" element={<StudentHome />} />
       <Route path="/settings" element={<Settings />} />
@@ -131,5 +137,6 @@ export default function App() {
       <Route path="/admin" element={<Suspense fallback={<Spinner label="Loading admin…" />}><Admin /></Suspense>} />
       <Route path="*" element={<Navigate to={home} replace />} />
     </Routes>
+    </>
   );
 }

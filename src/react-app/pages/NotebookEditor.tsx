@@ -5,7 +5,7 @@ import {
   Archive, ArrowLeft, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, EyeOff,
   CopyPlus, FolderPlus, Image as ImageIcon, ImageOff, ImagePlus, ListChecks, Loader2, Mic, MessageSquareText, Palette,
   Pencil, PenLine, RotateCcw, Rows3, Send, Trash2, Type as TypeIcon, Undo2, Upload, X, PanelLeft,
-  LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw, Radio,
+  LibraryBig, Wand2, Eye, ChevronUp, PanelLeftClose, PanelLeftOpen, Presentation, Rows2, GalleryVertical, RefreshCw, Radio, Share2,
   Link2 as LinkIcon, ExternalLink, Unlink2, Copy, MoreHorizontal, FilePlus2, SquarePlus, Sparkles, Printer, Ban,
 } from "lucide-react";
 import { type ContextEntry, MOD, isEditableTarget, longPressJustFired, openContextMenu, pointFor, watchLongPress } from "../components/ContextMenu";
@@ -28,6 +28,7 @@ import Tour from "../components/Tour";
 import PageLibraryModal from "../components/PageLibraryModal";
 import { AiPageDesigner } from "../components/AiPageDesigner";
 import { ExportPagesDialog } from "../components/ExportPagesDialog";
+import { ShareCopyDialog } from "../components/ShareCopyDialog";
 import { useSession } from "../lib/session";
 import { emptyLayer, markRefAt, parseLayer, PEN_COLORS, serializeLayer, TEACHER_COLORS, type LayerData, type MarkRef } from "../lib/ink";
 import { usePinchZoom } from "../lib/usePinchZoom";
@@ -264,6 +265,7 @@ export default function NotebookEditor() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   /** A page just added that the editor should show once the notebook reloads with it. */
   const [jumpTo, setJumpTo] = useState<string | null>(null);
   const { user: me } = useSession();
@@ -1437,6 +1439,12 @@ export default function NotebookEditor() {
                 { onSuccess: () => toast.success(notebook.allowExport === false ? "Students can print and download this notebook" : "Students can no longer print or download this notebook") },
               ),
             }] : []),
+            ...(["class", "template"].includes(notebook.kind ?? "class") ? [{
+              label: "Send a copy to a colleague",
+              icon: <Share2 className="h-5 w-5" strokeWidth={2.5} />,
+              hint: "A link another teacher opens to add their own copy. No student work goes with it.",
+              onClick: () => setShareOpen(true),
+            }] : []),
             {
               label: "Rename",
               icon: <Pencil className="h-5 w-5" strokeWidth={2.5} />,
@@ -1632,6 +1640,7 @@ export default function NotebookEditor() {
         />
       )}
 
+      {shareOpen && <ShareCopyDialog notebookId={notebookId} title={notebook.title} onClose={() => setShareOpen(false)} />}
       {exportOpen && (
         <ExportPagesDialog
           notebookId={notebookId}

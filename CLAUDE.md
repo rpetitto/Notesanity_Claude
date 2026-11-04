@@ -43,7 +43,7 @@ npx wrangler secret put AWS_ACCESS_KEY_ID        SES, if switching mail off Clou
 npx wrangler secret put ANTHROPIC_API_KEY        Design with AI (Claude); without it the feature says it isn't switched on
 npx wrangler dev --var AI_STANDIN:1              Design with AI against a free stand-in instead of Claude (tests use this)
 npx wrangler dev --var AUTH_DEV_LINKS:1          sign-up/sign-in links come back in the response (localhost only)
-tests/e2e/run.sh tenancy                         end-to-end suites on a fresh local server: tenancy, ai-designer, print, gradebook, answers, live
+tests/e2e/run.sh tenancy                         end-to-end suites on a fresh local server: tenancy, ai-designer, print, gradebook, answers, live, share
 ```
 
 Run `npm run build` before the suites (they drive the built SPA), and run

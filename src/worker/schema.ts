@@ -1286,3 +1286,24 @@ migrate("040_answer_keys", async () => {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_answer_marks_assignment ON answer_marks(assignment_id)`),
   ]);
 });
+
+/**
+ * A link a teacher sends a colleague, which adds a copy of one notebook — its
+ * pages, boxes and answer keys, never anyone's work — to their own templates.
+ * The token is the whole credential, so it's random and stays secret to the
+ * people it was sent to; stopping sharing revokes it.
+ */
+migrate("041_notebook_shares", async () => {
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS notebook_shares (
+        token TEXT PRIMARY KEY,
+        notebook_id TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT,
+        copies INTEGER NOT NULL DEFAULT 0
+      )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_notebook_shares_notebook ON notebook_shares(notebook_id)`),
+  ]);
+});

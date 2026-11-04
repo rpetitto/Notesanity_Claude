@@ -31,6 +31,7 @@ import "./routes/status";
 import "./routes/contact";
 import "./routes/ai";
 import "./routes/live";
+import "./routes/shares";
 import { drainMailQueue } from "./lib/mailqueue";
 import { purgeExpired } from "./lib/trash";
 import { purgeOldDesigns } from "./routes/ai";

@@ -1532,6 +1532,8 @@ export async function deleteNotebookCascade(notebookId: string) {
   // orphan rows keyed to a notebook that no longer existed.
   await db.prepare(`DELETE FROM page_annotations WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM pages WHERE notebook_id = ?`).bind(notebookId).run();
+  // A link to a notebook that's gone opens nothing.
+  await db.prepare(`DELETE FROM notebook_shares WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM notebooks WHERE id = ?`).bind(notebookId).run();
 
   /*

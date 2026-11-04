@@ -11,11 +11,12 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, BookOpen, BookText, CheckSquare, ChevronDown, LayoutGrid, Plus, Search, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
+import { Archive, BookOpen, BookText, CheckSquare, ChevronDown, LayoutGrid, Plus, Search, Rows3, Send, Share2, Trash2, Upload, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import NewNotebookModal from "../components/NewNotebookModal";
 import PushToClassesModal from "../components/PushToClassesModal";
+import { ShareCopyDialog } from "../components/ShareCopyDialog";
 import { Button, Chip, ConfirmModal, Input, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
 import { useSession } from "../lib/session";
@@ -44,6 +45,7 @@ export default function TeacherNotebooks() {
   const [archivedClass, setArchivedClass] = useState("all");
   const [archivedQuery, setArchivedQuery] = useState("");
   const [deleting, setDeleting] = useState<TeachingNotebook | null>(null);
+  const [sharing, setSharing] = useState<TeachingNotebook | null>(null);
   /** Template ids the push dialog is open for. */
   const [pushing, setPushing] = useState<string[] | null>(null);
   /** Picking several templates to push at once; null when not picking. */
@@ -155,10 +157,16 @@ export default function TeacherNotebooks() {
         icon: <RefreshCw className="h-5 w-5" strokeWidth={2.5} />,
         disabled: !pending,
         hint: pending
-          ? `${pending} new page${pending === 1 ? "" : "s"} or box${pending === 1 ? "" : "es"} waiting. Only what's new is added — nothing already in a class is changed.`
+          ? `${pending} update${pending === 1 ? "" : "s"} waiting: new pages, boxes or answer keys. Only what's new is added — nothing already in a class is changed.`
           : "Every class already has everything in this template.",
         onClick: () => sync.mutate(t.id),
       }] : []),
+      {
+        label: "Send a copy to a colleague",
+        icon: <Share2 className="h-5 w-5" strokeWidth={2.5} />,
+        hint: "A link another teacher opens to add their own copy. No student work goes with it.",
+        onClick: () => setSharing(t),
+      },
       ...(user?.isSuperadmin ? [{
         label: guideId === t.id ? "Stop using as the teacher guide" : "Make this the teacher guide",
         icon: <BookOpen className="h-5 w-5" strokeWidth={2.5} />,
@@ -383,6 +391,7 @@ export default function TeacherNotebooks() {
           onCreated={(id) => { setBlankOpen(false); navigate(`/notebooks/${id}/edit`); }}
         />
       )}
+      {sharing && <ShareCopyDialog notebookId={sharing.id} title={sharing.title} onClose={() => setSharing(null)} />}
       {deleting && (
         <ConfirmModal
           title={`Delete “${deleting.title}”?`}

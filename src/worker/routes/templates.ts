@@ -553,6 +553,17 @@ export async function guideMasterId(): Promise<string | null> {
 async function copyGuideFor(userId: string, masterId: string): Promise<string> {
   const master = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(masterId).first<any>();
   if (!master) throw new HttpError(404, "The guide isn't available right now.");
+  return copyAsTemplate(userId, master);
+}
+
+/**
+ * A fresh template of a teacher's own from any notebook: its live pages, their
+ * boxes (answer keys included), pictures and recordings, and the teacher's ink
+ * on its pages — each copied under the new notebook's own prefix. Nothing of
+ * any student's comes with it, because none of it lives on these rows.
+ */
+export async function copyAsTemplate(userId: string, master: any): Promise<string> {
+  const masterId = master.id;
   const contents = await templateContents(masterId);
   const copyId = uid();
   let coverKey: string | null = null;

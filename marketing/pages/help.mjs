@@ -161,6 +161,13 @@ const BODY = () => `
          also pick a file straight out of Drive, or start from blank paper.`,
       ],
       [
+        "Can I give a notebook to another teacher?",
+        `Yes. <b>Send a copy to a colleague</b>, in the notebook's &#8943; menu (or a template's), makes
+         a link. A teacher who opens it adds their own copy to their templates: the pages, answer
+         boxes and answer keys, and your writing on the pages. No student work ever goes with it, and
+         their copy changing doesn't change yours. <b>Stop sharing</b> switches the link off.`,
+      ],
+      [
         "Can AI make a worksheet for me?",
         `Yes: <b>Add page</b> &rarr; <b>Design with AI</b>. Describe the page, optionally attach a
          passage, a PDF, a photo or the page you're on, and you get a page with answer boxes already

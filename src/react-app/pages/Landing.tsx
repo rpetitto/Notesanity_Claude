@@ -42,6 +42,8 @@ export default function Landing({ error }: { error?: Error | null }) {
   const codeInUrl = params.get("code") ?? "";
   const [door, setDoorState] = useState<Door | null>(() => {
     if (codeInUrl || window.location.pathname.startsWith("/family")) return "family";
+    // A colleague's notebook link is for a teacher.
+    if (window.location.pathname.startsWith("/share/")) return "teacher";
     try { const d = localStorage.getItem(DOOR_KEY); return d === "teacher" || d === "student" || d === "family" ? d : null; } catch { return null; }
   });
   const setDoor = (d: Door | null) => {
