@@ -378,7 +378,17 @@ export function Menu({
           if (!open) place();
           setOpen((v) => !v);
         }}
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          // Enter and Space press a button without a pointer-down, and so used
+          // to do nothing at all: a keyboard couldn't open any "…" menu. A
+          // click with no pointer behind it (detail 0) is the keyboard.
+          if (e.detail === 0) {
+            if (!open) place();
+            setOpen((v) => !v);
+          }
+        }}
         // A pill trigger replaces the icon-button shape outright rather than
         // merging with it — the round 44px width is exactly what a labelled
         // button must not inherit.
@@ -439,10 +449,18 @@ export function Modal({
   onClose, children, className, title,
 }: { onClose: () => void; children: ReactNode; className?: string; title?: string }) {
   const titleId = useId();
+  // Only a press that starts and ends on the backdrop closes it. A drag that
+  // selects text in a field and lets go past the dialog's edge ends in a click
+  // on the backdrop too, and used to throw the whole dialog away.
+  const pressedBackdrop = useRef(false);
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-pine/40 p-0 sm:items-center sm:p-4"
-      onClick={onClose}
+      onPointerDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget; }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && pressedBackdrop.current) onClose();
+        pressedBackdrop.current = false;
+      }}
     >
       <div
         role="dialog"

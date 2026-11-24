@@ -1,12 +1,12 @@
-import { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
-import { CreditCard, LogOut, RotateCcw } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { BookOpen, CreditCard, KeyRound, LogOut, RotateCcw } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Shell, { Avatar, ErrorNote, Spinner } from "../components/Shell";
 import { useSession, signOutHref, type Plan } from "../lib/session";
 import { api } from "../lib/api";
-import { Button, ButtonLink, Card, Chip } from "../components/ui";
+import { Button, ButtonLink, Card, Chip, Input } from "../components/ui";
 import { FREE_NOTEBOOK_LIMIT, FREE_STUDENT_LIMIT } from "../../shared/plans.mjs";
 
 const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
@@ -78,6 +78,96 @@ function PlanCard({ plan, isTeacher }: { plan: Plan; isTeacher: boolean }) {
           Manage billing
         </Button>
       )}
+    </Card>
+  );
+}
+
+/**
+ * Every teacher gets the getting-started notebook once. This is how they get
+ * it again — after deleting it, or to see what's been added since.
+ */
+function GuideCard() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ["guide-available"], queryFn: () => api.get<{ available: boolean }>("/api/my/guide") });
+  const get = useMutation({
+    mutationFn: () => api.post<{ notebook: { id: string } }>("/api/my/guide", {}),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
+      toast.success("A fresh copy of the guide is in your templates");
+      navigate(`/notebooks/${r.notebook.id}/edit`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  if (!status.data?.available) return null;
+  return (
+    <Card className="mb-6 p-5">
+      <h2 className="font-display text-[17px] text-pine">Getting-started guide</h2>
+      <p className="mt-1 text-[16px] text-pine/70">
+        A notebook that shows you each feature by having you try it. Get a fresh copy any time — it goes in
+        Notebooks → Templates, and your old copy stays as it is.
+      </p>
+      <Button variant="secondary" className="mt-3" disabled={get.isPending} onClick={() => get.mutate()}>
+        <BookOpen className="h-4 w-4" strokeWidth={2.5} />
+        {get.isPending ? "Copying…" : "Get the latest guide"}
+      </Button>
+    </Card>
+  );
+}
+
+/**
+ * Set, change or reset a password.
+ *
+ * A reset link lands here with ?reset=1, and for twenty minutes that session
+ * may choose a new password without the old one — the link already proved
+ * the address. Saving signs out every other device.
+ */
+function PasswordCard({ resetting, onDone }: { resetting: boolean; onDone: () => void }) {
+  const methods = useQuery({ queryKey: ["auth-methods"], queryFn: () => api.get<{ password: boolean; local: boolean }>("/api/auth/methods") });
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const save = useMutation({
+    mutationFn: () => api.post("/api/auth/password/change", { currentPassword: current, newPassword: next }),
+    onSuccess: () => {
+      setCurrent(""); setNext("");
+      methods.refetch();
+      toast.success("Password saved. Any other devices were signed out.");
+      onDone();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  if (!methods.data?.local) return null;
+  const has = methods.data.password;
+  const askCurrent = has && !resetting;
+  return (
+    <Card className="mb-6 p-5" data-testid="password-card">
+      <h2 className="font-display text-[17px] text-pine">{resetting ? "Choose a new password" : has ? "Password" : "Add a password"}</h2>
+      <p className="mt-1 text-[16px] text-pine/70">
+        {resetting
+          ? "You came here from a reset link, so you don't need the old one."
+          : has
+            ? "Change the password you sign in with. Saving signs you out on every other device."
+            : "You sign in with Google or an email link. Add a password if you'd like another way in."}
+      </p>
+      <form className="mt-3 grid gap-3 sm:max-w-md" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        {askCurrent && (
+          <label className="block">
+            <span className="label-caps mb-1 block text-pine/70">Current password</span>
+            <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+          </label>
+        )}
+        <label className="block">
+          <span className="label-caps mb-1 block text-pine/70">New password</span>
+          <Input type="password" autoComplete="new-password" minLength={10} value={next} onChange={(e) => setNext(e.target.value)} />
+          <span className="mt-1 block text-[15px] text-pine/60">At least 10 characters.</span>
+        </label>
+        <div>
+          <Button type="submit" variant="secondary" disabled={save.isPending || next.length < 10 || (askCurrent && !current)}>
+            <KeyRound className="h-4 w-4" strokeWidth={2.5} />
+            {save.isPending ? "Saving…" : "Save password"}
+          </Button>
+        </div>
+      </form>
     </Card>
   );
 }
@@ -155,6 +245,11 @@ export default function Settings() {
         </ButtonLink>
       </Card>
 
+      <PasswordCard
+        resetting={params.get("reset") === "1"}
+        onDone={() => { if (params.get("reset")) setParams({}, { replace: true }); }}
+      />
+
       {/* A teacher who is also a parent here: the way to their children, kept
           off the main menu, which is already full for a teacher. */}
       {user.role !== "guardian" && (user.childCount ?? 0) > 0 && (
@@ -169,6 +264,8 @@ export default function Settings() {
 
       {/* Students have nothing to buy and nothing to manage, so the card is theirs to not see. */}
       {plan && user.role === "teacher" && <PlanCard plan={plan} isTeacher />}
+
+      {user.role === "teacher" && <GuideCard />}
 
       {user.role !== "guardian" && <Card className="mb-6 p-5">
         <h2 className="font-display text-[17px] text-pine">Guided tours</h2>

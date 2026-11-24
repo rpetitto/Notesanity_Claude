@@ -24,6 +24,12 @@ export function relativeTime(iso?: string | null): string {
   return new Date(then).toLocaleDateString();
 }
 
+/** "Due Oct 2, 10:00 AM", or "No due date" — never "Due No due date". */
+export function dueLabel(iso?: string | null): string {
+  const d = formatDue(iso);
+  return d === "No due date" ? d : `Due ${d}`;
+}
+
 export function formatDue(iso?: string | null): string {
   if (!iso) return "No due date";
   const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");

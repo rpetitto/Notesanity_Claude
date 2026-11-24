@@ -62,10 +62,31 @@ const BODY = () => `
 
     ${group("Getting started", [
       [
+        "Is there a quick way to learn it?",
+        `Yes. Every teacher gets a notebook called <b>Getting started with Notesanity</b> under
+         <b>Notebooks</b> &rarr; <b>Templates</b>. Each page has one thing to try right on the page:
+         writing, adding pages and answer boxes, handing a notebook out, assigning and grading. The
+         first section takes about ten minutes. It's yours to edit or delete, and
+         <b>Settings</b> &rarr; <b>Get the latest guide</b> gives you a fresh copy any time.`,
+      ],
+      [
         "How do I sign in?",
         `Three ways: <b>Continue with Google</b> using your school account, a
          <b>sign-in link</b> emailed to you, or an email and password. They all reach the same
-         account — the address is what identifies you, not the method.`,
+         account — the address is what identifies you, not the method. Setting up a password
+         sends a link to confirm the address first; your password works once you've opened it.
+         Forgot it? <b>Forgotten it?</b> on the sign-in page emails a link, and the page it opens lets you choose a
+         new one, which signs you out everywhere else. You can add or change a password any time
+         in <b>Settings</b>.`,
+      ],
+      [
+        "Can we sign in with Clever or ClassLink?",
+        `Yes, once it's set up for your district — <a href="/contact">ask us</a>. Your school's admin
+         then links your Clever district or ClassLink tenant under <b>My School</b>, and
+         <b>Continue with Clever</b> or <b>Continue with ClassLink</b> signs teachers and students
+         into the account their email already has. It only works for your school's own domains, and
+         only from the district you linked. Your district has to share each person's email address,
+         since that's how accounts are matched.`,
       ],
       [
         "Why hasn't my sign-in link arrived?",
@@ -149,9 +170,27 @@ const BODY = () => `
          also pick a file straight out of Drive, or start from blank paper.`,
       ],
       [
+        "Can I give a notebook to another teacher?",
+        `Yes. <b>Send a copy to a colleague</b>, in the notebook's &#8943; menu (or a template's), makes
+         a link. A teacher who opens it adds their own copy to their templates: the pages, answer
+         boxes and answer keys, and your writing on the pages. No student work ever goes with it, and
+         their copy changing doesn't change yours. <b>Stop sharing</b> switches the link off.`,
+      ],
+      [
+        "Can AI make a worksheet for me?",
+        `Yes: <b>Add page</b> &rarr; <b>Design with AI</b>. Describe the page, optionally attach a
+         passage, a PDF, a photo or the page you're on, and you get a page with answer boxes already
+         placed; ask for changes in plain words before you add it. Free includes 1 AI page a month
+         and Pro 50, during the beta too; changes and retries don't count. It draws simple diagrams,
+         tables and organizers but not pictures. Questions with one short right answer come with a
+         drafted answer key on the box, never printed, for you to check. Only your description and
+         what you attach are sent to Anthropic, never anything about your students.`,
+      ],
+      [
         "Do the links in my worksheet still work?",
         `Yes. Web and email links in a PDF, Word or PowerPoint file stay where they were, and open
-         in a new tab when a student taps them. Links from one page of the file to another (a
+         in a new tab when a student taps them; students see a dashed outline and the site's icon
+         on each one, so they know it's there. Links from one page of the file to another (a
          contents page, say) aren't kept. A notebook made before September 24, 2026 kept only the
          words: choose <b>Add element</b> &rarr; <b>Link</b> and it offers to put that page's links back.`,
       ],
@@ -164,10 +203,11 @@ const BODY = () => `
       ],
       [
         "Can I add a link of my own?",
-        `Two ways. <b>Add element</b> &rarr; <b>Link</b> makes anything already on the page open a
-         website: drag a box over the words or picture, then paste the address. In a <b>Text</b>
-         block, select words and press the link button. Addresses have to be web or email
-         addresses.`,
+        `Two ways. <b>Add element</b> &rarr; <b>Link</b>: drag a box, paste the address, and type
+         what it says. Under <b>Students see</b>, choose <b>A button</b> (the site's icon and your
+         words, drawn on the page) or <b>An outline over the page</b>, for words or a picture that are
+         already there. In a <b>Text</b> block, select words and press the link button. Addresses
+         have to be web or email addresses.`,
       ],
       [
         "Can I reuse a page in another notebook?",
@@ -203,8 +243,9 @@ const BODY = () => `
       [
         "Can I put a whole document into my page library?",
         `Yes. On the Library page, <b>Add pages</b> takes a PDF, Word or PowerPoint file, or one from
-         Google Drive, shows you every page in it, and saves the ones you tick. Each becomes its own entry,
-         named after the file and its page number, which you can rename afterwards.`,
+         Google Drive, shows you every page in it with none ticked, and saves the ones you tick (or
+         <b>Choose all</b>). Each becomes its own entry, named after the file and its page number;
+         rename one later from its <b>⋯</b> menu.`,
       ],
       [
         "Can I show a notebook on the projector?",
@@ -243,10 +284,13 @@ const BODY = () => `
          it's published, and deleting a class asks you to type its name first.`,
       ],
       [
-        "Can I get a notebook out as a file?",
-        `Yes — <b>Export</b> in a notebook gives you a PDF, either downloaded or saved straight to
-         your Google Drive. It's every page as it looks on screen, with the writing on it.
-         Students can export their own notebooks the same way.`,
+        "Can I print pages, or get them out as a PDF?",
+        `Yes. <b>Print or download</b> (the printer button, or Ctrl/⌘+P) lets you pick this page,
+         the pages you've selected, all of them, or a range like 1-3, 5, then print them, download a
+         PDF or save it to Google Drive. Pages come out as they look on screen, with the writing,
+         typed answers and ticks on them, or turn that off to print them as handed out. Students
+         can do the same, unless you've chosen <b>Stop students printing and downloading</b> in a
+         class notebook's ⋯ menu. That hides the button, but it can't stop a screenshot.`,
       ],
       [
         "Can students see a notebook I'm still building?",
@@ -284,8 +328,9 @@ const BODY = () => `
         `For an assignment you posted from here, yes: returning the work sends the grade to your
          Classroom gradebook. Only an assignment Notesanity posted can take a grade \u2014 Google
          doesn't let one app change another's \u2014 so one you made in Classroom by hand can't.
-         Points and complete/incomplete go across as numbers; a letter grade stays here, because
-         Classroom only accepts numbers. If the work was never turned in on Classroom, the grade
+         Points and complete/incomplete go across as numbers. Classroom only takes numbers, so a
+         letter grade goes out of 100 as A 95, B 85, C 75, D 65, F 59 — the same values your
+         averages use here. If the work was never turned in on Classroom, the grade
          waits in your Classroom gradebook until you return it there.`,
       ],
       [
@@ -301,6 +346,35 @@ const BODY = () => `
         `Open the assignment. Your roster is on the left — pick a student, then a page — and you
          write on their page in your own layer, so your marks and their work never mix. Add a
          comment, set a grade, and return it.`,
+      ],
+      [
+        "Can I see what everyone is doing during class?",
+        `Yes. <b>Live</b>, on a published class notebook or on an assignment, shows every student's
+         page as they work — the page they last wrote on, refreshed every few seconds, with
+         anyone active in the last half minute marked <b>Writing now</b>. It follows what students
+         write, not what they're looking at, so someone reading shows the last page they wrote on.
+         Only the class's teachers can open it.`,
+      ],
+      [
+        "Can Notesanity check answers for me?",
+        `For typed answers, dropdowns and checkboxes, yes. Give the box an answer key in its settings
+         in the editor, then open the assignment and choose <b>Check by question</b>: each question's
+         answers are gathered together, already marked by the key, and you can overrule any of them.
+         Handwritten answers and longer responses are yours to judge — they're shown so you can
+         mark them, but nothing reads handwriting. Students never see a key.`,
+      ],
+      [
+        "How do scores against the key become grades?",
+        `The grade panel shows a student's score and offers it as their grade, or <b>Make grades from
+         scores</b> in <b>Check by question</b> grades the whole class, as points or a letter. Work
+         you've already graded or returned is left alone unless you choose to replace it, and so is
+         anyone with an answer still to check or nothing answered at all.`,
+      ],
+      [
+        "Can one student have a different due date?",
+        `Yes. While grading, choose <b>Give an extension</b> under that student's grade and set their
+         date. Only they see it, and your gradebook won't show their work as missing until it passes.
+         <b>Use the class date</b> puts them back on everyone else's.`,
       ],
       [
         "Can I undo a mistake I made writing on a notebook?",
@@ -408,7 +482,30 @@ const BODY = () => `
          have admin rights. It covers your approved sign-in domains, everyone at your school,
          your sign-in email delivery, and a read-only look at your school's notebooks,
          assignments and grades. It only shows your own school — an admin can't see another
-         school's people or work.`,
+         school's people or work. You can add your own domain and its subdomains (like
+         students.yourschool.org); a domain that isn't, or that another school already uses, is
+         added by us, so nobody can claim a school's addresses.`,
+      ],
+      [
+        "How do I read the gradebook?",
+        `Students go down the left, surname first, and each assignment is a column across, newest
+         first, with its date, title and maximum score. A yellow cell has been handed in and is
+         waiting for a grade, a red one is past due with nothing handed in, and a red number is
+         under 60%. <b>Average</b> is points earned out of points possible on graded work —
+         complete counts as full marks and incomplete as none, and a letter grade counts out of
+         100 as A 95, B 85, C 75, D 65, F 59. Students see their own total worked out the same
+         way, from grades you've returned. Click
+         any cell to open that student's work on that assignment, or <b>Download CSV</b> for a
+         spreadsheet.`,
+      ],
+      [
+        "Can I set up everyone's accounts before they sign in?",
+        `Yes. On the <b>Admin</b> page, <b>People</b> &rarr; <b>Import from CSV</b> takes a spreadsheet
+         with email, name and role (teacher or student). You see what it would do — who's added, whose
+         role changes, who's skipped and why — before anything changes. Someone on your roster keeps the
+         role you gave them whichever button they pick at sign-in, which matters most when staff and
+         students share one email domain: without a roster, a person who picks Teacher on that domain
+         becomes a teacher. Addresses that belong to another school are never imported.`,
       ],
       [
         "Is there a limit on how many notebooks I can make?",
@@ -425,7 +522,7 @@ const BODY = () => `
       ],
       [
         "Can we export our work?",
-        `A notebook can be exported to PDF from inside it. If you need a bulk export of a whole
+        `Any notebook's pages can be downloaded as a PDF from inside it. If you need a bulk export of a whole
          school's data, email <a href="mailto:support@notesanity.com">support@notesanity.com</a>
          and we'll arrange it.`,
       ],

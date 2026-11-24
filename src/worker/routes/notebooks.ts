@@ -1,7 +1,8 @@
 import { app, db, storage } from "../platform";
 import {
-  handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, requireTeacher, HttpError, param,} from "../lib/session";
+  fileHeaders, handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, requireTeacher, HttpError, param,} from "../lib/session";
 import { fieldContent, importedLinks, linkLabel } from "../lib/links";
+import { serializeKey } from "../../shared/answers.mjs";
 import { deleteInk, inkKey, MAX_LAYER_BYTES } from "../lib/ink";
 import type { LibraryField } from "../lib/page-library";
 import { requireNotebookRoom, requirePlan } from "../lib/plans";
@@ -38,7 +39,7 @@ const OTHERS_NOTEBOOK =
 const FAMILY_READS = "Families can look at a child's work, not change it.";
 
 /** Teacher-or-enrolled-student access to a notebook, resolved via its class. */
-async function notebookAccess(c: any, notebookId: string) {
+export async function notebookAccess(c: any, notebookId: string) {
   const nb = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(notebookId).first<any>();
   if (!nb) throw new HttpError(404, "Notebook not found");
 
@@ -102,7 +103,7 @@ async function notebookAccess(c: any, notebookId: string) {
  * why it withheld authoring rights, and this is what carries that reason out to
  * the person instead of flattening every case into "Teacher access required".
  */
-function requireNotebookTeacher<T extends { isTeacher: boolean; denied?: string }>(access: T): T {
+export function requireNotebookTeacher<T extends { isTeacher: boolean; denied?: string }>(access: T): T {
   if (!access.isTeacher) throw new HttpError(403, access.denied ?? "Teacher access required");
   return access;
 }
@@ -153,17 +154,24 @@ app.post("/api/notebooks/:id/assets", handler(async (c) => {
 
 /** Stream a source PDF to any class member. */
 app.get("/api/notebooks/:id/asset", handler(async (c) => {
-  const { nb } = await notebookAccess(c, param(c, "id"));
+  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
   const key = c.req.query("key") || nb.asset_key;
   if (!key || !String(key).startsWith(`notebooks/${nb.id}/`)) throw new HttpError(400, "Invalid asset key");
+  // This route serves page documents. To anyone but a teacher of the
+  // notebook that means the document behind a page they can see — not ink,
+  // uploads or recordings that happen to share the prefix.
+  if (!isTeacher) {
+    const shown = await db
+      .prepare(`SELECT 1 AS yes FROM pages WHERE notebook_id = ? AND asset_key = ? AND archived = 0 LIMIT 1`)
+      .bind(nb.id, key)
+      .first();
+    if (!shown) throw new HttpError(404, "Asset not found");
+  }
   const obj = await storage.get(key);
   if (!obj) throw new HttpError(404, "Asset not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: {
-      "Content-Type": "application/pdf",
-      // Immutable: asset keys are content-addressed by uuid and never rewritten.
-      "Cache-Control": "private, max-age=31536000, immutable",
-    },
+    // Immutable: asset keys are content-addressed by uuid and never rewritten.
+    headers: fileHeaders("application/pdf", "private, max-age=31536000, immutable"),
   });
 }));
 
@@ -181,7 +189,9 @@ app.get("/api/notebooks/:id", handler(async (c) => {
     .bind(nb.id)
     .all();
   const fields = await db
+    // Answer keys are a teacher's: they're selected only for one.
     .prepare(`SELECT id, page_id, type, x, y, w, h, label, options, prompt, content, media_key IS NOT NULL AS has_media
+              ${isTeacher ? ", answer_key, points" : ""}
          FROM fields WHERE notebook_id = ? AND archived = 0`)
     .bind(nb.id)
     .all();
@@ -191,6 +201,7 @@ app.get("/api/notebooks/:id", handler(async (c) => {
       pageCount: nb.page_count, assetKey: nb.asset_key, lastPublishedAt: nb.last_published_at,
       accentColor: nb.accent_color ?? "#2E7D6B", hasCover: !!nb.cover_key,
       kind: nb.kind ?? "class", ownerId: nb.owner_id, archived: !!nb.archived,
+      allowExport: nb.allow_export !== 0,
       // Where a class copy came from, so the editor can say so.
       templateId: nb.template_id ?? null,
     },
@@ -262,6 +273,14 @@ app.post("/api/notebooks/:id/pages", handler(async (c) => {
   }>();
   const assetKey = body.assetKey || nb.asset_key;
   if (!assetKey) throw new HttpError(400, "No asset to draw pages from");
+  // A page draws on a document this notebook owns: one just uploaded to it,
+  // or one its pages already use. Any other key would let a page — and
+  // everything that copies pages — reach into another notebook's files.
+  if (assetKey !== nb.asset_key && !new RegExp(`^notebooks/${nb.id}/[0-9a-f-]{36}\\.pdf$`).test(assetKey)) {
+    const used = await db.prepare(`SELECT 1 AS yes FROM pages WHERE notebook_id = ? AND asset_key = ? LIMIT 1`).bind(nb.id, assetKey).first();
+    if (!used) throw new HttpError(400, "That document doesn't belong to this notebook");
+  }
+  if ((body.pages?.length ?? 0) > 500) throw new HttpError(400, "Add at most 500 pages at a time");
 
   const { start, step, groupName } = await seqWindow(nb.id, body.insertAfterPageId, body.pages?.length ?? 1);
 
@@ -431,12 +450,12 @@ async function insertLibraryPage(
     await db
       .prepare(
         `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
-                             content, media_key, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                             content, media_key, answer_key, points, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .bind(
         uid(), notebookId, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
-        f.prompt ?? "", f.content ?? "", mediaKey, now(),
+        f.prompt ?? "", f.content ?? "", mediaKey, f.answer_key ?? "", f.points ?? 1, now(),
       )
       .run();
   }
@@ -553,12 +572,12 @@ app.post("/api/notebooks/:id/pages/:pageId/duplicate", handler(async (c) => {
     await db
       .prepare(
         `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
-                             content, media_key, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                             content, media_key, answer_key, points, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       )
       .bind(
         uid(), nb.id, newId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
-        f.prompt ?? "", f.content ?? "", f.media_key ?? null, now(),
+        f.prompt ?? "", f.content ?? "", f.media_key ?? null, f.answer_key ?? "", f.points ?? 1, now(),
       )
       .run();
   }
@@ -810,10 +829,11 @@ app.post("/api/notebooks/:id/pages/arrange", handler(async (c) => {
 
 /** Assignments that draw on this notebook, shown alongside its pages. */
 app.get("/api/notebooks/:id/assignments", handler(async (c) => {
-  const { nb, isTeacher } = await notebookAccess(c, param(c, "id"));
+  const { nb, isTeacher, user } = await notebookAccess(c, param(c, "id"));
   const rows = await db
     .prepare(
-      `SELECT a.id, a.title, a.page_ids, a.due_at, a.release_at, a.grading, a.points_max, a.status, a.created_at
+      `SELECT a.id, a.title, a.page_ids, ${isTeacher ? "a.due_at" : "COALESCE((SELECT s.due_override FROM submissions s WHERE s.assignment_id = a.id AND s.student_id = ?), a.due_at) AS due_at"},
+              a.release_at, a.grading, a.points_max, a.status, a.created_at
               ${isTeacher ? `,
               (SELECT SUM(CASE WHEN submitted_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_submitted,
               (SELECT SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_returned,
@@ -822,7 +842,7 @@ app.get("/api/notebooks/:id/assignments", handler(async (c) => {
         WHERE a.notebook_id = ? ${isTeacher ? "" : "AND a.status = 'active'"}
         ORDER BY COALESCE(a.due_at, a.created_at) DESC`,
     )
-    .bind(nb.id)
+    .bind(...(isTeacher ? [nb.id] : [user.id, nb.id]))
     .all<any>();
 
   const assignments = [];
@@ -843,8 +863,9 @@ app.get("/api/notebooks/:id/assignments", handler(async (c) => {
 app.post("/api/notebooks/:id/reorder", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
   const { pageIds } = await c.req.json<{ pageIds: string[] }>();
+  if (!Array.isArray(pageIds) || pageIds.length > 2000) throw new HttpError(400, "Send the notebook's pages in order");
   let seq = 1;
-  for (const pid of pageIds ?? []) {
+  for (const pid of pageIds) {
     await db.prepare(`UPDATE pages SET seq = ? WHERE id = ? AND notebook_id = ?`).bind(seq++, pid, nb.id).run();
   }
   await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
@@ -898,7 +919,7 @@ app.post("/api/notebooks/:id/fields/bulk", handler(async (c) => {
   const body = await c.req.json<{
     pageId: string;
     /** `content` is read only for links — "Add the file's links" places them through here. */
-    fields: { type: string; x: number; y: number; w: number; h: number; label?: string; content?: string }[];
+    fields: { type: string; x: number; y: number; w: number; h: number; label?: string; content?: string; answerKey?: unknown }[];
   }>();
   const wanted = Array.isArray(body.fields) ? body.fields : [];
   if (!wanted.length) throw new HttpError(400, "No fields to add");
@@ -924,13 +945,15 @@ app.post("/api/notebooks/:id/fields/bulk", handler(async (c) => {
   const statements = wanted.map((f, i) =>
     db
       .prepare(
-        `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, answer_key, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         ids[i], nb.id, page.id, f.type, f.x, f.y, f.w, f.h,
         f.type === "link" ? linkLabel(f.label) : f.label ?? "", "[]", "",
-        f.type === "link" ? fieldContent("link", f.content) : "", now(), now(),
+        f.type === "link" ? fieldContent("link", f.content) : "",
+        // A drafted key (Design with AI) comes with its box; anything unreadable is no key.
+        serializeKey(f.type, f.answerKey), now(), now(),
       ),
   );
   statements.push(db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id));
@@ -947,9 +970,12 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
     .first<any>();
   if (!field) throw new HttpError(404, "Field not found");
   const b = await c.req.json<any>();
+  const points = b.points === undefined ? field.points ?? 1 : Number(b.points);
+  if (!Number.isFinite(points) || points < 0 || points > 1000) throw new HttpError(400, "Points must be between 0 and 1,000");
   await db
     .prepare(
-      `UPDATE fields SET x = ?, y = ?, w = ?, h = ?, label = ?, options = ?, prompt = ?, content = ?, archived = ?, updated_at = ?
+      `UPDATE fields SET x = ?, y = ?, w = ?, h = ?, label = ?, options = ?, prompt = ?, content = ?, archived = ?, updated_at = ?,
+              answer_key = ?, points = ?
         WHERE id = ?`,
     )
     .bind(
@@ -960,7 +986,9 @@ app.patch("/api/notebooks/:id/fields/:fieldId", handler(async (c) => {
       // Cleaned on the way in — markup sanitised, a link's address checked —
       // so what is stored is already safe to render.
       b.content === undefined ? field.content ?? "" : fieldContent(field.type, b.content),
-      b.archived === undefined ? field.archived : b.archived ? 1 : 0, now(), field.id,
+      b.archived === undefined ? field.archived : b.archived ? 1 : 0, now(),
+      b.answerKey === undefined ? field.answer_key ?? "" : serializeKey(field.type, b.answerKey),
+      points, field.id,
     )
     .run();
   await db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id).run();
@@ -999,9 +1027,9 @@ app.post("/api/notebooks/:id/fields/:fieldId/duplicate", handler(async (c) => {
   const y = f.y + nudge + f.h <= f.page_h ? f.y + nudge : Math.max(0, f.y - nudge);
   await db.batch([
     db.prepare(
-      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, media_key, archived, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-    ).bind(id, nb.id, f.page_id, f.type, x, y, f.w, f.h, f.label ?? "", f.options ?? "[]", f.prompt ?? "", f.content ?? "", mediaKey, now(), now()),
+      `INSERT INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt, content, media_key, answer_key, points, archived, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    ).bind(id, nb.id, f.page_id, f.type, x, y, f.w, f.h, f.label ?? "", f.options ?? "[]", f.prompt ?? "", f.content ?? "", mediaKey, f.answer_key ?? "", f.points ?? 1, now(), now()),
     db.prepare(`UPDATE notebooks SET updated_at = ? WHERE id = ?`).bind(now(), nb.id),
   ]);
   return c.json({ field: { id } });
@@ -1038,10 +1066,7 @@ app.get("/api/notebooks/:id/comment-audio", handler(async (c) => {
   const obj = await storage.get(key);
   if (!obj) throw new HttpError(404, "Recording not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: {
-      "Content-Type": obj.contentType || "audio/webm",
-      "Cache-Control": "private, max-age=31536000, immutable",
-    },
+    headers: fileHeaders(obj.contentType || "audio/webm", "private, max-age=31536000, immutable"),
   });
 }));
 
@@ -1057,7 +1082,8 @@ app.post("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
   const form = await c.req.parseBody();
   const file = form["file"] as File | undefined;
   if (!file) throw new HttpError(400, "No image uploaded");
-  if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) throw new HttpError(400, "That needs to be an image file");
+  // No SVG: it's a document that can carry script, not a picture.
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new HttpError(400, "That needs to be a PNG, JPEG, WebP or GIF image");
   if (file.size > MAX_FIELD_MEDIA_BYTES) throw new HttpError(413, "Images are limited to 6MB");
 
   const key = `notebooks/${nb.id}/fields/${fieldId}-${uid()}`;
@@ -1079,7 +1105,7 @@ app.get("/api/notebooks/:id/fields/:fieldId/media", handler(async (c) => {
   const obj = await storage.get(field.media_key);
   if (!obj) throw new HttpError(404, "Image not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: { "Content-Type": obj.contentType ?? "image/png", "Cache-Control": "private, max-age=3600" },
+    headers: fileHeaders(obj.contentType ?? "image/png", "private, max-age=3600"),
   });
 }));
 
@@ -1107,11 +1133,13 @@ app.patch("/api/notebooks/:id", handler(async (c) => {
     title?: string; accentColor?: string; clearCover?: boolean;
     /** Put the notebook away (or bring it back) for the whole class at once. */
     archived?: boolean;
+    /** Whether students may print and download its pages. */
+    allowExport?: boolean;
   }>();
   if (b.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(b.accentColor)) throw new HttpError(400, "Invalid color");
   await db
     .prepare(
-      `UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, archived = ?, updated_at = ?
+      `UPDATE notebooks SET title = ?, accent_color = ?, cover_key = ?, archived = ?, allow_export = ?, updated_at = ?
         WHERE id = ?`,
     )
     .bind(
@@ -1119,6 +1147,7 @@ app.patch("/api/notebooks/:id", handler(async (c) => {
       b.accentColor ?? nb.accent_color ?? "#2E7D6B",
       b.clearCover ? null : nb.cover_key,
       b.archived === undefined ? (nb.archived ?? 0) : b.archived ? 1 : 0,
+      b.allowExport === undefined ? (nb.allow_export ?? 1) : b.allowExport ? 1 : 0,
       now(),
       nb.id,
     )
@@ -1183,10 +1212,7 @@ app.get("/api/notebooks/:id/cover", handler(async (c) => {
   const obj = await storage.get(nb.cover_key);
   if (!obj) throw new HttpError(404, "Cover not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: {
-      "Content-Type": obj.contentType ?? "image/png",
-      "Cache-Control": "private, max-age=3600",
-    },
+    headers: fileHeaders(obj.contentType ?? "image/png", "private, max-age=3600"),
   });
 }));
 
@@ -1280,6 +1306,9 @@ app.post("/api/notebooks/:id/discard-drafts", handler(async (c) => {
  */
 app.post("/api/notebooks/:id/publish", handler(async (c) => {
   const { nb, isTeacher } = requireNotebookTeacher(await notebookAccess(c, param(c, "id")));
+  // Publishing hands a copy to every student in the class — a class notebook's
+  // business only. A student's own notebook is already theirs.
+  if ((nb.kind ?? "class") !== "class") throw new HttpError(400, "Only a class notebook is published to students");
 
   const since = nb.last_published_at ?? "";
   const stamp = now();
@@ -1325,14 +1354,16 @@ app.get("/api/my/notebooks", handler(async (c) => {
   const rows = await db
     .prepare(
       `SELECT n.id, n.title, n.page_count, n.updated_at, n.accent_color AS notebook_color,
-              n.cover_key, c.id AS class_id, c.name AS class_name, c.accent_color
+              n.cover_key IS NOT NULL AS has_cover, c.id AS class_id, c.name AS class_name, c.accent_color
          FROM notebooks n
          JOIN classes c ON c.id = n.class_id
          JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active'
-        WHERE n.status = 'published' AND c.archived = 0
+        WHERE n.status = 'published' AND n.archived = 0 AND c.archived = 0
+          -- The class's notebooks, and the caller's own book — never a classmate's.
+          AND (COALESCE(n.kind, 'class') = 'class' OR (n.kind = 'student' AND n.owner_id = ?))
         ORDER BY n.updated_at DESC`,
     )
-    .bind(user.id)
+    .bind(user.id, user.id)
     .all();
   return c.json({ notebooks: rows.results ?? [] });
 }));
@@ -1501,6 +1532,8 @@ export async function deleteNotebookCascade(notebookId: string) {
   // orphan rows keyed to a notebook that no longer existed.
   await db.prepare(`DELETE FROM page_annotations WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM pages WHERE notebook_id = ?`).bind(notebookId).run();
+  // A link to a notebook that's gone opens nothing.
+  await db.prepare(`DELETE FROM notebook_shares WHERE notebook_id = ?`).bind(notebookId).run();
   await db.prepare(`DELETE FROM notebooks WHERE id = ?`).bind(notebookId).run();
 
   /*

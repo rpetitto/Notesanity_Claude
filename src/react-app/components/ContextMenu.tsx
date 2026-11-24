@@ -35,6 +35,8 @@ export type ContextEntry =
       hint?: string;
       /** A setting that is on or off: drawn with a check, announced as a checkbox. */
       checked?: boolean;
+      /** A small pill after the label, such as the plan a feature belongs to. */
+      badge?: string;
     }
   /** One of a set of choices that stays open, e.g. where new pages go. */
   | { kind: "radio"; group: string; label: string; checked: boolean; onSelect: () => void }
@@ -325,7 +327,14 @@ export function ContextMenuHost() {
           >
             {entry.icon && <span className="shrink-0 [&>svg]:h-5 [&>svg]:w-5">{entry.icon}</span>}
             <span className="min-w-0 flex-1">
-              <span className="block font-display text-[17px] font-bold">{entry.label}</span>
+              <span className="block font-display text-[17px] font-bold">
+                {entry.label}
+                {entry.badge && (
+                  <span className="ml-2 inline-block rounded-full border-2 border-pine bg-mint px-2 align-[2px] font-body text-[14px] font-extrabold leading-[18px]">
+                    {entry.badge}
+                  </span>
+                )}
+              </span>
               {entry.hint && <span className="block text-[15px] leading-snug text-pine/60">{entry.hint}</span>}
             </span>
             {entry.checked !== undefined && (

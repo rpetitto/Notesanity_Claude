@@ -62,6 +62,13 @@
     }
   ],
 
+  // Rate limits for anything worth guessing at — see src/worker/platform/ratelimit.ts.
+  // namespace_id is an account-wide number chosen here, not a secret.
+  "ratelimits": [
+    { "name": "STRICT_LIMIT", "namespace_id": "4101", "simple": { "limit": 10, "period": 60 } },
+    { "name": "LOOSE_LIMIT", "namespace_id": "4102", "simple": { "limit": 120, "period": 60 } }
+  ],
+
   // Matches the schedule the mail-queue drain registers in src/worker/index.ts.
   "triggers": {
     "crons": ["* * * * *"]

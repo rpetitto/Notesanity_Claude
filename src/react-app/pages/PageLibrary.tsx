@@ -180,29 +180,30 @@ export default function PageLibrary() {
                     {p.title}
                   </div>
                   <div className="text-[14px] text-pine/55">{relativeTime(p.created_at)}</div>
-                  <Button variant="primary" size="sm" className="w-full" onClick={() => setPushing(p)} aria-label={`Add ${p.title} to notebooks`}>
-                    <Send className="h-3.5 w-3.5" strokeWidth={2.5} />
-                    {/* Two cards across a small phone leave no room for the long label. */}
-                    <span className="min-[360px]:hidden">Add to…</span>
-                    <span className="hidden min-[360px]:inline">Add to notebooks…</span>
-                  </Button>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => { setRenaming(p.id); setDraftTitle(p.title); }}
-                    >
-                      <Pencil className="h-3.5 w-3.5" strokeWidth={2.5} />
-                      Rename
+                  <div className="flex w-full items-center gap-1">
+                    <Button variant="primary" size="sm" className="min-w-0 flex-1" onClick={() => setPushing(p)} aria-label={`Add ${p.title} to notebooks`}>
+                      <Send className="h-3.5 w-3.5 shrink-0" strokeWidth={2.5} />
+                      {/* Two cards across a small phone leave no room for the long label. */}
+                      <span className="truncate min-[360px]:hidden">Add to…</span>
+                      <span className="hidden truncate min-[360px]:inline">Add to notebooks…</span>
                     </Button>
-                    <button
-                      type="button"
-                      onClick={() => setRemoving(p)}
-                      aria-label={`Remove ${p.title} from your library`}
-                      className="rounded-full px-2 text-pine/55 hover:bg-[#fbe9e4] hover:text-[#a3341f]"
-                    >
-                      <Trash2 className="h-4 w-4" strokeWidth={2.5} />
-                    </button>
+                    <Menu
+                      label={`More for ${p.title}`}
+                      items={[
+                        {
+                          label: "Rename",
+                          icon: <Pencil className="h-5 w-5" strokeWidth={2.5} />,
+                          onClick: () => { setRenaming(p.id); setDraftTitle(p.title); },
+                        },
+                        {
+                          label: "Remove from library",
+                          icon: <Trash2 className="h-5 w-5" strokeWidth={2.5} />,
+                          danger: true,
+                          hint: "Notebooks you already added it to keep their copy",
+                          onClick: () => setRemoving(p),
+                        },
+                      ]}
+                    />
                   </div>
                 </>
               )}
@@ -282,7 +283,9 @@ function LibraryImport({ source, onClose, onSaved }: { source: File; onClose: ()
         const read = await readPageSizes(pdf);
         if (read.length === 0) throw new Error("That PDF has no pages.");
         setSizes(read);
-        setPicked(new Set(read.map((p) => p.sourceIndex)));
+        // Nothing chosen to start: a teacher bringing in a long document usually
+        // wants two pages of it, not to untick the other twenty-two.
+        setPicked(new Set());
         setPhase("choose");
       } catch (e) {
         setError((e as Error).message);

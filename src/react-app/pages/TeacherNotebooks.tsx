@@ -11,13 +11,15 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, BookText, CheckSquare, ChevronDown, Plus, Rows3, Send, Trash2, Upload, RefreshCw, X } from "lucide-react";
+import { Archive, BookOpen, BookText, CheckSquare, ChevronDown, LayoutGrid, Plus, Search, Rows3, Send, Share2, Trash2, Upload, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import Shell, { EmptyState, ErrorNote, Spinner } from "../components/Shell";
 import NewNotebookModal from "../components/NewNotebookModal";
 import PushToClassesModal from "../components/PushToClassesModal";
-import { Button, Chip, ConfirmModal, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
+import { ShareCopyDialog } from "../components/ShareCopyDialog";
+import { Button, Chip, ConfirmModal, Input, Menu, Select, buttonClass, type MenuItem } from "../components/ui";
 import { api, type ClassSummary } from "../lib/api";
+import { useSession } from "../lib/session";
 import { driveFileAsPdf, hasDrivePicker, pickDriveFile } from "../lib/google";
 import { NotebookCard, type ClassNotebook } from "./ClassView";
 import GoogleIcon from "../components/GoogleIcon";
@@ -30,7 +32,7 @@ interface TeachingNotebook extends ClassNotebook {
   template_id: string | null;
   copies?: {
     notebookId: string; classId: string; className: string; status: string; archived: boolean;
-    pendingPages: number; pendingFields: number;
+    pendingPages: number; pendingFields: number; pendingKeys?: number;
   }[];
 }
 
@@ -40,7 +42,10 @@ export default function TeacherNotebooks() {
   const [filter, setFilter] = useState<string>("all");
   const [blankOpen, setBlankOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [archivedClass, setArchivedClass] = useState("all");
+  const [archivedQuery, setArchivedQuery] = useState("");
   const [deleting, setDeleting] = useState<TeachingNotebook | null>(null);
+  const [sharing, setSharing] = useState<TeachingNotebook | null>(null);
   /** Template ids the push dialog is open for. */
   const [pushing, setPushing] = useState<string[] | null>(null);
   /** Picking several templates to push at once; null when not picking. */
@@ -56,15 +61,32 @@ export default function TeacherNotebooks() {
     queryFn: () => api.get<{ classes: ClassSummary[] }>("/api/classes"),
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ["teaching-notebooks"] });
+  // A superadmin appoints the getting-started guide from their own templates.
+  const { user } = useSession();
+  const guide = useQuery({
+    queryKey: ["admin-guide"],
+    queryFn: () => api.get<{ guide: { id: string; title: string } | null; copiesGiven: number }>("/api/admin/guide"),
+    enabled: !!user?.isSuperadmin,
+  });
+  const guideId = guide.data?.guide?.id ?? null;
+  const appoint = useMutation({
+    mutationFn: (notebookId: string | null) => api.put("/api/admin/guide", { notebookId }),
+    onSuccess: (_r, id) => {
+      qc.invalidateQueries({ queryKey: ["admin-guide"] });
+      toast.success(id ? "This is now the teacher guide — teachers who haven't had one get a copy next visit" : "No teacher guide now");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const sync = useMutation({
     mutationFn: (templateId: string) =>
-      api.post<{ classes: number; pagesAdded: number; fieldsAdded: number }>(`/api/templates/${templateId}/sync`, {}),
+      api.post<{ classes: number; pagesAdded: number; fieldsAdded: number; keysAdded?: number }>(`/api/templates/${templateId}/sync`, {}),
     onSuccess: (res) => {
       refresh();
       const bits = [];
       if (res.pagesAdded) bits.push(`${res.pagesAdded} page${res.pagesAdded === 1 ? "" : "s"}`);
       if (res.fieldsAdded) bits.push(`${res.fieldsAdded} answer box${res.fieldsAdded === 1 ? "" : "es"}`);
+      if (res.keysAdded) bits.push(`${res.keysAdded} answer key${res.keysAdded === 1 ? "" : "s"}`);
       toast.success(bits.length
         ? `Sent ${bits.join(" and ")} to ${res.classes} class${res.classes === 1 ? "" : "es"}`
         : "Every class already has everything in this template");
@@ -104,9 +126,22 @@ export default function TeacherNotebooks() {
     () => all.filter((n) => n.kind !== "template" && !!n.class_archived),
     [all],
   );
+  // Years of archived classes add up, so the shelf can be narrowed by class
+  // and searched by name.
+  const archivedClasses = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const n of archivedNotebooks) if (!seen.has(n.class_id)) seen.set(n.class_id, n.class_name ?? "Class");
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [archivedNotebooks]);
+  const archivedShown = useMemo(() => {
+    const q = archivedQuery.trim().toLowerCase();
+    return archivedNotebooks.filter((n) =>
+      (archivedClass === "all" || n.class_id === archivedClass) &&
+      (!q || n.title.toLowerCase().includes(q) || (n.class_name ?? "").toLowerCase().includes(q)));
+  }, [archivedNotebooks, archivedClass, archivedQuery]);
 
   const templateMenu = (t: TeachingNotebook): MenuItem[] => {
-    const pending = (t.copies ?? []).reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
+    const pending = (t.copies ?? []).reduce((n, c) => n + c.pendingPages + c.pendingFields + (c.pendingKeys ?? 0), 0);
     return [
       {
         label: "Push to classes…",
@@ -122,9 +157,23 @@ export default function TeacherNotebooks() {
         icon: <RefreshCw className="h-5 w-5" strokeWidth={2.5} />,
         disabled: !pending,
         hint: pending
-          ? `${pending} new page${pending === 1 ? "" : "s"} or box${pending === 1 ? "" : "es"} waiting. Only what's new is added — nothing already in a class is changed.`
+          ? `${pending} update${pending === 1 ? "" : "s"} waiting: new pages, boxes or answer keys. Only what's new is added — nothing already in a class is changed.`
           : "Every class already has everything in this template.",
         onClick: () => sync.mutate(t.id),
+      }] : []),
+      {
+        label: "Send a copy to a colleague",
+        icon: <Share2 className="h-5 w-5" strokeWidth={2.5} />,
+        hint: "A link another teacher opens to add their own copy. No student work goes with it.",
+        onClick: () => setSharing(t),
+      },
+      ...(user?.isSuperadmin ? [{
+        label: guideId === t.id ? "Stop using as the teacher guide" : "Make this the teacher guide",
+        icon: <BookOpen className="h-5 w-5" strokeWidth={2.5} />,
+        hint: guideId === t.id
+          ? "Teachers keep the copies they have; nobody new gets one."
+          : "Every teacher who hasn't had the guide gets a copy of this, once.",
+        onClick: () => appoint.mutate(guideId === t.id ? null : t.id),
       }] : []),
       {
         label: "Delete template",
@@ -146,8 +195,9 @@ export default function TeacherNotebooks() {
 
   const byline = (t: TeachingNotebook) => {
     const copies = t.copies ?? [];
+    if (t.id === guideId) return `Teacher guide · copied to ${guide.data?.copiesGiven ?? 0} teacher${guide.data?.copiesGiven === 1 ? "" : "s"}`;
     if (copies.length === 0) return "Template · not in a class yet";
-    const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields, 0);
+    const pending = copies.reduce((n, c) => n + c.pendingPages + c.pendingFields + (c.pendingKeys ?? 0), 0);
     return `Template · in ${copies.length} class${copies.length === 1 ? "" : "es"}${pending ? ` · ${pending} update${pending === 1 ? "" : "s"} to send` : ""}`;
   };
 
@@ -229,7 +279,7 @@ export default function TeacherNotebooks() {
           <section>
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <h2 className="flex items-center gap-2 font-display text-[20px] text-pine">
-                In your classes
+                <LayoutGrid className="h-5 w-5" strokeWidth={2.5} /> In your classes
                 <Chip tone="quiet">{inClasses.length}</Chip>
               </h2>
               <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Show notebooks from" className="ml-auto h-11 w-auto min-w-[12rem]">
@@ -269,8 +319,30 @@ export default function TeacherNotebooks() {
               {showArchived && (
                 <div id="archived-notebooks">
                   <p className="mb-3 text-[16px] text-pine/70">From classes you've archived. Open one to look back at it; restore the class to work in it again.</p>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <div className="relative min-w-[12rem] flex-1">
+                      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-pine/50" strokeWidth={2.5} />
+                      <Input
+                        type="search"
+                        value={archivedQuery}
+                        onChange={(e) => setArchivedQuery(e.target.value)}
+                        placeholder="Search archived notebooks"
+                        aria-label="Search archived notebooks"
+                        className="h-11 pl-10"
+                      />
+                    </div>
+                    {archivedClasses.length > 1 && (
+                      <Select value={archivedClass} onChange={(e) => setArchivedClass(e.target.value)} aria-label="Archived class" className="h-11 w-auto min-w-[12rem]">
+                        <option value="all">All archived classes</option>
+                        {archivedClasses.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                      </Select>
+                    )}
+                  </div>
+                  {archivedShown.length === 0 && (
+                    <p className="py-4 text-center text-[16px] text-pine/60">No archived notebooks match.</p>
+                  )}
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {archivedNotebooks.map((n) => (
+                    {archivedShown.map((n) => (
                       <NotebookCard
                         key={n.id}
                         nb={n}
@@ -319,6 +391,7 @@ export default function TeacherNotebooks() {
           onCreated={(id) => { setBlankOpen(false); navigate(`/notebooks/${id}/edit`); }}
         />
       )}
+      {sharing && <ShareCopyDialog notebookId={sharing.id} title={sharing.title} onClose={() => setSharing(null)} />}
       {deleting && (
         <ConfirmModal
           title={`Delete “${deleting.title}”?`}

@@ -39,7 +39,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  Copy, CopyPlus, ExternalLink, ImageIcon, Loader2, MessageSquare, MessageSquarePlus, Mic, Music, PenLine,
+  Copy, CopyPlus, ExternalLink, ImageIcon, Link as LinkIcon, Loader2, MessageSquare, MessageSquarePlus, Mic, Music, PenLine,
   RefreshCw, Square, Trash2, Type as TypeIcon, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -1659,6 +1659,10 @@ function FieldControl({
       >
         <div
           className="rich-text h-full w-full overflow-hidden text-pine"
+          // Shrinks with the page when it's drawn below full size (an iPad,
+          // a phone), so a block that fits at 100% still fits; it never grows
+          // past 15px, so blocks sized on a large screen read as they always did.
+          style={{ fontSize: 15 * Math.min(1, scale) }}
           // Already sanitised server-side against a strict allowlist; see
           // worker/lib/richtext.ts for what survives and why.
           dangerouslySetInnerHTML={{ __html: field.content ?? "" }}
@@ -1674,19 +1678,67 @@ function FieldControl({
     // A link whose address hasn't been typed yet is nothing to press.
     if (!href) return null;
     const name = field.label || linkHost(href);
+    // Two looks. A button is drawn on the page — the site's icon and the words
+    // the teacher gave it — for a link placed on blank space, which otherwise
+    // left students looking at nothing. The other lies over words or a picture
+    // already on the page (every link imported from a PDF is one), so it draws
+    // only a dashed outline and a small icon on its corner: enough to say
+    // "this opens something" without covering what's underneath.
+    const asButton = safeLinkOptions(field.options).includes("button");
+    const boxPx = field.h * scale;
+    const common = {
+      href,
+      target: "_blank",
+      rel: "noopener noreferrer nofollow",
+      // A tap target for the pen, like a box: a tap opens it, a stroke
+      // that starts on it still writes.
+      ...(typeable ? { "data-typeable": "1" } : {}),
+      "aria-label": `${name} (opens in a new tab)`,
+      title: href,
+      style: { ...style, pointerEvents: linksLive ? "auto" : "none" } as React.CSSProperties,
+    } as const;
+    if (asButton) {
+      const font = Math.max(11, Math.min(18, boxPx * 0.5));
+      const icon = Math.round(Math.max(12, Math.min(20, boxPx * 0.62)));
+      return (
+        <a
+          {...common}
+          className="absolute flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-full border-2 border-pine bg-white px-2 text-pine shadow-[2px_2px_0_0_var(--color-pine)] transition-colors hover:bg-mint/30 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-mint"
+          data-link-look="button"
+        >
+          <SiteIcon href={href} size={icon} />
+          <span className="min-w-0 flex-1 truncate font-bold underline decoration-mint decoration-2 underline-offset-2" style={{ fontSize: font, lineHeight: 1.1 }}>
+            {name}
+          </span>
+          <ExternalLink className="shrink-0 opacity-60" style={{ width: icon * 0.8, height: icon * 0.8 }} strokeWidth={2.5} aria-hidden />
+        </a>
+      );
+    }
+    const badge = Math.round(Math.max(18, Math.min(24, boxPx * 0.9)));
     return (
       <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer nofollow"
-        // A tap target for the pen, like a box: a tap opens it, a stroke
-        // that starts on it still writes.
-        {...(typeable ? { "data-typeable": "1" } : {})}
-        aria-label={`${name} (opens in a new tab)`}
-        title={href}
-        className="absolute rounded-[4px] transition-colors hover:bg-mint/25 focus-visible:bg-mint/25 focus-visible:outline-[3px] focus-visible:outline-mint"
-        style={{ ...style, pointerEvents: linksLive ? "auto" : "none" }}
-      />
+        {...common}
+        className="group absolute cursor-pointer rounded-[4px] border-2 border-dashed border-[#2f8a63] bg-mint/10 transition-colors hover:bg-mint/30 focus-visible:bg-mint/30 focus-visible:outline-[3px] focus-visible:outline-mint"
+        data-link-look="outline"
+      >
+        {/* The words stay on the page underneath; hovering or tabbing to it
+            says where it goes, so an outline is never a mystery box. */}
+        <span
+          aria-hidden
+          data-link-tip
+          className="pointer-events-none absolute bottom-full left-0 z-10 mb-1.5 hidden max-w-[260px] items-center gap-1.5 whitespace-nowrap rounded-full border-2 border-pine bg-white px-2.5 py-1 text-[15px] font-bold text-pine shadow-[2px_2px_0_0_var(--color-pine)] group-hover:flex group-focus-visible:flex"
+        >
+          <span className="truncate">{name}</span>
+          <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-60" strokeWidth={2.5} />
+        </span>
+        <span
+          aria-hidden
+          className="absolute flex items-center justify-center rounded-full border-2 border-pine bg-white"
+          style={{ width: badge, height: badge, top: -badge / 2, right: -badge / 2 }}
+        >
+          <SiteIcon href={href} size={badge - 8} />
+        </span>
+      </a>
     );
   }
 
@@ -2178,5 +2230,41 @@ function ResponseAudioField({
         <div className="flex h-full w-full items-center justify-center text-[14px] text-pine/55">No recording</div>
       )}
     </div>
+  );
+}
+
+/** A link field's look, from its options; anything unreadable is the outline. */
+function safeLinkOptions(raw?: string): string[] {
+  try { const v = JSON.parse(raw || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
+/**
+ * The linked site's own icon, fetched from that site — the student is about to
+ * go there anyway — with no referrer, so it learns nothing about the page. A
+ * site with no /favicon.ico gets a plain link icon instead of a broken image.
+ */
+function SiteIcon({ href, size }: { href: string; size: number }) {
+  const [failed, setFailed] = useState(false);
+  let src = "";
+  try {
+    const u = new URL(href);
+    if (u.protocol === "https:" || u.protocol === "http:") src = `${u.origin}/favicon.ico`;
+  } catch { /* not a web address: mailto and the like */ }
+  if (!src || failed) {
+    return <LinkIcon aria-hidden className="shrink-0" style={{ width: size, height: size }} strokeWidth={2.5} />;
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden
+      width={size}
+      height={size}
+      referrerPolicy="no-referrer"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="shrink-0 rounded-[3px] object-contain"
+      style={{ width: size, height: size }}
+    />
   );
 }

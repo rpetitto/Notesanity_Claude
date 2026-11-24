@@ -10,7 +10,7 @@
  * API credentials.
  */
 
-import { app, auth, cron } from "./platform";
+import { app, auth, cron, db } from "./platform";
 
 import "./schema";
 import "./routes/auth";
@@ -29,8 +29,13 @@ import "./routes/billing";
 import "./routes/billing-webhooks";
 import "./routes/status";
 import "./routes/contact";
+import "./routes/ai";
+import "./routes/live";
+import "./routes/shares";
+import "./routes/sso";
 import { drainMailQueue } from "./lib/mailqueue";
 import { purgeExpired } from "./lib/trash";
+import { purgeOldDesigns } from "./routes/ai";
 
 /**
  * Queued mail goes out a few at a time, every minute.
@@ -53,6 +58,27 @@ cron("drain-mail-queue", "* * * * *", async () => {
 cron("purge-trash", "* * * * *", async () => {
   if (new Date().getUTCMinutes() !== 17) return { skipped: true };
   return { purged: await purgeExpired() };
+});
+
+/** AI page designs are scratch work, kept a week for refining and then dropped. Same hourly slot. */
+cron("purge-ai-designs", "* * * * *", async () => {
+  if (new Date().getUTCMinutes() !== 17) return { skipped: true };
+  return { purged: await purgeOldDesigns() };
+});
+
+/**
+ * Sign-in links that were never used are dropped a day after they expired —
+ * with them goes any password a sign-up was holding for confirmation. Expired
+ * sessions go too; they were only ever pruned when someone presented one.
+ */
+cron("purge-auth", "* * * * *", async () => {
+  if (new Date().getUTCMinutes() !== 23) return { skipped: true };
+  const dayAgo = new Date(Date.now() - 86400_000).toISOString();
+  const [tokens, sessions] = await db.batch([
+    db.prepare(`DELETE FROM auth_tokens WHERE expires_at < ?`).bind(dayAgo),
+    db.prepare(`DELETE FROM sessions WHERE expires_at < ?`).bind(new Date().toISOString()),
+  ]);
+  return { tokens: tokens.meta?.changes ?? 0, sessions: sessions.meta?.changes ?? 0 };
 });
 
 auth.allow();

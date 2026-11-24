@@ -6,12 +6,13 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronRight, ImageOff, PanelLeft } from "lucide-react";
+import { ArrowLeft, ChevronRight, ImageOff, PanelLeft, Printer } from "lucide-react";
 import { api, assetUrl, pageSource, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
-import { parseLayer } from "../lib/ink";
+import { parseLayer, type LayerData } from "../lib/ink";
+import { ExportPagesDialog } from "../components/ExportPagesDialog";
 import { useSession } from "../lib/session";
 import { useBackTo } from "../lib/useBackTo";
 import NotebookSurface, { type ZoomMode, type LayerMap } from "../components/NotebookSurface";
@@ -177,6 +178,7 @@ export default function StudentNotebook() {
   const [fingerDraw, setFingerDraw] = useState(false);
   const [zoom, setZoom] = useState<ZoomMode>("page");
   const [visiblePage, setVisiblePage] = useState<string>("");
+  const [exportOpen, setExportOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [railOpen, setRailOpen] = useState<boolean>(() => {
@@ -195,6 +197,23 @@ export default function StudentNotebook() {
   useEffect(() => {
     if (!visiblePage && pages[0]) setVisiblePage(pages[0].id);
   }, [pages, visiblePage]);
+
+  // `?page=` opens at that page — the live view links each tile to the page it shows.
+  const [searchParams] = useSearchParams();
+  const startPage = searchParams.get("page");
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (jumped.current || !startPage || !pages.some((p) => p.id === startPage)) return;
+    // Wait a frame for the pages to be laid out before scrolling to one.
+    const t = setTimeout(() => {
+      const el = scrollRef.current?.querySelector(`[data-page-id="${startPage}"]`);
+      if (!el) return;
+      jumped.current = true;
+      setVisiblePage(startPage);
+      el.scrollIntoView({ block: "start" });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [pages, startPage, work.isLoading]);
 
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   useEffect(() => {
@@ -255,7 +274,24 @@ export default function StudentNotebook() {
             {pages.length > 0 && ` · Page ${Math.max(1, pageIndex + 1)} of ${pages.length}`}
           </div>
         </div>
+        {pages.length > 0 && (
+          <IconButton label="Print or download" variant="secondary" className="ml-auto" onClick={() => setExportOpen(true)}>
+            <Printer className="h-5 w-5" strokeWidth={2.5} />
+          </IconButton>
+        )}
       </header>
+      {exportOpen && (
+        <ExportPagesDialog
+          notebookId={notebookId}
+          title={`${work.data.notebook.title} - ${student.name}`}
+          pages={pages}
+          currentPageId={visiblePage}
+          layersFor={(id) => [masterLayers[id], notebookWork.studentLayers[id], notebookWork.teacherLayers[id]].filter(Boolean) as LayerData[]}
+          content={{ fields: work.data.fields, values: notebookWork.fieldValues, studentId }}
+          includeLabel={`${student.name}'s writing and answers`}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
 
       <div className="overflow-x-auto">
         <InkToolbar

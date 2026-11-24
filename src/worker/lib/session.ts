@@ -1,4 +1,5 @@
 import { auth, currentScope, db } from "../platform";
+import { allowed, type Budget } from "../platform/ratelimit";
 import type { Context } from "hono";
 
 export const uid = () => crypto.randomUUID();
@@ -116,6 +117,43 @@ export async function orgForDomain(domain: string): Promise<Org | null> {
     )
     .bind(needle, needle)
     .first<Org>();
+}
+
+/**
+ * Check a comma-separated list of email domains a school wants to own.
+ *
+ * Whoever owns a domain gets every new sign-up on it, so a list is only kept
+ * when each entry is a real domain, not a personal-mail one, and not already
+ * claimed by another school (as its primary domain or on its lists). A school
+ * admin may add only their primary domain and its subdomains; anything else —
+ * a separate student domain, say — is added by the platform owner, who
+ * passes `anyDomain`. Returns the cleaned list.
+ */
+export async function checkSchoolDomains(
+  list: string, org: { id: string; primary_domain: string; teacher_domains?: string; student_domains?: string },
+  opts: { anyDomain?: boolean } = {},
+): Promise<string> {
+  const domains = Array.from(new Set(csv(list).map((d) => d.replace(/^@/, ""))));
+  const already = new Set([...csv(org.teacher_domains ?? ""), ...csv(org.student_domains ?? "")]);
+  const primary = (org.primary_domain ?? "").toLowerCase();
+  for (const d of domains) {
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) throw new HttpError(400, `"${d}" isn't a domain — something like school.edu.`);
+    if (PUBLIC_MAIL_DOMAINS.has(d)) throw new HttpError(400, `${d} is a personal-mail domain; it can't belong to a school.`);
+    const others = await db
+      .prepare(
+        `SELECT id FROM orgs WHERE id <> ? AND (lower(primary_domain) = ?
+           OR ',' || lower(replace(teacher_domains, ' ', '')) || ',' LIKE ?
+           OR ',' || lower(replace(student_domains, ' ', '')) || ',' LIKE ?) LIMIT 1`,
+      )
+      .bind(org.id, d, `%,${d},%`, `%,${d},%`)
+      .first();
+    if (others) throw new HttpError(409, `${d} belongs to another school here. If it should be yours, contact Notesanity support.`);
+    const ownPrimary = !!primary && (d === primary || d.endsWith(`.${primary}`));
+    if (!opts.anyDomain && !already.has(d) && !ownPrimary) {
+      throw new HttpError(403, `Only ${primary || "your school's own domain"} and its subdomains can be added here. Ask Notesanity support to add ${d}.`);
+    }
+  }
+  return domains.join(", ");
 }
 
 /**
@@ -393,6 +431,62 @@ export async function requireClassMember(c: Context, classId: string): Promise<{
   return { user, isTeacher: enrolled.role === "teacher" };
 }
 
+/**
+ * Refuse a request that has been made too often. `parts` say what is being
+ * guessed at — a route and an address, a route and a user — and the caller's
+ * network address is always added, so one machine can't spread its guesses
+ * across keys to get round the per-key budget unnoticed.
+ */
+export async function throttle(c: Context, budget: Budget, ...parts: (string | undefined | null)[]): Promise<void> {
+  const ip = c.req.header("cf-connecting-ip") ?? "local";
+  const key = [ip, ...parts.map((p) => (p ?? "").toLowerCase())].join("|");
+  const ok = (await allowed(budget, key)) && (await allowed("loose", `${ip}|${parts[0] ?? ""}`));
+  if (!ok) throw new HttpError(429, "That's a lot of tries in a short time. Wait a minute and try again.");
+}
+
+/**
+ * A state-changing request from another site's page. Browsers send `Origin`
+ * on every cross-site POST/PUT/PATCH/DELETE; a page elsewhere must never be
+ * able to sign someone in, out, or do anything as them. Requests with no
+ * Origin (Stripe's webhook, scripts) aren't from a browser page and pass.
+ */
+function crossSite(c: Context): boolean {
+  const origin = c.req.header("Origin");
+  if (!origin || origin === "null") return !!origin;
+  try {
+    const from = new URL(origin);
+    const to = new URL(c.req.url);
+    if (from.host === to.host) return false;
+    // `npm run dev:ui` serves the SPA from Vite and proxies the API.
+    const local = (h: string) => h === "localhost" || h === "127.0.0.1";
+    return !(local(from.hostname) && local(to.hostname));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Headers for serving a file someone uploaded.
+ *
+ * The stored content type is a claim the uploader made, so it's only passed
+ * through for types a browser renders inertly — raster images, audio, PDF —
+ * and anything else goes out as a download. `nosniff` stops a browser from
+ * second-guessing that, and the sandbox means that even if a file were opened
+ * as a page on our origin, it could run nothing and reach nothing — a student
+ * can't hand a teacher a link that acts as the teacher.
+ */
+const INERT_TYPES = /^(image\/(png|jpe?g|webp|gif|heic|heif)|audio\/[a-z0-9.+-]+|application\/pdf)(;.*)?$/i;
+export function fileHeaders(contentType: string | null | undefined, cacheControl: string): Record<string, string> {
+  const type = contentType && INERT_TYPES.test(contentType) ? contentType : "application/octet-stream";
+  return {
+    "Content-Type": type,
+    "Cache-Control": cacheControl,
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+    ...(type === "application/octet-stream" ? { "Content-Disposition": "attachment" } : {}),
+  };
+}
+
 /** Wrap a handler so thrown HttpErrors become clean JSON responses. */
 /**
  * Record a request that went wrong.
@@ -434,13 +528,14 @@ async function logApiFailure(c: Context, status: number, message: string, starte
  * end the session. Nothing else needs an exception: impersonation is a
  * read-only lens on the app, on purpose.
  */
-const IMPERSONATION_WRITE_ALLOWLIST = new Set(["/api/admin/impersonate/end"]);
+const IMPERSONATION_WRITE_ALLOWLIST = new Set(["/api/admin/impersonate/end", "/api/auth/signout"]);
 
 export function handler(fn: (c: Context) => Promise<Response>) {
   return async (c: Context) => {
     const startedAt = Date.now();
     try {
       if (c.req.method !== "GET" && c.req.method !== "HEAD" && c.req.method !== "OPTIONS") {
+        if (crossSite(c)) throw new HttpError(403, "That request came from another site.");
         const impersonation = await activeImpersonation(c);
         if (impersonation && !IMPERSONATION_WRITE_ALLOWLIST.has(new URL(c.req.url).pathname)) {
           throw new HttpError(403, "You're viewing as this user for support — nothing can be changed while impersonating.");
@@ -457,7 +552,8 @@ export function handler(fn: (c: Context) => Promise<Response>) {
       }
       console.error("Unhandled error:", err?.stack || err);
       await logApiFailure(c, 500, err?.message ?? "Server error", startedAt);
-      return c.json({ error: err?.message ?? "Server error" }, 500);
+      // The detail is in the log; the caller gets no database or provider text.
+      return c.json({ error: "Something went wrong on our side. Try again, and tell us if it keeps happening." }, 500);
     }
   };
 }

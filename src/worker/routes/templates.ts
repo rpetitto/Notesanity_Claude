@@ -42,6 +42,9 @@ const flatten = (key: string) => key.replace(/[^A-Za-z0-9._-]/g, "-").slice(-100
  */
 app.get("/api/my/teaching-notebooks", handler(async (c) => {
   const user = await requireTeacher(c);
+  // A teacher who hasn't had the guide yet gets it here, before the list is
+  // read, so it's there the first time they look. Never blocks the page.
+  await giveGuideOnce(user).catch(() => {});
   const rows = await db
     .prepare(
       `SELECT n.id, n.title, n.status, n.page_count, n.updated_at, n.created_at, n.kind, n.archived,
@@ -68,7 +71,7 @@ app.get("/api/my/teaching-notebooks", handler(async (c) => {
   // every copy in one statement rather than two queries per copy.
   const templates = notebooks.filter((n) => n.kind === "template");
   const copies = notebooks.filter((n) => n.template_id && templates.some((t) => t.id === n.template_id));
-  const pending = new Map<string, { pages: number; fields: number }>();
+  const pending = new Map<string, { pages: number; fields: number; keys: number }>();
   if (copies.length) {
     const rows = await db
       .prepare(
@@ -78,19 +81,23 @@ app.get("/api/my/teaching-notebooks", handler(async (c) => {
                     AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.notebook_id = cp.id AND p.template_page_id = tp.id)) AS pages,
                 (SELECT COUNT(*) FROM fields tf JOIN pages tp ON tp.id = tf.page_id
                   WHERE tf.notebook_id = cp.template_id AND tf.archived = 0 AND tp.archived = 0
-                    AND NOT EXISTS (SELECT 1 FROM fields f WHERE f.notebook_id = cp.id AND f.template_field_id = tf.id)) AS fields
+                    AND NOT EXISTS (SELECT 1 FROM fields f WHERE f.notebook_id = cp.id AND f.template_field_id = tf.id)) AS fields,
+                (SELECT COUNT(*) FROM fields f JOIN fields tf ON tf.id = f.template_field_id
+                  WHERE f.notebook_id = cp.id AND f.archived = 0 AND f.answer_key = ''
+                    AND tf.archived = 0 AND tf.answer_key <> '') AS keys
            FROM notebooks cp
           WHERE cp.template_id IN (SELECT id FROM notebooks WHERE kind = 'template' AND owner_id = ?)`,
       )
       .bind(user.id)
-      .all<{ id: string; pages: number; fields: number }>();
-    for (const r of rows.results ?? []) pending.set(r.id, { pages: r.pages, fields: r.fields });
+      .all<{ id: string; pages: number; fields: number; keys: number }>();
+    for (const r of rows.results ?? []) pending.set(r.id, { pages: r.pages, fields: r.fields, keys: r.keys });
   }
   for (const t of templates) {
     t.copies = copies.filter((n) => n.template_id === t.id).map((copy) => ({
       notebookId: copy.id, classId: copy.class_id, className: copy.class_name, status: copy.status,
       archived: !!copy.archived,
       pendingPages: pending.get(copy.id)?.pages ?? 0, pendingFields: pending.get(copy.id)?.fields ?? 0,
+      pendingKeys: pending.get(copy.id)?.keys ?? 0,
     }));
   }
   return c.json({ notebooks });
@@ -209,13 +216,13 @@ async function fieldInsert(copyId: string, pageId: string, f: any, limit: Limit)
   return db
     .prepare(
       `INSERT OR IGNORE INTO fields (id, notebook_id, page_id, type, x, y, w, h, label, options, prompt,
-                                     content, media_key, archived, template_field_id, created_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?
+                                     content, media_key, answer_key, points, archived, template_field_id, created_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?
         WHERE EXISTS (SELECT 1 FROM pages WHERE id = ?)`,
     )
     .bind(
       uid(), copyId, pageId, f.type, f.x, f.y, f.w, f.h, f.label ?? "", f.options ?? "",
-      f.prompt ?? "", f.content ?? "", mediaKey, f.id, now(), pageId,
+      f.prompt ?? "", f.content ?? "", mediaKey, f.answer_key ?? "", f.points ?? 1, f.id, now(), pageId,
     );
 }
 
@@ -242,7 +249,9 @@ async function copyPages(
   const limit = limiter(6);
   const copiedAssets = new Map<string, string>();
   await Promise.all(
-    [...new Set(pages.map((tp) => tp.asset_key).filter(Boolean))].map(async (src: string) => {
+    // Only documents under the template's own prefix are copied; a key
+    // pointing anywhere else is left behind rather than followed.
+    [...new Set(pages.filter((tp) => tp.asset_key && tp.asset_key.startsWith(`notebooks/${tp.notebook_id}/`)).map((tp) => tp.asset_key))].map(async (src: string) => {
       const dst = `notebooks/${copyId}/tpl-${flatten(src)}`;
       await limit(() => storage.copy(src, dst));
       copiedAssets.set(src, dst);
@@ -418,8 +427,14 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
   const user = await requireTeacher(c);
   const template = await ownedTemplate(user.id, param(c, "id"));
   const copies = await db
-    .prepare(`SELECT n.* FROM notebooks n JOIN classes c ON c.id = n.class_id WHERE n.template_id = ? AND n.owner_id = ? AND c.archived = 0`)
-    .bind(template.id, user.id)
+    // Only copies in classes they still teach: a co-teacher taken off a class
+    // stops reaching into it, even with the copy they once made there.
+    .prepare(
+      `SELECT n.* FROM notebooks n JOIN classes c ON c.id = n.class_id
+        WHERE n.template_id = ? AND n.owner_id = ? AND c.archived = 0
+          AND (c.owner_id = ? OR EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id = c.id AND e.user_id = ? AND e.role = 'teacher' AND e.status = 'active'))`,
+    )
+    .bind(template.id, user.id, user.id, user.id)
     .all<any>();
 
   const contents = await templateContents(template.id);
@@ -428,6 +443,7 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
   let classes = 0;
   let pagesAdded = 0;
   let fieldsAdded = 0;
+  let keysAdded = 0;
   for (const copy of copies.results ?? []) {
     const [pagesRes, fieldsRes] = await db.batch([
       db.prepare(`SELECT id, seq, template_page_id FROM pages WHERE notebook_id = ? ORDER BY seq`).bind(copy.id),
@@ -473,6 +489,22 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
     const boxStatements = await Promise.all(boxes);
     fieldsAdded += boxStatements.length;
 
+    // Answer keys written on the template after this copy was made. A box in
+    // the class that already has its own key keeps it: that one was set there
+    // on purpose, perhaps for this section alone.
+    const keyed = await db
+      .prepare(
+        `UPDATE fields
+            SET answer_key = (SELECT tf.answer_key FROM fields tf WHERE tf.id = fields.template_field_id),
+                points = (SELECT tf.points FROM fields tf WHERE tf.id = fields.template_field_id),
+                updated_at = ?
+          WHERE notebook_id = ? AND answer_key = ''
+            AND template_field_id IN (SELECT id FROM fields WHERE notebook_id = ? AND archived = 0 AND answer_key <> '')`,
+      )
+      .bind(now(), copy.id, template.id)
+      .run();
+    keysAdded += keyed.meta?.changes ?? 0;
+
     await runBatched([
       ...boxStatements,
       db.prepare(
@@ -483,7 +515,7 @@ app.post("/api/templates/:id/sync", handler(async (c) => {
     ]);
     classes++;
   }
-  return c.json({ classes, pagesAdded, fieldsAdded });
+  return c.json({ classes, pagesAdded, fieldsAdded, keysAdded });
 }));
 
 /** Delete a template. Its class copies stand on their own from here. */
@@ -493,4 +525,108 @@ app.delete("/api/templates/:id", handler(async (c) => {
   await db.prepare(`UPDATE notebooks SET template_id = NULL WHERE template_id = ?`).bind(template.id).run();
   await deleteNotebookCascade(template.id);
   return c.json({ ok: true });
+}));
+
+// ---------------------------------------------------------------------------
+// The getting-started guide.
+//
+// One template, appointed by a superadmin, is "the guide". Every teacher gets
+// their own copy of it once — a template of theirs to try things on, edit or
+// delete. A copy is a fresh template, not a mirror: it doesn't remember the
+// master, so improving the master never changes anyone's copy (they can ask
+// for the latest from Settings instead).
+// ---------------------------------------------------------------------------
+
+const GUIDE_KEY = "guide_notebook_id";
+
+export async function guideMasterId(): Promise<string | null> {
+  const row = await db.prepare(`SELECT value FROM app_settings WHERE key = ?`).bind(GUIDE_KEY).first<{ value: string }>();
+  if (!row?.value) return null;
+  const nb = await db
+    .prepare(`SELECT id FROM notebooks WHERE id = ? AND kind = 'template' AND archived = 0`)
+    .bind(row.value)
+    .first<{ id: string }>();
+  return nb?.id ?? null;
+}
+
+/** Copy the guide into a teacher's templates. Returns the new template's id. */
+async function copyGuideFor(userId: string, masterId: string): Promise<string> {
+  const master = await db.prepare(`SELECT * FROM notebooks WHERE id = ?`).bind(masterId).first<any>();
+  if (!master) throw new HttpError(404, "The guide isn't available right now.");
+  return copyAsTemplate(userId, master);
+}
+
+/**
+ * A fresh template of a teacher's own from any notebook: its live pages, their
+ * boxes (answer keys included), pictures and recordings, and the teacher's ink
+ * on its pages — each copied under the new notebook's own prefix. Nothing of
+ * any student's comes with it, because none of it lives on these rows.
+ */
+export async function copyAsTemplate(userId: string, master: any): Promise<string> {
+  const masterId = master.id;
+  const contents = await templateContents(masterId);
+  const copyId = uid();
+  let coverKey: string | null = null;
+  if (master.cover_key) {
+    coverKey = `notebooks/${copyId}/cover-${uid()}`;
+    await storage.copy(master.cover_key, coverKey);
+  }
+  await db
+    .prepare(
+      `INSERT INTO notebooks (id, class_id, owner_id, title, source_name, asset_key, page_count, status, kind,
+                              accent_color, cover_key, created_at, updated_at)
+       VALUES (?, '', ?, ?, ?, '', ?, 'draft', 'template', ?, ?, ?, ?)`,
+    )
+    .bind(copyId, userId, master.title, master.source_name ?? "", contents.pages.length,
+      master.accent_color ?? "#2E7D6B", coverKey, now(), now())
+    .run();
+  const order = new Map(contents.pages.map((tp, i) => [tp.id, i + 1]));
+  await copyPages(contents, copyId, contents.pages, (tp) => order.get(tp.id)!);
+  // A copy stands on its own: nothing in it points back at the master, so a
+  // later push from this template mirrors the teacher's pages, not ours.
+  await db.batch([
+    db.prepare(`UPDATE pages SET template_page_id = NULL WHERE notebook_id = ?`).bind(copyId),
+    db.prepare(`UPDATE fields SET template_field_id = NULL WHERE notebook_id = ?`).bind(copyId),
+  ]);
+  return copyId;
+}
+
+/**
+ * Give a teacher their copy, if they haven't had one. Safe to call on every
+ * request: the conditional update is what decides, so two arriving together
+ * make one copy. A failed copy un-marks them so the next visit tries again.
+ */
+export async function giveGuideOnce(user: { id: string; role: string }): Promise<void> {
+  if (user.role !== "teacher") return;
+  const masterId = await guideMasterId();
+  if (!masterId) return;
+  const owner = await db.prepare(`SELECT owner_id FROM notebooks WHERE id = ?`).bind(masterId).first<{ owner_id: string }>();
+  if (owner?.owner_id === user.id) return; // the master is already theirs
+  const claim = await db
+    .prepare(`UPDATE users SET guide_given_at = ? WHERE id = ? AND guide_given_at IS NULL`)
+    .bind(now(), user.id)
+    .run();
+  if (!claim.meta?.changes) return;
+  try {
+    await copyGuideFor(user.id, masterId);
+  } catch (e) {
+    await db.prepare(`UPDATE users SET guide_given_at = NULL WHERE id = ?`).bind(user.id).run();
+    throw e;
+  }
+}
+
+/** "Get the latest guide": a fresh copy, whatever they did with the last one. */
+app.post("/api/my/guide", handler(async (c) => {
+  const user = await requireTeacher(c);
+  const masterId = await guideMasterId();
+  if (!masterId) throw new HttpError(404, "There's no getting-started guide yet.");
+  const id = await copyGuideFor(user.id, masterId);
+  await db.prepare(`UPDATE users SET guide_given_at = COALESCE(guide_given_at, ?) WHERE id = ?`).bind(now(), user.id).run();
+  return c.json({ notebook: { id } });
+}));
+
+/** Whether a guide exists, for the Settings button. */
+app.get("/api/my/guide", handler(async (c) => {
+  await requireTeacher(c);
+  return c.json({ available: !!(await guideMasterId()) });
 }));

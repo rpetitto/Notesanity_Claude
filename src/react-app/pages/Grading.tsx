@@ -15,10 +15,11 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckCheck, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ClipboardCheck,
-  History, Lock, Mail, MoreVertical, PanelLeft, Pencil, Send, Trash2, Type as TypeIcon,
+  History, ListChecks, Lock, Radio, Mail, MoreVertical, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Send, Trash2, Type as TypeIcon,
   Undo2, Unlock, Upload, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { DeleteAssignmentDialog } from "../components/DeleteAssignment";
 import { api, pageSource, type PageRec, type WorkResponse } from "../lib/api";
 import { useNotebookWork } from "../lib/useNotebookWork";
 import { parseLayer } from "../lib/ink";
@@ -28,9 +29,12 @@ import PageThumb from "../components/PageThumb";
 import InkToolbar from "../components/InkToolbar";
 import type { ToolState } from "../components/PageCanvas";
 import { Avatar, ErrorNote, Spinner } from "../components/Shell";
-import { Button, Chip, IconButton, Modal, Textarea } from "../components/ui";
-import { cn, formatDue, relativeTime } from "../lib/utils";
+import { Button, Chip, IconButton, Modal, Textarea, buttonClass } from "../components/ui";
+import { cn, relativeTime, dueLabel } from "../lib/utils";
 import { hasGoogleClientId, pushGrades, type ClassroomGrade, type GradePushResult } from "../lib/google";
+import { letterPercent } from "../../shared/grades.mjs";
+import { letterFor } from "../../shared/answers.mjs";
+import type { CheckResponse } from "./CheckByQuestion";
 import GoogleIcon from "../components/GoogleIcon";
 
 /** Header controls share one height so a row of them lines up. */
@@ -41,73 +45,6 @@ const BUTTON_ROW =
 
 const RAIL_KEY = "notesanity:gradeRail";
 const ROSTER_KEY = "notesanity:gradeRoster";
-
-/** What deleting (or heavily editing) an assignment would actually disturb. */
-export interface AssignmentImpact {
-  submitted: number;
-  graded: number;
-  returned: number;
-  total: number;
-  started: number;
-  grading: string;
-  status: string;
-}
-
-/**
- * A plain confirm dialog isn't enough for a destructive, hard-to-undo action
- * that affects a whole roster — the teacher needs the real numbers in front of
- * them, and needs to understand that student *work* survives even though the
- * assignment record doesn't.
- */
-export function DeleteAssignmentModal({
-  impact, loading, deleting, onCancel, onConfirm,
-}: {
-  impact: AssignmentImpact | null;
-  loading: boolean;
-  deleting: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal onClose={onCancel}>
-      <div className="flex items-start justify-between">
-        <h3 className="text-[17px] text-pine">Delete assignment?</h3>
-        <button onClick={onCancel} className="rounded-full p-1 text-pine/50 hover:bg-pine/8" aria-label="Close">
-          <X className="h-4 w-4" strokeWidth={2.5} />
-        </button>
-      </div>
-
-      {loading || !impact ? (
-        <div className="py-8"><Spinner label="Checking impact…" /></div>
-      ) : (
-        <>
-          <div className="mt-3 space-y-1.5 text-[16px] text-pine/80">
-            {impact.submitted > 0 && (
-              <p>{impact.submitted} of {impact.total} students have turned this in.</p>
-            )}
-            {impact.graded > 0 && <p>{impact.graded} have been graded.</p>}
-            {impact.submitted === 0 && impact.graded === 0 && (
-              <p>No one has turned this in yet.</p>
-            )}
-          </div>
-          <p className="mt-3 rounded-[12px] border-[3px] border-pine/20 bg-oat p-3 text-[16px] leading-relaxed text-pine/70">
-            Deleting removes the assignment and all of its grades and submission records.
-            It does <strong>not</strong> delete the pages or anything students wrote on them —
-            that work stays in the notebook.
-          </p>
-          <div className="mt-5 flex justify-end gap-2">
-            <Button variant="ghost" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button variant="danger" onClick={onConfirm} disabled={deleting}>
-              <Trash2 className="h-4 w-4" strokeWidth={2.5} /> Delete assignment
-            </Button>
-          </div>
-        </>
-      )}
-    </Modal>
-  );
-}
 
 function PageRail({
   pages, pageNumbers, notebookId, activePageId, onSelect, ink,
@@ -154,6 +91,28 @@ function PageRail({
 }
 
 /** Roster list, shared by the persistent left panel and its mobile drawer. */
+/**
+ * A side panel's header: its hide button on the left, where a notebook's page
+ * list keeps its own, and the panel's name. Same 48px band as the notebook's
+ * Pages/Assignments tabs, so the two screens line up.
+ */
+function PanelHeader({ label, onHide, hideLabel }: { label: string; onHide: () => void; hideLabel: string }) {
+  return (
+    <div className="flex h-12 shrink-0 items-center border-b-2 border-pine/12">
+      <button
+        type="button"
+        onClick={onHide}
+        title={hideLabel}
+        aria-label={hideLabel}
+        className="flex h-12 w-10 shrink-0 items-center justify-center text-pine/60 hover:bg-oat hover:text-pine"
+      >
+        <PanelLeftClose className="h-4 w-4" strokeWidth={2.5} />
+      </button>
+      <span className="min-w-0 truncate font-display text-[17px] font-bold text-pine">{label}</span>
+    </div>
+  );
+}
+
 function RosterList({
   rows, studentIdx, onSelect,
 }: {
@@ -201,9 +160,56 @@ interface GradeRow {
   grade: { points: number | null; letter: string | null; complete: number | null };
   feedback: string;
   graded: boolean;
+  /** This student's own due date, when they have an extension. */
+  dueOverride?: string | null;
 }
 
 const LETTERS = ["A", "B", "C", "D", "F"];
+
+/** An ISO time as a <input type="datetime-local"> value, in the viewer's own time zone. */
+const toLocalInput = (iso: string | null | undefined) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/**
+ * One student's own due date: an extension, or an accommodation an IEP
+ * requires. It replaces the class's date for this student everywhere they
+ * see it, and in the gradebook's "Missing".
+ */
+function ExtensionControl({ classDue, override, onChange, busy }: {
+  classDue: string | null; override: string | null | undefined; onChange: (dueAt: string | null) => void; busy: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(toLocalInput(override ?? classDue));
+  useEffect(() => { setValue(toLocalInput(override ?? classDue)); setEditing(false); }, [override, classDue]);
+  return (
+    <div className="mt-5 border-t-2 border-pine/10 pt-4" data-testid="extension">
+      <div className="label-caps text-pine/70">Due date for this student</div>
+      <p className="mt-1 text-[16px] text-pine">
+        {override ? <><b>{dueLabel(override)}</b> <span className="text-pine/60">· extended from {classDue ? dueLabel(classDue).replace(/^Due /, "") : "no date"}</span></> : dueLabel(classDue)}
+      </p>
+      {editing ? (
+        <div className="mt-2 grid gap-2">
+          <input type="datetime-local" aria-label="New due date for this student" value={value} onChange={(e) => setValue(e.target.value)}
+            className="h-11 rounded-[12px] border-[3px] border-pine px-2 text-[16px] outline-none focus:ring-[3px] focus:ring-mint" />
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" disabled={busy || !value} onClick={() => onChange(new Date(value).toISOString())}>Save date</Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>{override ? "Change" : "Give an extension"}</Button>
+          {override && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onChange(null)}>Use the class date</Button>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** "Pages 4, 7-9" reads far better than "3 pages" when you're about to grade them. */
 export function formatPageNumbers(numbers?: number[]): string {
@@ -294,8 +300,6 @@ export default function Grading() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [deleteImpact, setDeleteImpact] = useState<AssignmentImpact | null>(null);
-  const [impactLoading, setImpactLoading] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
@@ -335,28 +339,9 @@ export default function Grading() {
     );
   }, [studentId, searchParams, setSearchParams]);
 
-  const deleteMutation = useMutation({
-    mutationFn: () => api.del(`/api/assignments/${assignmentId}`),
-    onSuccess: () => {
-      toast.success("Assignment deleted");
-      navigate(`/classes/${assignment.classId}?tab=assignments`);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const openDeleteModal = async () => {
+  const openDeleteModal = () => {
     setMenuOpen(false);
     setShowDeleteModal(true);
-    setImpactLoading(true);
-    try {
-      const impact = await api.get<AssignmentImpact>(`/api/assignments/${assignmentId}/impact`);
-      setDeleteImpact(impact);
-    } catch (e) {
-      toast.error((e as Error).message);
-      setShowDeleteModal(false);
-    } finally {
-      setImpactLoading(false);
-    }
   };
 
   /*
@@ -370,6 +355,16 @@ export default function Grading() {
   const scope = assignment?.pageIds?.length ? `&pages=${assignment.pageIds.join(",")}` : "";
   const workUrl = (id: string) =>
     `/api/notebooks/${assignment.notebookId}/work?student=${encodeURIComponent(id)}${scope}`;
+
+  // Scores against the answer key, for the whole class at once — the grade
+  // panel offers the current student's as a suggestion.
+  const check = useQuery({
+    queryKey: ["check", assignmentId],
+    queryFn: () => api.get<CheckResponse>(`/api/assignments/${assignmentId}/check`),
+    enabled: isTeacher && !!assignmentId,
+  });
+  const keyed = !!check.data?.fields.some((f) => f.counted);
+  const keyScore = keyed ? check.data?.students.find((s) => s.student.id === studentId)?.score : undefined;
 
   const work = useQuery({
     queryKey: ["work", assignment?.notebookId, studentId, scope],
@@ -463,14 +458,21 @@ export default function Grading() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["assignment", assignmentId] }),
     onError: (e: Error) => toast.error(e.message),
   });
+  const extend = useMutation({
+    mutationFn: (dueAt: string | null) => api.post(`/api/assignments/${assignmentId}/extension`, { studentId, dueAt }),
+    onSuccess: (_r, dueAt) => {
+      qc.invalidateQueries({ queryKey: ["assignment", assignmentId] });
+      toast.success(dueAt ? "Extension saved" : "Back to the class due date");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   /**
    * The same grades, in the only shape Classroom understands.
    *
-   * Points go across as they are and complete/incomplete as the one-point
-   * assignment it was posted as. A letter grade has no numeric form worth
-   * inventing, so those assignments simply don't push — the letter stays here,
-   * which is what the teacher was told when they posted it.
+   * Points go across as they are, complete/incomplete as the one-point
+   * assignment it was posted as, and a letter as its value out of 100 (A 95,
+   * B 85 … shared/grades.mjs) — the number Notesanity's own averages use.
    */
   const classroomGradesFor = (target: GradeRow[]): ClassroomGrade[] => {
     if (assignment?.grading === "points") {
@@ -483,8 +485,15 @@ export default function Grading() {
         .filter((r) => r.grade.complete !== null)
         .map((r) => ({ email: r.student.email, points: r.grade.complete ? 1 : 0 }));
     }
+    if (assignment?.grading === "letter") {
+      return target
+        .filter((r) => letterPercent(r.grade.letter) !== null)
+        .map((r) => ({ email: r.student.email, points: letterPercent(r.grade.letter)! }));
+    }
     return [];
   };
+  /** Letters need the coursework graded out of 100, which older posts weren't. */
+  const classroomOpts = () => (assignment?.grading === "letter" ? { maxPoints: 100 } : {});
 
   const returnWork = useMutation({
     mutationFn: async (body: { studentId?: string; all?: boolean }) => {
@@ -503,7 +512,7 @@ export default function Grading() {
       // Classroom is the mirror. A failure to mirror is reported, not thrown,
       // or the teacher would think the grades hadn't gone out at all.
       try {
-        return { classroom: await pushGrades(courseId, courseworkId, grades), classroomError: null };
+        return { classroom: await pushGrades(courseId, courseworkId, grades, classroomOpts()), classroomError: null };
       } catch (e) {
         return { classroom: null, classroomError: (e as Error).message };
       }
@@ -530,7 +539,7 @@ export default function Grading() {
       const grades = classroomGradesFor(rows.filter((r) => r.graded && r.returnedAt));
       if (grades.length === 0) return { classroom: null, classroomError: "No returned grades to send yet." };
       try {
-        return { classroom: await pushGrades(courseId, courseworkId, grades), classroomError: null };
+        return { classroom: await pushGrades(courseId, courseworkId, grades, classroomOpts()), classroomError: null };
       } catch (e) {
         return { classroom: null, classroomError: (e as Error).message };
       }
@@ -612,30 +621,9 @@ export default function Grading() {
         <IconButton label="Back" onClick={goBack}>
           <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
         </IconButton>
-        {/* Both panel toggles live together on the left, where the panels
-            themselves are — a "Roster" button living in the actions cluster on
-            the right was two screens' worth of eye travel from the thing it
-            opened. */}
-        <button
-          type="button"
-          onClick={() => setRosterOpen((v) => !v)}
-          className="hidden h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8 sm:inline-flex"
-          aria-label={rosterOpen ? "Hide roster" : "Show roster"}
-          aria-pressed={rosterOpen}
-          title="Roster"
-        >
-          <Users className="h-4 w-4" strokeWidth={2.5} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setRailOpen((v) => !v)}
-          className="hidden h-11 w-11 items-center justify-center rounded-full text-pine hover:bg-pine/8 sm:inline-flex"
-          aria-label={railOpen ? "Hide pages" : "Show pages"}
-          aria-pressed={railOpen}
-          title="Pages"
-        >
-          <PanelLeft className="h-4 w-4" strokeWidth={2.5} />
-        </button>
+        {/* On a computer the panels hide and show from their own headers, the
+            way a notebook's page list does; on a phone they are drawers,
+            opened from here. */}
         <button
           type="button"
           onClick={() => setRosterMobileOpen(true)}
@@ -655,7 +643,7 @@ export default function Grading() {
         <div className="min-w-0 flex-1 sm:flex-initial">
           <div className="truncate font-display text-[16px] font-bold text-pine">{assignment.title}</div>
           <div className="truncate text-[16px] text-pine/70">
-            {formatPageNumbers(assignment.pageNumbers)} · Due {formatDue(assignment.dueAt)}
+            {formatPageNumbers(assignment.pageNumbers)} · {dueLabel(assignment.dueAt)}
           </div>
         </div>
 
@@ -679,6 +667,15 @@ export default function Grading() {
             <Button variant="secondary" onClick={() => resendClassroom.mutate()} disabled={resendClassroom.isPending} title="Send the returned grades to Google Classroom again">
               <GoogleIcon product="classroom" /> {resendClassroom.isPending ? "Sending…" : "Send grades to Classroom"}
             </Button>
+          )}
+
+          <Link to={`/notebooks/${assignment.notebookId}/live${assignment.pageIds?.length === 1 ? `?page=${assignment.pageIds[0]}` : ""}`} className={buttonClass("secondary", "sm")}>
+            <Radio className="h-4 w-4" strokeWidth={2.5} /> Live
+          </Link>
+          {(check.data?.fields.length ?? 0) > 0 && (
+            <Link to={`/assignments/${assignmentId}/check`} className={buttonClass("secondary", "sm")}>
+              <ListChecks className="h-4 w-4" strokeWidth={2.5} /> Check by question
+            </Link>
           )}
 
           <Button variant="secondary" size="sm" onClick={() => setHistoryOpen(true)}>
@@ -853,13 +850,46 @@ export default function Grading() {
       {/* Roster sits to the left of the pages, matching the order you actually
           work in: pick a student, then a page, then look at it. */}
       <div className="flex min-h-0 flex-1">
+        {/* Hidden panels leave a slim strip with a button to bring each back —
+            the same strip, in the same place, as a notebook's page list. */}
+        {(!rosterOpen || !railOpen) && (
+          <aside className="hidden w-11 shrink-0 flex-col items-center gap-1 border-r-2 border-pine/12 bg-white pt-1 sm:flex">
+            {!rosterOpen && (
+              <button
+                type="button"
+                onClick={() => setRosterOpen(true)}
+                title="Show students"
+                aria-label="Show students"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-pine/70 hover:bg-oat hover:text-pine"
+              >
+                <Users className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            )}
+            {!railOpen && (
+              <button
+                type="button"
+                onClick={() => setRailOpen(true)}
+                title="Show pages"
+                aria-label="Show pages"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-pine/70 hover:bg-oat hover:text-pine"
+              >
+                <PanelLeftOpen className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            )}
+          </aside>
+        )}
         {rosterOpen && (
-          <aside className="hidden w-64 shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white sm:block">
-            <RosterList rows={rows} studentIdx={studentIdx} onSelect={setStudentIdx} />
+          <aside className="hidden w-64 shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
+            <PanelHeader label="Students" onHide={() => setRosterOpen(false)} hideLabel="Hide students" />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <RosterList rows={rows} studentIdx={studentIdx} onSelect={setStudentIdx} />
+            </div>
           </aside>
         )}
         {railOpen && (
-          <aside className="hidden w-[104px] shrink-0 overflow-y-auto border-r-2 border-pine/12 bg-white px-2 py-3 sm:block">
+          <aside className="hidden w-[112px] shrink-0 flex-col border-r-2 border-pine/12 bg-white sm:flex">
+            <PanelHeader label="Pages" onHide={() => setRailOpen(false)} hideLabel="Hide pages" />
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
             <PageRail
               pages={assignedPages}
               pageNumbers={assignment.pageNumbers}
@@ -872,6 +902,7 @@ export default function Grading() {
                 teacher: notebookWork.teacherLayers,
               }}
             />
+            </div>
           </aside>
         )}
 
@@ -911,6 +942,9 @@ export default function Grading() {
           onSave={(body) => grade.mutate(body)}
           onReturn={() => returnWork.mutate({ studentId })}
           onReopen={() => setReopenModalOpen(true)}
+          onExtend={(d) => extend.mutate(d)}
+          extending={extend.isPending}
+          keyScore={keyScore}
           saving={grade.isPending}
           mobileOpen={gradeSheetOpen}
           onMobileClose={() => setGradeSheetOpen(false)}
@@ -930,12 +964,10 @@ export default function Grading() {
       </button>
 
       {showDeleteModal && (
-        <DeleteAssignmentModal
-          impact={deleteImpact}
-          loading={impactLoading}
-          deleting={deleteMutation.isPending}
-          onCancel={() => setShowDeleteModal(false)}
-          onConfirm={() => deleteMutation.mutate()}
+        <DeleteAssignmentDialog
+          assignmentId={assignmentId}
+          onClose={() => setShowDeleteModal(false)}
+          onDeleted={() => navigate(`/classes/${assignment.classId}?tab=assignments`)}
         />
       )}
 
@@ -1094,13 +1126,17 @@ function StatusPill({ row }: { row?: GradeRow }) {
 }
 
 function GradePanel({
-  assignment, row, onSave, onReturn, onReopen, saving, mobileOpen, onMobileClose,
+  assignment, row, onSave, onReturn, onReopen, onExtend, extending, saving, mobileOpen, onMobileClose, keyScore,
 }: {
   assignment: any;
   row?: GradeRow;
+  /** Their score against the answer key, when the assignment's boxes have one. */
+  keyScore?: { earned: number; possible: number; pending: number; answered: number };
   onSave: (body: any) => void;
   onReturn: () => void;
   onReopen: () => void;
+  onExtend: (dueAt: string | null) => void;
+  extending: boolean;
   saving: boolean;
   mobileOpen: boolean;
   onMobileClose: () => void;
@@ -1135,8 +1171,40 @@ function GradePanel({
    */
   const returned = !!row.returnedAt;
 
+  const fromKey = keyScore && keyScore.possible > 0 && (assignment.grading === "points" || assignment.grading === "letter")
+    ? assignment.grading === "points"
+      ? String(Math.round((keyScore.earned / keyScore.possible) * Number(assignment.pointsMax ?? 100) * 100) / 100)
+      : letterFor((keyScore.earned / keyScore.possible) * 100)
+    : null;
+  const usingKey = fromKey !== null && (assignment.grading === "points" ? points === fromKey : letter === fromKey);
+
   const fields = (
     <>
+      {keyScore && keyScore.possible > 0 && (
+        <div className="mt-4 rounded-[14px] border-2 border-pine/15 bg-oat/60 p-3" data-testid="key-score">
+          <div className="label-caps text-pine/70">Answer key</div>
+          <div className="mt-0.5 font-display text-[18px] font-bold text-pine">
+            {keyScore.earned} of {keyScore.possible} point{keyScore.possible === 1 ? "" : "s"}
+          </div>
+          {keyScore.pending > 0 && (
+            <p className="text-[15px] text-[#5c4611]">
+              {keyScore.pending} answer{keyScore.pending === 1 ? "" : "s"} still to check
+            </p>
+          )}
+          {fromKey !== null && !returned && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-2"
+              disabled={usingKey}
+              onClick={() => (assignment.grading === "points" ? setPoints(fromKey) : setLetter(fromKey))}
+            >
+              {usingKey ? "Using it" : `Use ${fromKey}${assignment.grading === "points" ? ` / ${assignment.pointsMax}` : ""} as the grade`}
+            </Button>
+          )}
+        </div>
+      )}
+
       {assignment.grading === "points" && (
         <div className="mt-4">
           <label className="label-caps block text-pine/70">Points</label>
@@ -1207,16 +1275,30 @@ function GradePanel({
         className="mt-1 text-[16px] disabled:opacity-60"
       />
 
-      {!returned && (
-        <>
-          <Button variant="secondary" onClick={submit} disabled={saving} className="mt-3 w-full">
-            Save grade
-          </Button>
-          <Button variant="primary" onClick={() => { submit(); onReturn(); }} className="mt-2 w-full">
-            <Send className="h-4 w-4" strokeWidth={2.5} /> Save &amp; return
-          </Button>
-        </>
-      )}
+      {!returned && (() => {
+        // A graded assignment needs its grade before either button means
+        // anything; one graded on feedback alone can be saved as it is.
+        const hasGrade =
+          assignment.grading === "points" ? points.trim() !== "" && Number.isFinite(Number(points)) :
+          assignment.grading === "letter" ? !!letter :
+          assignment.grading === "complete" ? complete !== null :
+          true;
+        return (
+          <>
+            <Button variant="secondary" onClick={submit} disabled={saving || !hasGrade} className="mt-3 w-full">
+              Save grade
+            </Button>
+            <Button variant="primary" onClick={() => { submit(); onReturn(); }} disabled={saving || !hasGrade} className="mt-2 w-full">
+              <Send className="h-4 w-4" strokeWidth={2.5} /> Save &amp; return
+            </Button>
+            {!hasGrade && (
+              <p className="mt-2 text-[16px] text-pine/60">
+                {assignment.grading === "points" ? "Enter points to save." : assignment.grading === "letter" ? "Choose a grade to save." : "Choose Complete or Incomplete to save."}
+              </p>
+            )}
+          </>
+        );
+      })()}
 
       {returned && (
         <p className="mt-3 flex items-start gap-1.5 text-[16px] text-pine/70">
@@ -1230,6 +1312,8 @@ function GradePanel({
           <Unlock className="h-4 w-4" strokeWidth={2.5} /> Reopen for student
         </Button>
       )}
+
+      <ExtensionControl classDue={assignment.dueAt ?? null} override={row.dueOverride} onChange={onExtend} busy={extending} />
     </>
   );
 

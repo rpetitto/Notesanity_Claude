@@ -1,13 +1,23 @@
 import { app, db } from "../platform";
 import {
   handler, now, uid, SQL_UUID, requireUser, requireClassTeacher, requireClassMember, HttpError, param,} from "../lib/session";
+import { gradeContribution } from "../../shared/grades.mjs";
+import { KEYABLE, checkAnswer, letterFor } from "../../shared/answers.mjs";
 import { logActivity } from "../lib/activity";
-import { HAS_INK_BYTES } from "../lib/ink";
+import { HAS_INK_BYTES, inkKey, parseShape, readInkMany } from "../lib/ink";
 
 async function loadAssignment(c: any, assignmentId: string) {
   const a = await db.prepare(`SELECT * FROM assignments WHERE id = ?`).bind(assignmentId).first<any>();
   if (!a) throw new HttpError(404, "Assignment not found");
   const { user, isTeacher } = await requireClassMember(c, a.class_id);
+  // To a student, an assignment exists once it's live: active, past its
+  // release time, on a published notebook. Before then its id opens nothing —
+  // the same rule the class's assignment list already follows.
+  if (!isTeacher) {
+    const released = !a.release_at || new Date(String(a.release_at).includes("T") ? a.release_at : `${a.release_at.replace(" ", "T")}Z`).getTime() <= Date.now();
+    const nb = await db.prepare(`SELECT status FROM notebooks WHERE id = ?`).bind(a.notebook_id).first<{ status: string }>();
+    if (a.status !== "active" || !released || nb?.status !== "published") throw new HttpError(404, "Assignment not found");
+  }
   return { a, user, isTeacher };
 }
 
@@ -94,7 +104,8 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
               (SELECT SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_returned,
               (SELECT SUM(CASE WHEN graded_at IS NOT NULL THEN 1 ELSE 0 END) FROM submissions WHERE assignment_id = a.id) AS s_graded,
               (SELECT COUNT(*) FROM submissions WHERE assignment_id = a.id) AS s_total` : `ms.status AS my_status, ms.grade_points AS my_points, ms.grade_letter AS my_letter,
-              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at`}
+              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at,
+              ms.due_override AS my_due`}
          FROM assignments a
          JOIN notebooks n ON n.id = a.notebook_id
          ${isTeacher ? "" : "LEFT JOIN submissions ms ON ms.assignment_id = a.id AND ms.student_id = ?"}
@@ -110,7 +121,7 @@ app.get("/api/classes/:id/assignments", handler(async (c) => {
     const base = {
       id: a.id, title: a.title, notebookId: a.notebook_id, notebookTitle: a.notebook_title,
       notebookColor: a.notebook_color ?? "#2E7D6B", notebookHasCover: !!a.notebook_has_cover,
-      pageCount: pageIds.length, releaseAt: a.release_at, dueAt: a.due_at,
+      pageCount: pageIds.length, releaseAt: a.release_at, dueAt: (!isTeacher && a.my_due) || a.due_at,
       grading: a.grading, pointsMax: a.points_max, status: a.status,
     };
     if (isTeacher) {
@@ -429,7 +440,8 @@ app.get("/api/assignments/:id", handler(async (c) => {
       ? await db.prepare(`SELECT google_course_id FROM classes WHERE id = ?`).bind(a.class_id).first<{ google_course_id: string | null }>()
       : null;
     return c.json({
-      assignment: base,
+      // Their own due date when they have an extension; the class's otherwise.
+      assignment: { ...base, dueAt: sub?.due_override ?? base.dueAt, extended: !!sub?.due_override },
       isTeacher: false,
       studentId: user.id,
       classroom: course?.google_course_id ? { courseId: course.google_course_id, courseworkId: a.google_coursework_id as string } : null,
@@ -493,6 +505,7 @@ app.get("/api/assignments/:id", handler(async (c) => {
       grade: { points: sub?.grade_points ?? null, letter: sub?.grade_letter ?? null, complete: sub?.grade_complete ?? null },
       feedback: sub?.feedback ?? "",
       graded: !!sub?.graded_at,
+      dueOverride: sub?.due_override ?? null,
     });
   }
   // The course id lives on the class, but the post and the grade passback both
@@ -615,6 +628,14 @@ app.post("/api/assignments/:id/grade", handler(async (c) => {
     .prepare(`SELECT id FROM submissions WHERE assignment_id = ? AND student_id = ?`)
     .bind(a.id, b.studentId)
     .first<{ id: string }>();
+  // A grade goes to someone in this class, never to an id from anywhere else.
+  if (!existing) {
+    const enrolled = await db
+      .prepare(`SELECT 1 AS yes FROM enrollments WHERE class_id = ? AND user_id = ? AND role = 'student' AND status = 'active'`)
+      .bind(a.class_id, String(b.studentId ?? ""))
+      .first();
+    if (!enrolled) throw new HttpError(404, "That student isn't in this class");
+  }
   const completeVal = b.complete === null || b.complete === undefined ? null : b.complete ? 1 : 0;
   if (existing) {
     await db
@@ -637,6 +658,298 @@ app.post("/api/assignments/:id/grade", handler(async (c) => {
     detail: `Graded "${a.title}"`, assignmentId: a.id, notebookId: a.notebook_id, studentId: b.studentId,
   });
   return c.json({ ok: true });
+}));
+
+/**
+ * Give one student their own due date — an extension, an accommodation — or
+ * take it away (`dueAt: null`) so the class's date applies again. Teachers
+ * only, and only for a student in the class.
+ */
+app.post("/api/assignments/:id/extension", handler(async (c) => {
+  const { a, isTeacher } = await loadAssignment(c, param(c, "id"));
+  if (!isTeacher) throw new HttpError(403, "Teacher access required");
+  const b = await c.req.json<{ studentId?: string; dueAt?: string | null }>();
+  const studentId = String(b.studentId ?? "");
+  const enrolled = await db
+    .prepare(`SELECT 1 AS yes FROM enrollments WHERE class_id = ? AND user_id = ? AND role = 'student' AND status = 'active'`)
+    .bind(a.class_id, studentId)
+    .first();
+  if (!enrolled) throw new HttpError(404, "That student isn't in this class");
+  let due: string | null = null;
+  if (b.dueAt) {
+    const d = new Date(b.dueAt);
+    if (Number.isNaN(d.getTime())) throw new HttpError(400, "That isn't a date");
+    due = d.toISOString();
+  }
+  await db
+    .prepare(
+      `INSERT INTO submissions (id, assignment_id, student_id, status, due_override, created_at, updated_at)
+       VALUES (?, ?, ?, 'not_started', ?, ?, ?)
+       ON CONFLICT(assignment_id, student_id) DO UPDATE SET due_override = excluded.due_override, updated_at = excluded.updated_at`,
+    )
+    .bind(uid(), a.id, studentId, due, now(), now())
+    .run();
+  return c.json({ ok: true, dueAt: due });
+}));
+
+// ---------------------------------------------------------------------------
+// Checking by question.
+//
+// A box with an answer key is checked as the work is read: every student's
+// answer to it against the key, in one place, with the teacher able to
+// overrule any single decision. A box without a key can still be marked by
+// hand, and once anyone's answer to it has been marked it counts for everyone
+// (the ones nobody has marked yet show as still to check, not as wrong).
+//
+// Keys and marks are teacher-only. Nothing here is reachable by a student,
+// and the routes students use select their columns by name, so a key never
+// rides along with their own work.
+// ---------------------------------------------------------------------------
+
+const KEYABLE_SQL = [...KEYABLE].map((t) => `'${t}'`).join(",");
+
+async function requireTeacherOf(c: any, assignmentId: string) {
+  const loaded = await loadAssignment(c, assignmentId);
+  if (!loaded.isTeacher) throw new HttpError(403, "Teacher access required");
+  return loaded;
+}
+
+/** The assignment's boxes, every student's answers to them, and what's been decided. */
+async function checkSheet(a: any) {
+  const pageIds: string[] = JSON.parse(a.page_ids || "[]");
+  const empty = { pages: [] as any[], fields: [] as any[], students: [] as any[] };
+  if (pageIds.length === 0) return empty;
+  const ph = pageIds.map(() => "?").join(",");
+  const [pagesRes, fieldsRes, rosterRes, instRes, valuesRes, marksRes, subsRes] = await db.batch([
+    db.prepare(
+      `SELECT id, seq, asset_key, source_index, width, height, label, pattern, pattern_color
+         FROM pages WHERE notebook_id = ? AND archived = 0 AND id IN (${ph}) ORDER BY seq`,
+    ).bind(a.notebook_id, ...pageIds),
+    db.prepare(
+      `SELECT id, page_id, type, x, y, w, h, label, options, prompt, answer_key, points
+         FROM fields WHERE notebook_id = ? AND archived = 0 AND type IN (${KEYABLE_SQL}) AND page_id IN (${ph})`,
+    ).bind(a.notebook_id, ...pageIds),
+    db.prepare(
+      `SELECT u.id, u.name, u.email, u.picture FROM enrollments e JOIN users u ON u.id = e.user_id
+        WHERE e.class_id = ? AND e.role = 'student' AND e.status = 'active' ORDER BY u.name`,
+    ).bind(a.class_id),
+    db.prepare(`SELECT id, student_id FROM instances WHERE notebook_id = ?`).bind(a.notebook_id),
+    db.prepare(
+      `SELECT v.instance_id, v.field_id, v.value FROM field_values v JOIN fields f ON f.id = v.field_id
+        WHERE f.notebook_id = ? AND f.archived = 0 AND f.page_id IN (${ph})
+          AND v.instance_id IN (SELECT id FROM instances WHERE notebook_id = ?)`,
+    ).bind(a.notebook_id, ...pageIds, a.notebook_id),
+    db.prepare(`SELECT student_id, field_id, correct FROM answer_marks WHERE assignment_id = ?`).bind(a.id),
+    db.prepare(
+      `SELECT student_id, status, grade_points, grade_letter, graded_at FROM submissions WHERE assignment_id = ?`,
+    ).bind(a.id),
+  ]) as D1Result<any>[];
+
+  const pages = pagesRes.results ?? [];
+  const pageOrder = new Map(pages.map((p: any, i: number) => [p.id, i]));
+  // Reading order: page by page, then top to bottom, then left to right — with
+  // boxes on roughly the same line read left to right rather than by a pixel.
+  const fields = (fieldsRes.results ?? [])
+    .filter((f: any) => pageOrder.has(f.page_id))
+    .sort((x: any, y: any) =>
+      (pageOrder.get(x.page_id)! - pageOrder.get(y.page_id)!)
+      || (Math.abs(x.y - y.y) > Math.min(x.h, y.h) / 2 ? x.y - y.y : x.x - y.x));
+
+  const studentOf = new Map<string, string>();
+  for (const i of instRes.results ?? []) studentOf.set(i.id, i.student_id);
+  const values = new Map<string, string>();
+  for (const v of valuesRes.results ?? []) {
+    const sid = studentOf.get(v.instance_id);
+    if (sid) values.set(`${sid}:${v.field_id}`, v.value ?? "");
+  }
+  const marks = new Map<string, boolean>();
+  const markedFields = new Set<string>();
+  for (const m of marksRes.results ?? []) {
+    marks.set(`${m.student_id}:${m.field_id}`, !!m.correct);
+    markedFields.add(m.field_id);
+  }
+  const subs = new Map<string, any>();
+  for (const s of subsRes.results ?? []) subs.set(s.student_id, s);
+
+  // A box counts toward the score once it has a key or anyone has been marked on it.
+  const counted = new Set(fields.filter((f: any) => f.answer_key || markedFields.has(f.id)).map((f: any) => f.id));
+  const possible = fields.reduce((n: number, f: any) => n + (counted.has(f.id) ? Number(f.points) || 0 : 0), 0);
+
+  const students = (rosterRes.results ?? []).map((u: any) => {
+    let earned = 0;
+    let pending = 0;
+    let answered = 0;
+    const answers: Record<string, { value: string; auto: boolean | null; mark: boolean | null }> = {};
+    for (const f of fields) {
+      const k = `${u.id}:${f.id}`;
+      const value = values.get(k) ?? "";
+      const auto = checkAnswer(f.type, f.answer_key, value);
+      const mark = marks.has(k) ? marks.get(k)! : null;
+      answers[f.id] = { value, auto, mark };
+      if (!counted.has(f.id)) continue;
+      if (value.trim() || mark !== null) answered++;
+      const result = mark ?? auto;
+      if (result === null) pending++;
+      else if (result) earned += Number(f.points) || 0;
+    }
+    const sub = subs.get(u.id);
+    return {
+      student: u,
+      answers,
+      score: { earned: Math.round(earned * 100) / 100, possible: Math.round(possible * 100) / 100, pending, answered },
+      status: sub?.status ?? "not_started",
+      graded: !!sub?.graded_at,
+      grade: { points: sub?.grade_points ?? null, letter: sub?.grade_letter ?? null },
+    };
+  });
+
+  return {
+    pages,
+    fields: fields.map((f: any) => ({ ...f, counted: counted.has(f.id) })),
+    students,
+  };
+}
+
+/** What a score comes to under this assignment's grading: points, or a letter. */
+function gradeFromScore(a: any, earned: number, possible: number) {
+  if (possible <= 0) return null;
+  const pct = (earned / possible) * 100;
+  if (a.grading === "points") return { points: Math.round((earned / possible) * Number(a.points_max ?? 100) * 100) / 100, letter: null };
+  if (a.grading === "letter") return { points: null, letter: letterFor(pct) };
+  return null;
+}
+
+app.get("/api/assignments/:id/check", handler(async (c) => {
+  const { a } = await requireTeacherOf(c, param(c, "id"));
+  const sheet = await checkSheet(a);
+  return c.json({
+    assignment: { id: a.id, title: a.title, notebookId: a.notebook_id, classId: a.class_id, grading: a.grading, pointsMax: a.points_max },
+    ...sheet,
+  });
+}));
+
+/**
+ * Overrule the key for students' answers to one box: right, wrong, or
+ * (`correct: null`) back to whatever the key says. `studentIds` marks a group
+ * at once — everyone who gave the same answer — and every one of them has to
+ * be in the class, or nothing is marked.
+ */
+app.post("/api/assignments/:id/marks", handler(async (c) => {
+  const { a, user } = await requireTeacherOf(c, param(c, "id"));
+  const b = await c.req.json<{ studentId?: string; studentIds?: string[]; fieldId?: string; correct?: boolean | null }>();
+  const ids = [...new Set((Array.isArray(b.studentIds) ? b.studentIds : [b.studentId]).map((v) => String(v ?? "")).filter(Boolean))];
+  if (ids.length === 0 || ids.length > 1000) throw new HttpError(400, "Say which students");
+  const fieldId = String(b.fieldId ?? "");
+  const pageIds: string[] = JSON.parse(a.page_ids || "[]");
+  // The box has to be on this assignment's pages in this assignment's notebook.
+  const field = await db.prepare(`SELECT id, page_id, type FROM fields WHERE id = ? AND notebook_id = ? AND archived = 0`)
+    .bind(fieldId, a.notebook_id).first<{ id: string; page_id: string; type: string }>();
+  if (!field || !pageIds.includes(field.page_id) || !KEYABLE.has(field.type)) throw new HttpError(404, "That question isn't part of this assignment");
+  const enrolled = new Set<string>();
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    const res = await db
+      .prepare(
+        `SELECT user_id FROM enrollments WHERE class_id = ? AND role = 'student' AND status = 'active'
+            AND user_id IN (${chunk.map(() => "?").join(",")})`,
+      )
+      .bind(a.class_id, ...chunk)
+      .all<{ user_id: string }>();
+    for (const r of res.results ?? []) enrolled.add(r.user_id);
+  }
+  if (ids.some((id) => !enrolled.has(id))) throw new HttpError(404, "That student isn't in this class");
+  const stamp = now();
+  const statements = ids.map((studentId) =>
+    b.correct === null || b.correct === undefined
+      ? db.prepare(`DELETE FROM answer_marks WHERE assignment_id = ? AND student_id = ? AND field_id = ?`).bind(a.id, studentId, fieldId)
+      : db
+        .prepare(
+          `INSERT INTO answer_marks (id, assignment_id, student_id, field_id, correct, marked_by, marked_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(assignment_id, student_id, field_id) DO UPDATE SET correct = excluded.correct, marked_by = excluded.marked_by, marked_at = excluded.marked_at`,
+        )
+        .bind(uid(), a.id, studentId, fieldId, b.correct ? 1 : 0, user.id, stamp),
+  );
+  for (let i = 0; i < statements.length; i += 50) await db.batch(statements.slice(i, i + 50));
+  return c.json({ ok: true, marked: ids.length });
+}));
+
+/**
+ * Turn checked scores into grades, for everyone or the students named.
+ *
+ * Leaves alone, and reports, anyone it shouldn't decide for: work already
+ * returned, a grade the teacher already gave (unless `overwrite`), anyone
+ * with an answer nobody has checked yet, and anyone who answered nothing —
+ * work not done is the teacher's to call missing, not ours to call zero.
+ * Feedback is never touched.
+ */
+app.post("/api/assignments/:id/apply-scores", handler(async (c) => {
+  const { a, user } = await requireTeacherOf(c, param(c, "id"));
+  if (a.grading !== "points" && a.grading !== "letter") {
+    throw new HttpError(400, "Scores can become grades on points or letter assignments — this one is graded another way.");
+  }
+  const b = await c.req.json<{ studentIds?: string[]; overwrite?: boolean }>().catch(() => ({} as { studentIds?: string[]; overwrite?: boolean }));
+  const only = Array.isArray(b.studentIds) ? new Set(b.studentIds.map(String)) : null;
+  const sheet = await checkSheet(a);
+  const skipped = { returned: 0, graded: 0, pending: 0, blank: 0 };
+  const stamp = now();
+  const statements: D1PreparedStatement[] = [];
+  for (const s of sheet.students) {
+    if (only && !only.has(s.student.id)) continue;
+    if (s.status === "returned") { skipped.returned++; continue; }
+    if (s.graded && !b.overwrite) { skipped.graded++; continue; }
+    // Nothing typed and nothing marked: that's missing work, not a zero to record.
+    if (s.score.answered === 0) { skipped.blank++; continue; }
+    if (s.score.pending > 0) { skipped.pending++; continue; }
+    const g = gradeFromScore(a, s.score.earned, s.score.possible);
+    if (!g) { skipped.blank++; continue; }
+    statements.push(
+      db.prepare(
+        `INSERT INTO submissions (id, assignment_id, student_id, status, grade_points, grade_letter, graded_at, graded_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'not_started', ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(assignment_id, student_id) DO UPDATE SET grade_points = excluded.grade_points, grade_letter = excluded.grade_letter,
+                graded_at = excluded.graded_at, graded_by = excluded.graded_by, updated_at = excluded.updated_at`,
+      ).bind(uid(), a.id, s.student.id, g.points, g.letter, stamp, user.id, stamp, stamp),
+    );
+  }
+  for (let i = 0; i < statements.length; i += 50) await db.batch(statements.slice(i, i + 50));
+  if (statements.length) {
+    await logActivity({
+      actorId: user.id, actorRole: "teacher", action: "grade",
+      detail: `Graded "${a.title}" from the answer key (${statements.length})`, assignmentId: a.id, notebookId: a.notebook_id,
+    });
+  }
+  return c.json({ applied: statements.length, skipped });
+}));
+
+/**
+ * Every student's own ink on one page of the assignment, so the check view can
+ * show what each of them wrote around a box as well as what they typed.
+ */
+app.get("/api/assignments/:id/page-ink", handler(async (c) => {
+  const { a } = await requireTeacherOf(c, param(c, "id"));
+  const pageId = c.req.query("pageId") ?? "";
+  const pageIds: string[] = JSON.parse(a.page_ids || "[]");
+  if (!pageIds.includes(pageId)) throw new HttpError(404, "That page isn't part of this assignment");
+  const rows = await db
+    .prepare(
+      `SELECT i.student_id, l.instance_id, l.data, l.byte_length FROM layers l
+         JOIN instances i ON i.id = l.instance_id
+         JOIN enrollments e ON e.class_id = ? AND e.user_id = i.student_id AND e.role = 'student' AND e.status = 'active'
+        WHERE i.notebook_id = ? AND l.page_id = ? AND l.kind = 'student'
+          AND (l.byte_length > ${HAS_INK_BYTES} OR l.data <> '')`,
+    )
+    .bind(a.class_id, a.notebook_id, pageId)
+    .all<{ student_id: string; instance_id: string; data: string; byte_length: number }>();
+  const list = rows.results ?? [];
+  const keys = list.map((r) => inkKey(a.notebook_id, r.instance_id, pageId, "student"));
+  const blobs = await readInkMany(keys);
+  const ink: Record<string, string> = {};
+  list.forEach((r, i) => {
+    const { v, s, x, e } = blobs.get(keys[i]) ?? parseShape(r.data);
+    if (s.length || x.length || e.length) ink[r.student_id] = JSON.stringify({ v, s, x, e, c: [] });
+  });
+  return c.json({ pageId, ink });
 }));
 
 /** Release grades — one student, or the whole class at once. */
@@ -776,7 +1089,7 @@ app.get("/api/classes/:id/gradebook", handler(async (c) => {
   const classId = param(c, "id");
   await requireClassTeacher(c, classId);
   const assignments = await db
-    .prepare(`SELECT id, title, grading, points_max, due_at FROM assignments WHERE class_id = ? AND status = 'active' ORDER BY COALESCE(due_at, created_at)`)
+    .prepare(`SELECT id, title, grading, points_max, due_at, created_at FROM assignments WHERE class_id = ? AND status = 'active' ORDER BY COALESCE(due_at, created_at)`)
     .bind(classId)
     .all<any>();
   const students = await db
@@ -788,7 +1101,7 @@ app.get("/api/classes/:id/gradebook", handler(async (c) => {
     .all<any>();
   const subs = await db
     .prepare(
-      `SELECT s.assignment_id, s.student_id, s.status, s.grade_points, s.grade_letter, s.grade_complete
+      `SELECT s.assignment_id, s.student_id, s.status, s.grade_points, s.grade_letter, s.grade_complete, s.due_override
          FROM submissions s JOIN assignments a ON a.id = s.assignment_id WHERE a.class_id = ?`,
     )
     .bind(classId)
@@ -812,7 +1125,7 @@ app.get("/api/classes/:id/my-grades", handler(async (c) => {
 
   const rows = await db
     .prepare(
-      `SELECT a.id, a.title, a.due_at, a.grading, a.points_max, a.notebook_id,
+      `SELECT a.id, a.title, COALESCE(s.due_override, a.due_at) AS due_at, a.grading, a.points_max, a.notebook_id,
               s.status, s.submitted_at, s.returned_at, s.grade_points, s.grade_letter,
               s.grade_complete, s.feedback
          FROM assignments a
@@ -830,9 +1143,13 @@ app.get("/api/classes/:id/my-grades", handler(async (c) => {
     // Only returned work counts — a grade the teacher hasn't released yet must
     // stay invisible to the student.
     const released = !!r.returned_at;
-    if (released && r.grading === "points" && r.grade_points !== null) {
-      earned += r.grade_points;
-      possible += r.points_max;
+    // Counted the same way the teacher's gradebook counts it — see shared/grades.mjs.
+    const counts = released
+      ? gradeContribution({ grading: r.grading, pointsMax: r.points_max, points: r.grade_points, letter: r.grade_letter, complete: r.grade_complete })
+      : null;
+    if (counts) {
+      earned += counts.earned;
+      possible += counts.possible;
     }
     return {
       id: r.id,
@@ -859,7 +1176,9 @@ app.get("/api/classes/:id/my-grades", handler(async (c) => {
     className: cls?.name ?? "",
     accentColor: cls?.accent_color ?? "#2E7D6B",
     assignments,
-    totals: possible > 0 ? { earned, possible, percent: Math.round((earned / possible) * 100) } : null,
+    totals: possible > 0
+      ? { earned: Math.round(earned * 10) / 10, possible, percent: Math.round((earned / possible) * 100) }
+      : null,
   });
 }));
 
@@ -891,15 +1210,25 @@ app.get("/api/classes/:id/gradebook.csv", handler(async (c) => {
   for (const s of subs.results ?? []) map.set(key(s.assignment_id, s.student_id), s);
 
   const esc = (v: any) => {
-    const s = v === null || v === undefined ? "" : String(v);
+    let s = v === null || v === undefined ? "" : String(v);
+    // A cell that starts like a formula is run by a spreadsheet; names and
+    // titles come from people, so they're made plain text first.
+    if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
 
-  const header = ["Student", "Email", ...(assignments.results ?? []).map((a: any) =>
+  const header = ["Student", "Email", "Average %", ...(assignments.results ?? []).map((a: any) =>
     a.grading === "points" ? `${a.title} (/${a.points_max})` : a.title)];
   const lines = [header.map(esc).join(",")];
   for (const st of students.results ?? []) {
-    const row = [st.name, st.email];
+    let earned = 0;
+    let possible = 0;
+    for (const a of assignments.results ?? []) {
+      const s = map.get(key(a.id, st.id));
+      const counts = s && gradeContribution({ grading: a.grading, pointsMax: a.points_max, points: s.grade_points, letter: s.grade_letter, complete: s.grade_complete });
+      if (counts) { earned += counts.earned; possible += counts.possible; }
+    }
+    const row = [st.name, st.email, possible ? Math.round((earned / possible) * 1000) / 10 : ""];
     for (const a of assignments.results ?? []) {
       const s = map.get(key(a.id, st.id));
       let cell = "";
@@ -972,7 +1301,8 @@ app.get("/api/my/assignments", handler(async (c) => {
       `SELECT a.*, c.name AS class_name, c.accent_color, c.emoji AS class_emoji,
               n.title AS notebook_title, n.accent_color AS notebook_color,
               ms.status AS my_status, ms.grade_points AS my_points, ms.grade_letter AS my_letter,
-              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at
+              ms.grade_complete AS my_complete, ms.feedback AS my_feedback, ms.returned_at AS my_returned_at,
+              ms.due_override AS my_due
          FROM assignments a
          JOIN classes c ON c.id = a.class_id
          JOIN enrollments e ON e.class_id = c.id AND e.user_id = ? AND e.status = 'active' AND e.role = 'student'
@@ -997,7 +1327,7 @@ app.get("/api/my/assignments", handler(async (c) => {
       accentColor: a.accent_color, classEmoji: a.class_emoji ?? "",
       notebookId: a.notebook_id, notebookTitle: a.notebook_title,
       notebookColor: a.notebook_color ?? "#2E7D6B",
-      dueAt: a.due_at, grading: a.grading, pointsMax: a.points_max,
+      dueAt: a.my_due || a.due_at, grading: a.grading, pointsMax: a.points_max,
       total: pageIds.length,
       status: sub?.status ?? "not_started",
       grade: sub?.returned_at ? { points: sub.grade_points, letter: sub.grade_letter, complete: sub.grade_complete } : null,

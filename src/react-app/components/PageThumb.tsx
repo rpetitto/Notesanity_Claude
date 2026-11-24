@@ -14,7 +14,7 @@ import { cn } from "../lib/utils";
  */
 export default function PageThumb({
   pdfUrl, sourceIndex, pageWidth, pageHeight, pattern, patternColor, width = 96, className, dimmed,
-  overlays,
+  overlays, revision,
 }: {
   pdfUrl: string;
   sourceIndex: number;
@@ -32,6 +32,12 @@ export default function PageThumb({
    * pages have been written on" without opening any of them.
    */
   overlays?: (LayerData | null | undefined)[];
+  /**
+   * Redraw whenever this changes. The ink is compared by its counts, which an
+   * edit that moves or erases part of a stroke leaves alone; a caller that
+   * knows the ink changed (the live view) says so here.
+   */
+  revision?: string | number;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -64,7 +70,7 @@ export default function PageThumb({
   // a rail repaints on every autosave otherwise.
   const inkKey = (overlays ?? [])
     .map((l) => (l ? `${l.s.length}:${l.e.length}` : ""))
-    .join("|");
+    .join("|") + (revision === undefined ? "" : `#${revision}`);
 
   useEffect(() => {
     if (!visible || !canvasRef.current) return;

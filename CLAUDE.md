@@ -40,7 +40,19 @@ npm run deploy     build then deploy
 npx wrangler d1 execute notesanity --remote --command "SELECT ..."
 npx wrangler secret put STRIPE_SECRET_KEY        Stripe; also STRIPE_WEBHOOK_SECRET (test mode until launch)
 npx wrangler secret put AWS_ACCESS_KEY_ID        SES, if switching mail off Cloudflare; also AWS_SECRET_ACCESS_KEY
+npx wrangler secret put ANTHROPIC_API_KEY        Design with AI (Claude); without it the feature says it isn't switched on
+npx wrangler dev --var AI_STANDIN:1              Design with AI against a free stand-in instead of Claude (tests use this)
+npx wrangler secret put CLEVER_CLIENT_ID          Clever sign-in; also CLEVER_CLIENT_SECRET, CLASSLINK_CLIENT_ID, CLASSLINK_CLIENT_SECRET
+                                                 redirect URI to register: https://<host>/api/auth/sso/{clever|classlink}/callback
+npx wrangler dev --var SSO_STANDIN:1             Clever and ClassLink against a local stand-in page (localhost only; tests use this)
+npx wrangler dev --var AUTH_DEV_LINKS:1          sign-up/sign-in links come back in the response (localhost only)
+tests/e2e/run.sh tenancy                         end-to-end suites on a fresh local server: tenancy, ai-designer, print, gradebook, answers, live, share, sso
+tests/e2e/run.sh demo                            re-records the landing page's screen recording (public/media), invented class; rerun when those screens change
 ```
+
+Run `npm run build` before the suites (they drive the built SPA), and run
+`tenancy` after any change to a route: it is the check that schools, teachers,
+students and families stay apart.
 
 Deploying needs Cloudflare credentials in `.cf-credentials` (gitignored):
 `. ./.cf-credentials` first. If that token has been revoked, ask rather than
@@ -69,6 +81,31 @@ names.
   is a static file and never reaches the Worker.
 - **Marketing pages are static HTML, not app routes**, so a reader doesn't
   download the app bundle and link previews still work.
+- **Design with AI is metered even in the beta.** `AI_PAGES_FREE` / `AI_PAGES_PAID`
+  in `src/shared/plans.mjs`, counted per teacher per month in `ai_usage` when a
+  design is made (refunded if it fails); refining a design is free, up to ten
+  changes. Only the teacher's description and chosen source material go to
+  Anthropic — keep it that way, and keep the privacy page's list in step.
+- **There is no row-level security; every route is the rule.** Use the guards
+  (`requireClassTeacher`, `requireClassMember`, `notebookAccess` +
+  `requireNotebookTeacher`) and tie every id from a request back to the
+  caller's class or notebook in the same WHERE clause. A teacher never creates
+  an account on another school's domain (`addressBelongsElsewhere`), domains
+  go through `checkSchoolDomains`, uploaded files are served with
+  `fileHeaders`, and anything guessable goes through `throttle`.
+- **Signing up proves the address.** A password sign-up is held, hashed, with
+  a single-use link and only becomes an account when the link is opened —
+  never set a password or start a session for an address nobody has proven.
+- **A district vouches only for its own school.** Clever/ClassLink sign-in
+  (`routes/sso.ts`) is accepted only when the email's domain belongs to a
+  school (`orgForDomain`, never the superadmin fallback in `resolveOrgFor`),
+  that school's admin linked the provider, and the signed token names that
+  same district or tenant. Superadmin addresses never sign in this way.
+- **Answer keys never reach a student.** `fields.answer_key` and `points` are
+  selected only for a teacher (`GET /api/notebooks/:id`, the check routes in
+  `assignments.ts`); every student and family route names its columns, so never
+  `SELECT *` from `fields` into a response. Marks overruling the key live in
+  `answer_marks`, per assignment. The `answers` suite checks both.
 - **`/api/status` really probes.** Keep it that way — a status page that reports
   a value someone set by hand is worse than none.
 

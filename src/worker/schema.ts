@@ -1152,3 +1152,171 @@ migrate("034_trash", async () => {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_trash_purge ON trash(purge_after) WHERE restored_at IS NULL AND purged_at IS NULL`),
   ]);
 });
+
+/**
+ * The getting-started guide: which template every teacher gets a copy of,
+ * and when each teacher got theirs. Schema only. `guide_given_at` stays NULL
+ * until a copy is made, so a guide appointed later still reaches teachers
+ * who signed up before it existed — once.
+ */
+migrate("035_guide", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(users)`).all<{ name: string }>();
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`).run();
+  if (!(cols.results ?? []).some((c) => c.name === "guide_given_at")) {
+    await db.prepare(`ALTER TABLE users ADD COLUMN guide_given_at TEXT`).run();
+  }
+});
+
+/**
+ * Designing pages with AI. Schema only.
+ *
+ * `ai_usage` is the monthly allowance: one row per teacher per calendar month
+ * (UTC, "2026-10"), holding how many pages they have had designed. A month
+ * nobody used has no row, and a new month starts from nothing without a job
+ * to reset anything.
+ *
+ * `ai_designs` holds each design while the teacher looks at it, so refining
+ * one works from what the server actually produced (not a copy the browser
+ * sends back) and refinements can be counted without counting against the
+ * allowance.
+ */
+migrate("036_ai_pages", async () => {
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_usage (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        month TEXT NOT NULL,
+        pages INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, month)
+      )`),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_designs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        notebook_id TEXT,
+        request TEXT NOT NULL,
+        result TEXT NOT NULL,
+        refinements INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_ai_designs_user ON ai_designs(user_id, created_at)`),
+  ]);
+});
+
+/**
+ * Whether students may print and download a class notebook's pages. Schema
+ * only; every notebook starts allowed, which is how it behaved before the
+ * switch existed. Only class notebooks read it — a student's own and a
+ * personal notebook are theirs to print.
+ */
+migrate("037_allow_export", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(notebooks)`).all<{ name: string }>();
+  if (!(cols.results ?? []).some((c) => c.name === "allow_export")) {
+    await db.prepare(`ALTER TABLE notebooks ADD COLUMN allow_export INTEGER NOT NULL DEFAULT 1`).run();
+  }
+});
+
+/**
+ * Signing up proves the address before anything is made. Schema only.
+ *
+ * `auth_tokens.pending_password` holds the chosen password, already hashed,
+ * between "Create account" and the click on the confirmation link; it is
+ * cleared the moment the link is used and swept with expired tokens.
+ * `sessions.reset_until` marks a session opened by a password-reset link, for
+ * the few minutes in which it may set a new password without the old one.
+ */
+migrate("038_verified_signup", async () => {
+  const tokens = await db.prepare(`PRAGMA table_info(auth_tokens)`).all<{ name: string }>();
+  if (!(tokens.results ?? []).some((c) => c.name === "pending_password")) {
+    await db.prepare(`ALTER TABLE auth_tokens ADD COLUMN pending_password TEXT`).run();
+  }
+  const sessions = await db.prepare(`PRAGMA table_info(sessions)`).all<{ name: string }>();
+  if (!(sessions.results ?? []).some((c) => c.name === "reset_until")) {
+    await db.prepare(`ALTER TABLE sessions ADD COLUMN reset_until TEXT`).run();
+  }
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`).run();
+});
+
+/**
+ * A student's own due date for one assignment — an extension, an IEP
+ * accommodation. Schema only. On the submission row because that is already
+ * the one-student-one-assignment row every view reads; NULL means the class's
+ * due date applies.
+ */
+migrate("039_extensions", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(submissions)`).all<{ name: string }>();
+  if (!(cols.results ?? []).some((c) => c.name === "due_override")) {
+    await db.prepare(`ALTER TABLE submissions ADD COLUMN due_override TEXT`).run();
+  }
+});
+
+/**
+ * Answer keys and checking by question. Schema only.
+ *
+ * `fields.answer_key` is the box's right answer as JSON (see
+ * shared/answers.mjs), "" when it has none; `fields.points` is what the box is
+ * worth when work is scored from the key. Neither is ever sent to a student.
+ * `answer_marks` holds a teacher's own call on one student's box — right or
+ * wrong — which wins over the key, and is how a box with no key gets marked.
+ */
+migrate("040_answer_keys", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(fields)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("answer_key")) await db.prepare(`ALTER TABLE fields ADD COLUMN answer_key TEXT NOT NULL DEFAULT ''`).run();
+  if (!has("points")) await db.prepare(`ALTER TABLE fields ADD COLUMN points REAL NOT NULL DEFAULT 1`).run();
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS answer_marks (
+        id TEXT PRIMARY KEY,
+        assignment_id TEXT NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+        student_id TEXT NOT NULL,
+        field_id TEXT NOT NULL,
+        correct INTEGER NOT NULL,
+        marked_by TEXT NOT NULL,
+        marked_at TEXT NOT NULL,
+        UNIQUE(assignment_id, student_id, field_id)
+      )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_answer_marks_assignment ON answer_marks(assignment_id)`),
+  ]);
+});
+
+/**
+ * A link a teacher sends a colleague, which adds a copy of one notebook — its
+ * pages, boxes and answer keys, never anyone's work — to their own templates.
+ * The token is the whole credential, so it's random and stays secret to the
+ * people it was sent to; stopping sharing revokes it.
+ */
+migrate("041_notebook_shares", async () => {
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS notebook_shares (
+        token TEXT PRIMARY KEY,
+        notebook_id TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT,
+        copies INTEGER NOT NULL DEFAULT 0
+      )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_notebook_shares_notebook ON notebook_shares(notebook_id)`),
+  ]);
+});
+
+/**
+ * Which Clever district and ClassLink tenant a school's admin has linked.
+ * Sign-in through either counts only for addresses on that school's own
+ * domains, and only when the provider says it's that district — so a district
+ * elsewhere can't vouch for an address here. Empty means not linked.
+ */
+migrate("042_sso_links", async () => {
+  const cols = await db.prepare(`PRAGMA table_info(orgs)`).all<{ name: string }>();
+  const has = (n: string) => (cols.results ?? []).some((c) => c.name === n);
+  if (!has("clever_district_id")) await db.prepare(`ALTER TABLE orgs ADD COLUMN clever_district_id TEXT NOT NULL DEFAULT ''`).run();
+  if (!has("classlink_tenant_id")) await db.prepare(`ALTER TABLE orgs ADD COLUMN classlink_tenant_id TEXT NOT NULL DEFAULT ''`).run();
+});

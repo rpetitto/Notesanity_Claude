@@ -1,5 +1,5 @@
 import { layout } from "../layout.mjs";
-import { BETA_FREE, PLANS, FREE_NOTEBOOK_LIMIT, FREE_STUDENT_LIMIT, dollars } from "../../src/shared/plans.mjs";
+import { BETA_FREE, PLANS, FREE_NOTEBOOK_LIMIT, FREE_STUDENT_LIMIT, AI_PAGES_FREE, AI_PAGES_PAID, dollars } from "../../src/shared/plans.mjs";
 
 /**
  * Pricing, during the beta and after it.
@@ -60,7 +60,7 @@ export default () =>
     <h1>${BETA_FREE ? "Free while we're in beta. Here's what it will cost." : "Simple plans, for one teacher or a whole school."}</h1>
     <p class="lede">
       ${BETA_FREE
-        ? "Every teacher, every class, every student — free for the whole beta, no card and no trial clock. The plans below are what comes after, published now so a school can plan a year ahead."
+        ? "Every teacher, every class, every student — free for the whole beta, no card and no trial clock. The plans below are what comes after, published now so a school can plan a year ahead. The one limit that applies today is designing pages with AI, because each page costs us to make."
         : "Keep your files, keep your gradebook. Notesanity replaces the printing, not your stack. Start free, and go Pro when you want last year's work to pay off again: unlimited notebooks and the page library. Schools buy by the department or the building, on an invoice."}
     </p>
   </div>
@@ -78,6 +78,7 @@ export default () =>
           "PDF, Word, PowerPoint and Google Drive imports",
           "Find the blanks in a worksheet and make them fillable",
           "Students' own personal notebooks",
+          `${AI_PAGES_FREE} page designed with AI each month`,
           "Google sign-in, sign-in links and passwords",
         ],
         cta: `<a class="btn" href="/?signin=1">Start free</a>`,
@@ -90,6 +91,7 @@ export default () =>
           "Unlimited class notebooks",
           "Classes of any size",
           "The page library — save any page, reuse it anywhere",
+          `${AI_PAGES_PAID} pages designed with AI each month`,
           "Support straight from the people who build it",
         ],
         cta: BETA_FREE

@@ -26,13 +26,13 @@ const GRADING_LABELS: Record<string, string> = {
  *
  * Classroom grades are numbers and nothing else. Points carry across exactly;
  * complete/incomplete becomes the one-point assignment teachers already use for
- * it there; a letter grade has no honest numeric form, so that coursework is
- * posted ungraded and the letter stays in Notesanity rather than being invented
- * as a percentage.
+ * it there; a letter grade goes out of 100 as the school's own values (A 95,
+ * B 85 … see shared/grades.mjs), the same numbers its averages use here.
  */
 function classroomMaxPoints(grading: Grading, pointsMax: number): number | null {
   if (grading === "points") return Math.max(1, Math.round(pointsMax || 0));
   if (grading === "complete") return 1;
+  if (grading === "letter") return 100;
   return null;
 }
 
@@ -619,7 +619,7 @@ export default function AssignmentEditor() {
                   {postToClassroom && (
                     <p className="mt-2 pl-7 text-[16px] text-pine/70">
                       Posted when you assign to the class — saving a draft doesn't post anything.
-                      {grading === "letter" && " Classroom only accepts number grades, so this one posts ungraded there."}
+                      {grading === "letter" && " Classroom only takes numbers, so letters go there out of 100: A 95, B 85, C 75, D 65, F 59."}
                     </p>
                   )}
                 </>

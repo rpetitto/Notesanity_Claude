@@ -1,6 +1,25 @@
 import { app, db, storage } from "../platform";
 import {
-  handler, now, uid, SQL_UUID, requireUser, requireTeacher, requireClassTeacher, requireClassMember, findUserInOrg, HttpError, param,} from "../lib/session";
+  fileHeaders, handler, now, uid, SQL_UUID, requireUser, requireTeacher, requireClassTeacher, requireClassMember, findUserInOrg, HttpError, param,
+  orgForDomain, roleForDomain, PUBLIC_MAIL_DOMAINS, throttle,} from "../lib/session";
+
+
+/**
+ * Whether a teacher may make an account ahead of time for this address.
+ *
+ * Accounts are found by email at sign-in, so an account made here decides
+ * which school the person lands in for good. An address on another school's
+ * domain is never made here — otherwise anyone who signs up as a teacher
+ * could claim a district's students before the district did. The reply is
+ * the same whether or not the person already has an account somewhere, so
+ * this can't be used to find out who does.
+ */
+const NOT_HERE = "That address can't be added to this school's classes.";
+async function addressBelongsElsewhere(email: string, orgId: string): Promise<boolean> {
+  const domain = email.split("@")[1] ?? "";
+  const school = await orgForDomain(domain);
+  return !!school && school.id !== orgId;
+}
 import { queueMail } from "../lib/mailqueue";
 import { CLASS_FULL_FOR_STUDENT, CLASS_FULL_FOR_TEACHER, studentRoom } from "../lib/plans";
 import { HAS_INK_BYTES } from "../lib/ink";
@@ -89,6 +108,7 @@ app.get("/api/classes", handler(async (c) => {
 app.post("/api/classes", handler(async (c) => {
   const user = await requireTeacher(c);
   const body = await c.req.json<{ name: string; section?: string; accentColor?: string }>();
+  if (body.accentColor && !/^#[0-9A-Fa-f]{6}$/.test(body.accentColor)) throw new HttpError(400, "Invalid color");
   if (!body.name?.trim()) throw new HttpError(400, "Class name is required");
   const id = uid();
   await db
@@ -151,8 +171,8 @@ app.post("/api/classes/import-classroom", handler(async (c) => {
     if (!email) continue;
     const existingAnywhere = await db.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first<any>();
     let student = await findUserInOrg(email, user.org_id);
-    if (!student && existingAnywhere) {
-      skipped.push({ email, reason: "That account belongs to another school." });
+    if (!student && (existingAnywhere || (await addressBelongsElsewhere(email, user.org_id)))) {
+      skipped.push({ email, reason: NOT_HERE });
       continue;
     }
     // A full class on the Free plan takes nobody new; someone already in it
@@ -252,7 +272,11 @@ app.get("/api/classes/:id", handler(async (c) => {
     .bind(cls.owner_id, cls.owner_id, classId)
     .all();
   return c.json({
-    class: { ...cls, hasCover: !!cls.cover_key, joinCode: isTeacher ? cls.join_code : undefined },
+    // The raw row minus what a student must not have: the code (so rotating
+    // it after a leak actually works) and storage keys.
+    class: (({ join_code: _code, cover_key: _cover, ...safe }) => ({
+      ...safe, hasCover: !!cls.cover_key, joinCode: isTeacher ? cls.join_code : undefined,
+    }))(cls),
     myRole: isTeacher ? "teacher" : "student",
     roster: isTeacher ? roster.results ?? [] : [],
     teachers: teachers.results ?? [],
@@ -317,9 +341,14 @@ app.patch("/api/classes/:id", handler(async (c) => {
  */
 app.delete("/api/classes/:id", handler(async (c) => {
   const classId = param(c, "id");
-  await requireClassTeacher(c, classId);
+  const user = await requireClassTeacher(c, classId);
   const cls = await db.prepare(`SELECT * FROM classes WHERE id = ?`).bind(classId).first<any>();
   if (!cls) throw new HttpError(404, "Class not found");
+  // Deleting takes every notebook, submission and grade with it, so it's the
+  // owner's call (or their school admin's), never a co-teacher's.
+  if (cls.owner_id !== user.id && !(user.is_admin && user.org_id === cls.org_id)) {
+    throw new HttpError(403, "Only the teacher who owns this class can delete it.");
+  }
 
   const confirm = (c.req.query("confirm") ?? "").trim();
   if (confirm.toLowerCase() !== String(cls.name).trim().toLowerCase()) {
@@ -376,7 +405,7 @@ app.get("/api/classes/:id/cover", handler(async (c) => {
   const obj = await storage.get(cls.cover_key);
   if (!obj) throw new HttpError(404, "Image not found");
   return new Response(await obj.arrayBuffer(), {
-    headers: { "Content-Type": obj.contentType ?? "image/png", "Cache-Control": "private, max-age=3600" },
+    headers: fileHeaders(obj.contentType ?? "image/png", "private, max-age=3600"),
   });
 }));
 
@@ -393,6 +422,7 @@ app.post("/api/classes/:id/rotate-code", handler(async (c) => {
 app.post("/api/classes/join", handler(async (c) => {
   const user = await requireUser(c);
   const { code } = await c.req.json<{ code: string }>();
+  await throttle(c, "strict", "join", user.id);
   return c.json({ class: await joinClass(user, code) });
 }));
 
@@ -402,8 +432,9 @@ export async function joinClass(user: { id: string; org_id: string }, code: stri
     .prepare(`SELECT * FROM classes WHERE join_code = ? AND archived = 0`)
     .bind((code ?? "").trim().toUpperCase())
     .first<any>();
-  if (!cls) throw new HttpError(404, "No class matches that code");
-  if (cls.org_id !== user.org_id) throw new HttpError(403, "That class belongs to another school");
+  // A real code at another school gets the same answer as a wrong one, so
+  // guessing can't find live codes anywhere.
+  if (!cls || cls.org_id !== user.org_id) throw new HttpError(404, "No class matches that code");
   if (cls.owner_id === user.id) throw new HttpError(400, "You already teach this class");
   const room = await studentRoom(cls.id);
   if (room !== null && room < 1) {
@@ -412,6 +443,16 @@ export async function joinClass(user: { id: string; org_id: string }, code: stri
       .bind(cls.id, user.id)
       .first();
     if (!already) throw new HttpError(403, CLASS_FULL_FOR_STUDENT);
+  }
+
+  // A co-teacher who was taken off the class doesn't get back on with the
+  // code they still remember — only the class's teacher can add them again.
+  const previous = await db
+    .prepare(`SELECT role, status FROM enrollments WHERE class_id = ? AND user_id = ?`)
+    .bind(cls.id, user.id)
+    .first<{ role: string; status: string }>();
+  if (previous && previous.role === "teacher" && previous.status !== "active") {
+    throw new HttpError(403, "You were removed as a teacher of this class. Ask its teacher to add you back.");
   }
 
   // Join (or rejoin) and get every published notebook, in one batch. An
@@ -445,8 +486,8 @@ app.post("/api/classes/:id/invite", handler(async (c) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
     const existingAnywhere = await db.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first<any>();
     let student = await findUserInOrg(email, teacher.org_id);
-    if (!student && existingAnywhere) {
-      skipped.push({ email, reason: "That account belongs to another school." });
+    if (!student && (existingAnywhere || (await addressBelongsElsewhere(email, teacher.org_id)))) {
+      skipped.push({ email, reason: NOT_HERE });
       continue;
     }
     // A full class on the Free plan takes nobody new; someone already in it
@@ -523,17 +564,32 @@ app.post("/api/classes/:id/teachers", handler(async (c) => {
   const classId = param(c, "id");
   const teacher = await requireClassTeacher(c, classId);
   const { emails } = await c.req.json<{ emails: string[] }>();
+  if (!Array.isArray(emails)) throw new HttpError(400, "Send a list of email addresses");
   const added: string[] = [];
   const skipped: { email: string; reason: string }[] = [];
+  const org = await db.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(teacher.org_id).first<any>();
 
-  for (const raw of emails ?? []) {
-    const email = raw.trim().toLowerCase();
-    if (!email.includes("@")) continue;
+  for (const raw of emails) {
+    const email = String(raw ?? "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
 
     const existingAnywhere = await db.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first<any>();
     let person = await findUserInOrg(email, teacher.org_id);
-    if (!person && existingAnywhere) {
-      skipped.push({ email, reason: "That account belongs to another school." });
+    if (!person && (existingAnywhere || (await addressBelongsElsewhere(email, teacher.org_id)))) {
+      skipped.push({ email, reason: NOT_HERE });
+      continue;
+    }
+    // A teacher account is only made for an address that could be a teacher
+    // here: a personal one, or the school's own that isn't a student address.
+    const domain = email.split("@")[1] ?? "";
+    if (!person && org && !PUBLIC_MAIL_DOMAINS.has(domain) && roleForDomain(org, domain) === "student") {
+      skipped.push({ email, reason: "That's a student address at your school — an admin can make someone a teacher under People." });
+      continue;
+    }
+    if (person && person.role !== "teacher") {
+      skipped.push({ email, reason: person.role === "student"
+        ? "That account is a student — an admin can change their role in Settings."
+        : "That account isn't a teacher account yet — an admin can change it under People." });
       continue;
     }
     if (!person) {
@@ -544,9 +600,6 @@ app.post("/api/classes/:id/teachers", handler(async (c) => {
         .bind(pid, teacher.org_id, email, email, now())
         .run();
       person = { id: pid, role: "teacher" } as any;
-    } else if (person.role === "student") {
-      skipped.push({ email, reason: "That account is a student — an admin can change their role in Settings." });
-      continue;
     }
 
     const cls = await db.prepare(`SELECT owner_id FROM classes WHERE id = ?`).bind(classId).first<any>();
@@ -670,7 +723,12 @@ app.post("/api/classes/:id/backfill", handler(async (c) => {
   const classId = param(c, "id");
   await requireClassTeacher(c, classId);
   const { studentId, assignmentIds } = await c.req.json<{ studentId: string; assignmentIds: string[] }>();
-  for (const aid of assignmentIds ?? []) {
+  const enrolled = await db
+    .prepare(`SELECT 1 AS yes FROM enrollments WHERE class_id = ? AND user_id = ? AND role = 'student' AND status = 'active'`)
+    .bind(classId, String(studentId ?? ""))
+    .first();
+  if (!enrolled) throw new HttpError(404, "That student isn't in this class");
+  for (const aid of (Array.isArray(assignmentIds) ? assignmentIds : []).slice(0, 500)) {
     const assignment = await db
       .prepare(`SELECT id FROM assignments WHERE id = ? AND class_id = ?`)
       .bind(aid, classId)

@@ -87,7 +87,10 @@ type ToolDef = {
   phone: boolean;
 };
 
+// Select leads: it's where every view starts — reading and scrolling come
+// before writing — so it sits where the eye starts too.
 const TOOLS: ToolDef[] = [
+  { kind: "select", icon: MousePointer2, label: "Select", hint: "Select — pick up and move your own writing; a finger scrolls", phone: true },
   { kind: "pen", icon: Pen, label: "Pen", hint: "Pen", palette: "ink", phone: true },
   { kind: "highlighter", icon: Highlighter, label: "Highlight", hint: "Highlighter", palette: "highlight", phone: true },
   { kind: "eraser", icon: Eraser, label: "Eraser", hint: "Eraser", phone: true },
@@ -95,7 +98,6 @@ const TOOLS: ToolDef[] = [
   { kind: "stamp", icon: Smile, label: "Stamp", hint: "Stamp", phone: false },
   { kind: "shape", icon: Shapes, label: "Shapes", hint: "Shapes — drag to draw a line, arrow, box or circle", palette: "ink", phone: false },
   { kind: "comment", icon: MessageSquarePlus, label: "Comment", hint: "Add a comment pinned to the page", phone: false },
-  { kind: "select", icon: MousePointer2, label: "Select", hint: "Select — pick up and move your own writing; a finger scrolls", phone: true },
 ];
 
 /** Every swatch has a name: a color is never the only way to tell one apart (WCAG 1.4.1). */

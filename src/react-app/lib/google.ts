@@ -349,8 +349,23 @@ export async function pushGrades(
   courseId: string,
   courseWorkId: string,
   grades: ClassroomGrade[],
+  opts: { maxPoints?: number } = {},
 ): Promise<GradePushResult> {
   const token = await getToken(COURSEWORK_SCOPES);
+
+  // A letter-graded assignment posted before letters had a number went up
+  // ungraded, and Classroom won't take a grade on that. Giving it its points
+  // possible first is a change Classroom allows on coursework this app made.
+  if (opts.maxPoints) {
+    const cw = await gapi<{ maxPoints?: number }>(`${CLASSROOM}/courses/${courseId}/courseWork/${courseWorkId}`, token);
+    if (!cw.maxPoints) {
+      await gapi(`${CLASSROOM}/courses/${courseId}/courseWork/${courseWorkId}?updateMask=maxPoints`, token, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxPoints: opts.maxPoints }),
+      });
+    }
+  }
 
   const roster = await listStudents(courseId);
   const idByEmail = new Map<string, string>();
